@@ -17,6 +17,7 @@ if (DEFINED ENV{ESP_IDF_VERSION})
             M5stackCoreS3
             UnPhone
             CYD-8048S043C
+            CYD-JC8048W550C
         )
     endif()
 

@@ -25,6 +25,9 @@
 #elif defined(CONFIG_TT_BOARD_CYD_8048S043C)
 #include "CYD8048S043C.h"
 #define TT_BOARD_HARDWARE &cyd_8048s043c_config
+#elif defined(CONFIG_TT_BOARD_CYD_JC8048W550C)
+#include "JC8048W550C.h"
+#define TT_BOARD_HARDWARE &cyd_jc8048w550c_config
 #else
 #define TT_BOARD_HARDWARE NULL
 #error Replace TT_BOARD_HARDWARE in main.c with your own. Or copy one of the ./sdkconfig.board.* files into ./sdkconfig.
