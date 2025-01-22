@@ -16,6 +16,7 @@ if (DEFINED ENV{ESP_IDF_VERSION})
             LilygoTdeck
             M5stackCoreS3
             UnPhone
+            CYD-8048S043C
         )
     endif()
 
