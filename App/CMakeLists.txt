@@ -7,6 +7,7 @@ if (DEFINED ENV{ESP_IDF_VERSION})
         list(APPEND BOARD_COMPONENTS
             CYD-2432S024C
             M5stackCore2
+            CYD-JC2432W328C
         )
     endif()
 
