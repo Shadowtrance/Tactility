@@ -446,6 +446,12 @@ static void eventHandler(TT_UNUSED void* arg, esp_event_base_t event_base, int32
         return;
     }
 
+    if (event_base == WIFI_EVENT) {
+        TT_LOG_I(TAG, "eventHandler: WIFI_EVENT (%ld)", event_id);
+    } else if (event_base == IP_EVENT) {
+        TT_LOG_W(TAG, "eventHandler: IP_EVENT (%ld)", event_id);
+    }
+
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         TT_LOG_I(TAG, "eventHandler: sta start");
         if (wifi->getRadioState() == RadioState::ConnectionPending) {
@@ -708,6 +714,8 @@ static void dispatchConnect(std::shared_ptr<void> context) {
         }
     }
 
+    wifi->setScanActive(false);
+
     wifi->setRadioState(RadioState::ConnectionPending);
 
     publish_event_simple(wifi, EventType::ConnectionPending);
@@ -729,7 +737,7 @@ static void dispatchConnect(std::shared_ptr<void> context) {
             .sort_method = WIFI_CONNECT_AP_BY_SIGNAL,
             .threshold = {
                 .rssi = 0,
-                .authmode = WIFI_AUTH_WPA2_WPA3_PSK,
+                .authmode = WIFI_AUTH_OPEN,
             },
             .pmf_cfg = {
                 .capable = false,
@@ -762,6 +770,13 @@ static void dispatchConnect(std::shared_ptr<void> context) {
     memcpy(wifi_config.sta.ssid, wifi_singleton->connection_target.ssid, sizeof(wifi_config.sta.ssid));
     memcpy(wifi_config.sta.password, wifi_singleton->connection_target.password, sizeof(wifi_config.sta.password));
 
+    if (wifi_singleton->connection_target.password[0] != 0x00U) {
+        wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_WPA3_PSK;
+    } else {
+        wifi_config.sta.threshold.authmode = WIFI_AUTH_OPEN;
+    }
+
+    TT_LOG_I(TAG, "esp_wifi_set_config()");
     esp_err_t set_config_result = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     if (set_config_result != ESP_OK) {
         wifi->setRadioState(RadioState::On);
@@ -770,6 +785,7 @@ static void dispatchConnect(std::shared_ptr<void> context) {
         return;
     }
 
+    TT_LOG_I(TAG, "esp_wifi_start()");
     esp_err_t wifi_start_result = esp_wifi_start();
     if (wifi_start_result != ESP_OK) {
         wifi->setRadioState(RadioState::On);
@@ -920,52 +936,54 @@ void onAutoConnectTimer(std::shared_ptr<void> context) {
     }
 }
 
-static void onStart(ServiceContext& service) {
-    tt_assert(wifi_singleton == nullptr);
-    wifi_singleton = std::make_shared<Wifi>();
+class WifiService final : public Service {
 
-    service.setData(wifi_singleton);
+public:
 
-    wifi_singleton->autoConnectTimer = std::make_unique<Timer>(Timer::Type::Periodic, onAutoConnectTimer, wifi_singleton);
-    // We want to try and scan more often in case of startup or scan lock failure
-    wifi_singleton->autoConnectTimer->start(TT_MIN(2000, AUTO_SCAN_INTERVAL));
+    void onStart(ServiceContext& service) override {
+        tt_assert(wifi_singleton == nullptr);
+        wifi_singleton = std::make_shared<Wifi>();
 
-    if (settings::shouldEnableOnBoot()) {
-        TT_LOG_I(TAG, "Auto-enabling due to setting");
-        getMainDispatcher().dispatch(dispatchEnable, wifi_singleton);
-    }
-}
+        wifi_singleton->autoConnectTimer = std::make_unique<Timer>(Timer::Type::Periodic, onAutoConnectTimer, wifi_singleton);
+        // We want to try and scan more often in case of startup or scan lock failure
+        wifi_singleton->autoConnectTimer->start(TT_MIN(2000, AUTO_SCAN_INTERVAL));
 
-static void onStop(ServiceContext& service) {
-    auto wifi = wifi_singleton;
-    tt_assert(wifi != nullptr);
-
-    RadioState state = wifi->getRadioState();
-    if (state != RadioState::Off) {
-        dispatchDisable(wifi);
+        if (settings::shouldEnableOnBoot()) {
+            TT_LOG_I(TAG, "Auto-enabling due to setting");
+            getMainDispatcher().dispatch(dispatchEnable, wifi_singleton);
+        }
     }
 
-    wifi->autoConnectTimer->stop();
-    wifi->autoConnectTimer = nullptr; // Must release as it holds a reference to this Wifi instance
+    void onStop(ServiceContext& service) override {
+        auto wifi = wifi_singleton;
+        tt_assert(wifi != nullptr);
 
-    // Acquire all mutexes
-    wifi->dataMutex.acquire(TtWaitForever);
-    wifi->radioMutex.acquire(TtWaitForever);
+        RadioState state = wifi->getRadioState();
+        if (state != RadioState::Off) {
+            dispatchDisable(wifi);
+        }
 
-    // Detach
-    wifi_singleton = nullptr;
+        wifi->autoConnectTimer->stop();
+        wifi->autoConnectTimer = nullptr; // Must release as it holds a reference to this Wifi instance
 
-    // Release mutexes
-    wifi->dataMutex.release();
-    wifi->radioMutex.release();
+        // Acquire all mutexes
+        wifi->dataMutex.acquire(TtWaitForever);
+        wifi->radioMutex.acquire(TtWaitForever);
 
-    // Release (hopefully) last Wifi instance by scope
-}
+        // Detach
+        wifi_singleton = nullptr;
+
+        // Release mutexes
+        wifi->dataMutex.release();
+        wifi->radioMutex.release();
+
+        // Release (hopefully) last Wifi instance by scope
+    }
+};
 
 extern const ServiceManifest manifest = {
     .id = "Wifi",
-    .onStart = onStart,
-    .onStop = onStop
+    .createService = create<WifiService>
 };
 
 } // namespace
