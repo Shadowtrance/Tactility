@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 add_definitions(-DTT_DEBUG)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_ASM_COMPILE_OBJECT "${CMAKE_CXX_COMPILER_TARGET}")
 
@@ -17,8 +17,9 @@ if (DEFINED ENV{ESP_IDF_VERSION})
 
     set(COMPONENTS App)
     set(EXTRA_COMPONENT_DIRS
-        "Boards"
         "App"
+        "Boards"
+        "Drivers"
         "Tactility"
         "TactilityC"
         "TactilityCore"

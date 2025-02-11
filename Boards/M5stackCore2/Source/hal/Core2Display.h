@@ -1,34 +1,14 @@
 #pragma once
 
-#include "lvgl.h"
-#include "hal/Display.h"
+#include "Tactility/hal/display/DisplayDevice.h"
+#include <memory>
 
-#include <esp_lcd_types.h>
+#define CORE2_LCD_SPI_HOST SPI2_HOST
+#define CORE2_LCD_PIN_CS GPIO_NUM_5
+#define CORE2_LCD_PIN_DC GPIO_NUM_15
+#define CORE2_LCD_HORIZONTAL_RESOLUTION 320
+#define CORE2_LCD_VERTICAL_RESOLUTION 240
+#define CORE2_LCD_DRAW_BUFFER_HEIGHT (CORE2_LCD_VERTICAL_RESOLUTION / 10)
+#define CORE2_LCD_DRAW_BUFFER_SIZE (CORE2_LCD_HORIZONTAL_RESOLUTION * CORE2_LCD_DRAW_BUFFER_HEIGHT)
 
-extern lv_disp_t* displayHandle;
-
-class Core2Display : public tt::hal::Display {
-
-private:
-
-    esp_lcd_panel_io_handle_t ioHandle = nullptr;
-    esp_lcd_panel_handle_t panelHandle = nullptr;
-    lv_display_t* displayHandle = nullptr;
-
-public:
-
-    bool start() override;
-
-    bool stop() override;
-
-    tt::hal::Touch* _Nullable createTouch() override;
-
-    bool supportsBacklightDuty() const override { return false; }
-
-    void setGammaCurve(uint8_t index) override;
-    uint8_t getGammaCurveCount() const override { return 4; };
-
-    lv_display_t* _Nullable getLvglDisplay() const override { return displayHandle; }
-};
-
-tt::hal::Display* createDisplay();
+std::shared_ptr<tt::hal::display::DisplayDevice> createDisplay();

@@ -1,6 +1,6 @@
 #include "doctest.h"
-#include "TactilityCore.h"
-#include "Mutex.h"
+#include <Tactility/TactilityCore.h>
+#include <Tactility/Mutex.h>
 
 using namespace tt;
 
@@ -31,4 +31,23 @@ TEST_CASE("a mutex can block a thread") {
     CHECK_EQ(thread.getState(), Thread::State::Stopped);
 
     thread.join();
+}
+
+TEST_CASE("a Mutex can be locked exactly once") {
+    auto mutex = Mutex(Mutex::Type::Normal);
+    CHECK_EQ(mutex.lock(0), true);
+    CHECK_EQ(mutex.lock(0), false);
+    CHECK_EQ(mutex.unlock(), true);
+}
+
+TEST_CASE("unlocking a Mutex without locking returns false") {
+    auto mutex = Mutex(Mutex::Type::Normal);
+    CHECK_EQ(mutex.unlock(), false);
+}
+
+TEST_CASE("unlocking a Mutex twice returns false on the second attempt") {
+    auto mutex = Mutex(Mutex::Type::Normal);
+    CHECK_EQ(mutex.lock(0), true);
+    CHECK_EQ(mutex.unlock(), true);
+    CHECK_EQ(mutex.unlock(), false);
 }

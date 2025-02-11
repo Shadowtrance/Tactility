@@ -1,8 +1,13 @@
-#include "app/AppContext.h"
-#include "app/ManifestRegistry.h"
-#include "Check.h"
-#include "lvgl.h"
-#include "service/loader/Loader.h"
+#include "Tactility/app/AppContext.h"
+#include "Tactility/app/ManifestRegistry.h"
+#include "Tactility/service/loader/Loader.h"
+
+#include <Tactility/Check.h>
+#include <Tactility/Tactility.h>
+
+#include <lvgl.h>
+
+#define TAG "launcher"
 
 namespace tt::app::launcher {
 
@@ -44,6 +49,14 @@ static lv_obj_t* createAppButton(lv_obj_t* parent, const char* title, const char
 
 class LauncherApp : public App {
 
+    void onCreate(TT_UNUSED AppContext& app) override {
+        auto* config = tt::getConfiguration();
+        if (!config->autoStartAppId.empty()) {
+            TT_LOG_I(TAG, "auto-starting %s", config->autoStartAppId.c_str());
+            tt::service::loader::startApp(config->autoStartAppId);
+        }
+    }
+
     void onShow(TT_UNUSED AppContext& app, lv_obj_t* parent) override {
         auto* wrapper = lv_obj_create(parent);
 
@@ -64,7 +77,7 @@ class LauncherApp : public App {
         }
 
         int32_t available_width = lv_display_get_horizontal_resolution(display) - (3 * 80);
-        int32_t padding = is_landscape_display ? TT_MIN(available_width / 4, 64) : 0;
+        int32_t padding = is_landscape_display ? std::min(available_width / 4, (int32_t)64) : 0;
 
         auto paths = app.getPaths();
         auto apps_icon_path = paths->getSystemPathLvgl("icon_apps.png");

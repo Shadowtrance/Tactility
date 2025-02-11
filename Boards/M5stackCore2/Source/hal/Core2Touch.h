@@ -1,10 +1,10 @@
 #pragma once
 
-#include "hal/Touch.h"
-#include "TactilityCore.h"
+#include "Tactility/hal/touch/TouchDevice.h"
 #include "ft6x36/FT6X36.h"
+#include <Tactility/TactilityCore.h>
 
-class Core2Touch : public tt::hal::Touch {
+class Core2Touch : public tt::hal::touch::TouchDevice {
 
 private:
 
@@ -22,6 +22,9 @@ private:
 public:
 
     Core2Touch();
+
+    std::string getName() const final { return "FT6336U"; }
+    std::string getDescription() const final { return "I2C touch driver"; }
 
     bool start(lv_display_t* display) override;
     bool stop() override;

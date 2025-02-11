@@ -1,8 +1,15 @@
-#include "hal/Hal_i.h"
-#include "hal/i2c/I2c.h"
-#include "kernel/SystemEvents.h"
+#include "Tactility/hal/Configuration.h"
+#include "Tactility/hal/Device.h"
+#include "Tactility/hal/i2c/I2c.h"
+#include "Tactility/hal/power/PowerDevice.h"
+#include "Tactility/hal/spi/Spi.h"
+#include "Tactility/hal/uart/Uart.h"
+
+#include <Tactility/kernel/SystemEvents.h>
 
 #define TAG "hal"
+
+#define TT_SDCARD_MOUNT_POINT "/sdcard"
 
 namespace tt::hal {
 
@@ -11,11 +18,15 @@ void init(const Configuration& configuration) {
 
     kernel::systemEventPublish(kernel::SystemEvent::BootInitI2cBegin);
     tt_check(i2c::init(configuration.i2c), "I2C init failed");
-    if (configuration.initHardware != nullptr) {
-        TT_LOG_I(TAG, "Init hardware");
-        tt_check(configuration.initHardware(), "Hardware init failed");
-    }
     kernel::systemEventPublish(kernel::SystemEvent::BootInitI2cEnd);
+
+    kernel::systemEventPublish(kernel::SystemEvent::BootInitSpiBegin);
+    tt_check(spi::init(configuration.spi), "SPI init failed");
+    kernel::systemEventPublish(kernel::SystemEvent::BootInitSpiEnd);
+
+    kernel::systemEventPublish(kernel::SystemEvent::BootInitUartBegin);
+    tt_check(uart::init(configuration.uart), "UART init failed");
+    kernel::systemEventPublish(kernel::SystemEvent::BootInitUartEnd);
 
     if (configuration.initBoot != nullptr) {
         TT_LOG_I(TAG, "Init power");
@@ -27,6 +38,12 @@ void init(const Configuration& configuration) {
         if (!configuration.sdcard->mount(TT_SDCARD_MOUNT_POINT)) {
             TT_LOG_W(TAG, "SD card mount failed (init can continue)");
         }
+        hal::registerDevice(configuration.sdcard);
+    }
+
+    if (configuration.power != nullptr) {
+        std::shared_ptr<tt::hal::power::PowerDevice> power = configuration.power();
+        hal::registerDevice(power);
     }
 
     kernel::systemEventPublish(kernel::SystemEvent::BootInitHalEnd);

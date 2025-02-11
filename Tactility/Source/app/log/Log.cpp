@@ -1,11 +1,14 @@
+#include "Tactility/app/selectiondialog/SelectionDialog.h"
+#include "Tactility/lvgl/Style.h"
+#include "Tactility/lvgl/Toolbar.h"
+#include "Tactility/lvgl/LvglSync.h"
+#include "Tactility/service/loader/Loader.h"
+
 #include <sstream>
 #include <vector>
-#include "lvgl.h"
-#include "lvgl/Style.h"
-#include "lvgl/Toolbar.h"
-#include "app/selectiondialog/SelectionDialog.h"
-#include "service/loader/Loader.h"
-#include "lvgl/LvglSync.h"
+#include <ranges>
+
+#include <lvgl.h>
 
 #define TAG "text_viewer"
 
@@ -18,39 +21,36 @@ private:
     LogLevel filterLevel = LogLevel::Info;
     lv_obj_t* labelWidget = nullptr;
 
-    static bool shouldShowLog(LogLevel filterLevel, LogLevel logLevel) {
-        if (filterLevel == LogLevel::None || logLevel == LogLevel::None) {
-            return false;
-        } else {
-            return filterLevel >= logLevel;
-        }
+    static inline bool shouldShowLog(LogLevel filterLevel, LogLevel logLevel) {
+        return (filterLevel != LogLevel::None) &&
+            (logLevel != LogLevel::None) &&
+            filterLevel >= logLevel;
     }
 
     void updateLogEntries() {
-        unsigned int index;
-        auto* entries = copyLogEntries(index);
+        std::size_t next_log_index;
+        auto entries = copyLogEntries(next_log_index);
         std::stringstream buffer;
-        if (entries != nullptr) {
-            for (unsigned int i = index; i < TT_LOG_ENTRY_COUNT; ++i) {
-                if (shouldShowLog(filterLevel, entries[i].level)) {
-                    buffer << entries[i].message;
+
+        if (next_log_index != 0) {
+            long to_drop = TT_LOG_ENTRY_COUNT - next_log_index;
+            for (auto entry : std::views::drop(*entries, (long)next_log_index)) {
+                if (shouldShowLog(filterLevel, entry.level) && entry.message[0] != 0x00) {
+                    buffer << entry.message;
                 }
             }
-            if (index != 0) {
-                for (unsigned int i = 0; i < index; ++i) {
-                    if (shouldShowLog(filterLevel, entries[i].level)) {
-                        buffer << entries[i].message;
-                    }
-                }
+        }
+
+        for (auto entry : std::views::take(*entries, (long)next_log_index)) {
+            if (shouldShowLog(filterLevel, entry.level) && entry.message[0] != 0x00) {
+                buffer << entry.message;
             }
-            delete entries;
-            if (!buffer.str().empty()) {
-                lv_label_set_text(labelWidget, buffer.str().c_str());
-            } else {
-                lv_label_set_text(labelWidget, "No logs for the selected log level");
-            }
+        }
+
+        if (!buffer.str().empty()) {
+            lv_label_set_text(labelWidget, buffer.str().c_str());
         } else {
-            lv_label_set_text(labelWidget, "Failed to load log");
+            lv_label_set_text(labelWidget, "No logs for the selected log level");
         }
     }
 
@@ -93,8 +93,8 @@ public:
     }
 
     void onResult(AppContext& app, Result result, std::unique_ptr<Bundle> bundle) override {
-        auto resultIndex = selectiondialog::getResultIndex(*bundle);
-        if (result == Result::Ok) {
+        if (result == Result::Ok && bundle != nullptr) {
+            auto resultIndex = selectiondialog::getResultIndex(*bundle);
             switch (resultIndex) {
                 case 0:
                     filterLevel = LogLevel::Verbose;
@@ -114,9 +114,9 @@ public:
                 default:
                     break;
             }
-        }
 
-        updateViews();
+            updateViews();
+        }
     }
 };
 

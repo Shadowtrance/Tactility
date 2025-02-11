@@ -1,10 +1,12 @@
-#include "InputDialog.h"
-#include "lvgl.h"
-#include "lvgl/Toolbar.h"
-#include "service/loader/Loader.h"
-#include "service/gui/Gui.h"
-#include <StringUtils.h>
-#include <TactilityCore.h>
+#include "Tactility/app/inputdialog/InputDialog.h"
+
+#include "Tactility/lvgl/Toolbar.h"
+#include "Tactility/service/loader/Loader.h"
+#include "Tactility/service/gui/Gui.h"
+
+#include <Tactility/TactilityCore.h>
+
+#include <lvgl.h>
 
 namespace tt::app::inputdialog {
 
@@ -56,9 +58,8 @@ private:
     }
 
     static void onButtonClickedCallback(lv_event_t* e) {
-        auto appContext = service::loader::getCurrentAppContext();
-        tt_assert(appContext != nullptr);
-        auto app = std::static_pointer_cast<InputDialogApp>(appContext->getApp());
+        auto app = std::static_pointer_cast<InputDialogApp>(getCurrentApp());
+        assert(app != nullptr);
         app->onButtonClicked(e);
     }
 
@@ -79,6 +80,7 @@ private:
     }
 
 public:
+
     void onShow(AppContext& app, lv_obj_t* parent) override {
         auto parameters = app.getParameters();
         tt_check(parameters != nullptr, "Parameters missing");

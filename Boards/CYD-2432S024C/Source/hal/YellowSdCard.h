@@ -1,8 +1,8 @@
 #pragma once
 
-#include "hal/SdCard.h"
+#include "Tactility/hal/sdcard/SdCardDevice.h"
 
-using namespace tt::hal;
+using tt::hal::sdcard::SdCardDevice;
 
-std::shared_ptr<SdCard> createYellowSdCard();
+std::shared_ptr<SdCardDevice> createYellowSdCard();
 

@@ -1,8 +1,8 @@
 #include "UnPhoneFeatures.h"
-#include "FreeRTOS-Kernel/include/FreeRTOS.h"
-#include "Log.h"
-#include "kernel/Kernel.h"
-#include "service/loader/Loader.h"
+
+#include <Tactility/Log.h>
+#include <Tactility/kernel/Kernel.h>
+#include <Tactility/service/loader/Loader.h>
 #include <driver/gpio.h>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
@@ -223,7 +223,7 @@ bool UnPhoneFeatures::init() {
 
 void UnPhoneFeatures::printInfo() const {
     esp_io_expander_print_state(ioExpander);
-    batteryManagement.printInfo();
+    batteryManagement->printInfo();
     bool backlight_power;
     const char* backlight_power_state = getBacklightPower(backlight_power) && backlight_power ? "on" : "off";
     TT_LOG_I(TAG, "Backlight: %s", backlight_power_state);
@@ -282,14 +282,12 @@ void UnPhoneFeatures::turnPeripheralsOff() const {
 bool UnPhoneFeatures::setShipping(bool on) const {
     if (on) {
         TT_LOG_W(TAG, "setShipping: on");
-        batteryManagement.setWatchDogTimer(Bq24295::WatchDogTimer::Disabled);
-        // Set bit 5 to disable
-        batteryManagement.setOperationControlBitOn(1 << 5);
+        batteryManagement->setWatchDogTimer(Bq24295::WatchDogTimer::Disabled);
+        batteryManagement->setBatFetOn(false);
     } else {
         TT_LOG_W(TAG, "setShipping: off");
-        batteryManagement.setWatchDogTimer(Bq24295::WatchDogTimer::Enabled40s);
-        // Clear bit 5 to enable
-        batteryManagement.setOperationControlBitOff(1 << 5);
+        batteryManagement->setWatchDogTimer(Bq24295::WatchDogTimer::Enabled40s);
+        batteryManagement->setBatFetOn(true);
     }
     return true;
 }
@@ -299,5 +297,5 @@ void UnPhoneFeatures::wakeOnPowerSwitch() const {
 }
 
 bool UnPhoneFeatures::isUsbPowerConnected() const {
-    return batteryManagement.isUsbPowerConnected();
+    return batteryManagement->isUsbPowerConnected();
 }

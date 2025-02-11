@@ -1,6 +1,7 @@
-#include "Critical.h"
-#include "CoreDefines.h"
-#include "RtosCompatTask.h"
+#include "Tactility/kernel/critical/Critical.h"
+
+#include "Tactility/RtosCompatTask.h"
+#include "Tactility/kernel/Kernel.h"
 
 #ifdef ESP_PLATFORM
 static portMUX_TYPE critical_mutex;
@@ -11,10 +12,10 @@ static portMUX_TYPE critical_mutex;
 
 namespace tt::kernel::critical {
 
-TtCriticalInfo enter() {
-    TtCriticalInfo info = {
+CriticalInfo enter() {
+    CriticalInfo info = {
         .isrm = 0,
-        .fromIsr = TT_IS_ISR(),
+        .fromIsr = kernel::isIsr(),
         .kernelRunning = (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING)
     };
 
@@ -29,7 +30,7 @@ TtCriticalInfo enter() {
     return info;
 }
 
-void exit(TtCriticalInfo info) {
+void exit(CriticalInfo info) {
     if (info.fromIsr) {
         taskEXIT_CRITICAL_FROM_ISR(info.isrm);
     } else if (info.kernelRunning) {

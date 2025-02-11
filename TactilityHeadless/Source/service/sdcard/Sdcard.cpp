@@ -1,9 +1,9 @@
-#include "Mutex.h"
-#include "Timer.h"
+#include "Tactility/service/ServiceContext.h"
+#include "Tactility/TactilityHeadless.h"
+#include "Tactility/service/ServiceRegistry.h"
 
-#include "service/ServiceContext.h"
-#include "TactilityHeadless.h"
-#include "service/ServiceRegistry.h"
+#include <Tactility/Mutex.h>
+#include <Tactility/Timer.h>
 
 #define TAG "sdcard_service"
 
@@ -17,24 +17,24 @@ private:
 
     Mutex mutex;
     std::unique_ptr<Timer> updateTimer;
-    hal::SdCard::State lastState = hal::SdCard::State::Unmounted;
+    hal::sdcard::SdCardDevice::State lastState = hal::sdcard::SdCardDevice::State::Unmounted;
 
     bool lock(TickType_t timeout) const {
-        return mutex.acquire(timeout) == TtStatusOk;
+        return mutex.lock(timeout);
     }
 
     void unlock() const {
-        tt_check(mutex.release() == TtStatusOk);
+        mutex.unlock();
     }
 
     void update() {
         auto sdcard = tt::hal::getConfiguration()->sdcard;
-        tt_assert(sdcard);
+        assert(sdcard);
 
         if (lock(50)) {
             auto new_state = sdcard->getState();
 
-            if (new_state == hal::SdCard::State::Error) {
+            if (new_state == hal::sdcard::SdCardDevice::State::Error) {
                 TT_LOG_W(TAG, "Sdcard error - unmounting. Did you eject the card in an unsafe manner?");
                 sdcard->unmount();
             }

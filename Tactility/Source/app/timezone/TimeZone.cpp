@@ -1,16 +1,17 @@
-#include "TimeZone.h"
-#include "app/AppManifest.h"
-#include "app/AppContext.h"
-#include "service/loader/Loader.h"
-#include "lvgl.h"
-#include "lvgl/Toolbar.h"
-#include "Partitions.h"
-#include "TactilityHeadless.h"
-#include "lvgl/LvglSync.h"
-#include "service/gui/Gui.h"
+#include "Tactility/app/AppContext.h"
+#include "Tactility/app/AppManifest.h"
+#include "Tactility/app/timezone/TimeZone.h"
+#include "Tactility/lvgl/Toolbar.h"
+#include "Tactility/lvgl/LvglSync.h"
+#include "Tactility/service/gui/Gui.h"
+#include "Tactility/service/loader/Loader.h"
+
+#include <Tactility/Partitions.h>
+#include <Tactility/StringUtils.h>
+#include <Tactility/Timer.h>
+
+#include <lvgl.h>
 #include <memory>
-#include <StringUtils.h>
-#include <Timer.h>
 
 namespace tt::app::timezone {
 
@@ -92,11 +93,9 @@ private:
 
     static void onListItemSelectedCallback(lv_event_t* e) {
         auto index = reinterpret_cast<std::size_t>(lv_event_get_user_data(e));
-        auto appContext = service::loader::getCurrentAppContext();
-        if (appContext != nullptr && appContext->getManifest().id == manifest.id) {
-            auto app = std::static_pointer_cast<TimeZoneApp>(appContext->getApp());
-            app->onListItemSelected(index);
-        }
+        auto app = std::static_pointer_cast<TimeZoneApp>(getCurrentApp());
+        assert(app != nullptr);
+        app->onListItemSelected(index);
     }
 
     void onListItemSelected(std::size_t index) {
@@ -114,12 +113,12 @@ private:
     }
 
     static void createListItem(lv_obj_t* list, const std::string& title, size_t index) {
-        lv_obj_t* btn = lv_list_add_button(list, nullptr, title.c_str());
+        auto* btn = lv_list_add_button(list, nullptr, title.c_str());
         lv_obj_add_event_cb(btn, &onListItemSelectedCallback, LV_EVENT_SHORT_CLICKED, (void*)index);
     }
 
     static void updateTimerCallback(std::shared_ptr<void> context) {
-        auto appContext = service::loader::getCurrentAppContext();
+        auto appContext = getCurrentAppContext();
         if (appContext != nullptr && appContext->getManifest().id == manifest.id) {
             auto app = std::static_pointer_cast<TimeZoneApp>(appContext->getApp());
             app->updateList();
@@ -231,7 +230,7 @@ public:
         listWidget = list;
     }
 
-    void onStart(AppContext& app) override {
+    void onCreate(AppContext& app) override {
         updateTimer = std::make_unique<Timer>(Timer::Type::Once, updateTimerCallback, nullptr);
     }
 };

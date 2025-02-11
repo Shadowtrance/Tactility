@@ -1,12 +1,10 @@
 #pragma once
 
+#include "Tactility/hal/display/DisplayDevice.h"
 #include <esp_lcd_types.h>
-#include "lvgl.h"
-#include "hal/Display.h"
+#include <lvgl.h>
 
-extern lv_disp_t* displayHandle;
-
-class TdeckDisplay : public tt::hal::Display {
+class TdeckDisplay : public tt::hal::display::DisplayDevice {
 
 private:
 
@@ -17,6 +15,9 @@ private:
 
 public:
 
+    std::string getName() const final { return "ST7780"; }
+    std::string getDescription() const final { return "SPI display"; }
+
     bool start() override;
 
     bool stop() override;
@@ -25,7 +26,7 @@ public:
     bool isPoweredOn() const override { return poweredOn; };
     bool supportsPowerControl() const override { return true; }
 
-    tt::hal::Touch* _Nullable createTouch() override;
+    std::shared_ptr<tt::hal::touch::TouchDevice> _Nullable createTouch() override;
 
     void setBacklightDuty(uint8_t backlightDuty) override;
     bool supportsBacklightDuty() const override { return true; }
@@ -34,10 +35,6 @@ public:
     uint8_t getGammaCurveCount() const override { return 4; };
 
     lv_display_t* _Nullable getLvglDisplay() const override { return displayHandle; }
-
-private:
-
-    static bool startBacklight();
 };
 
-tt::hal::Display* createDisplay();
+std::shared_ptr<tt::hal::display::DisplayDevice> createDisplay();

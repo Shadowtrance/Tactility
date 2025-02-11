@@ -1,12 +1,13 @@
-#include "TactilityConfig.h"
+#include <Tactility/TactilityConfig.h>
 
 #if TT_FEATURE_SCREENSHOT_ENABLED
 
-#include "Screenshot.h"
-#include <memory>
+#include "Tactility/service/screenshot/Screenshot.h"
 
-#include "service/ServiceContext.h"
-#include "service/ServiceRegistry.h"
+#include <Tactility/service/ServiceContext.h>
+#include <Tactility/service/ServiceRegistry.h>
+
+#include <memory>
 
 namespace tt::service::screenshot {
 
@@ -18,7 +19,7 @@ std::shared_ptr<ScreenshotService> _Nullable optScreenshotService() {
     return service::findServiceById<ScreenshotService>(manifest.id);
 }
 
-void ScreenshotService::startApps(const char* path) {
+void ScreenshotService::startApps(const std::string& path) {
     auto scoped_lockable = mutex.scoped();
     if (!scoped_lockable->lock(50 / portTICK_PERIOD_MS)) {
         TT_LOG_W(TAG, LOG_MESSAGE_MUTEX_LOCK_FAILED);
@@ -34,7 +35,7 @@ void ScreenshotService::startApps(const char* path) {
     }
 }
 
-void ScreenshotService::startTimed(const char* path, uint8_t delayInSeconds, uint8_t amount) {
+void ScreenshotService::startTimed(const std::string& path, uint8_t delayInSeconds, uint8_t amount) {
     auto scoped_lockable = mutex.scoped();
     if (!scoped_lockable->lock(50 / portTICK_PERIOD_MS)) {
         TT_LOG_W(TAG, LOG_MESSAGE_MUTEX_LOCK_FAILED);

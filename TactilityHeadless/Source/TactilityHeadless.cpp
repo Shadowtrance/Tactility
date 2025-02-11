@@ -1,15 +1,15 @@
-#include <Dispatcher.h>
-#include "TactilityHeadless.h"
-#include "hal/Configuration.h"
-#include "hal/Hal_i.h"
-#include "service/ServiceManifest.h"
-#include "service/ServiceRegistry.h"
-#include "kernel/SystemEvents.h"
-#include "network/NtpPrivate.h"
-#include "time/TimePrivate.h"
+#include "Tactility/TactilityHeadless.h"
+#include "Tactility/hal/Configuration.h"
+#include "Tactility/hal/Hal_i.h"
+#include "Tactility/network/NtpPrivate.h"
+#include "Tactility/service/ServiceManifest.h"
+#include "Tactility/service/ServiceRegistry.h"
+
+#include <Tactility/Dispatcher.h>
+#include <Tactility/time/TimePrivate.h>
 
 #ifdef ESP_PLATFORM
-#include "EspInit.h"
+#include "Tactility/InitEsp.h"
 #endif
 
 namespace tt {
@@ -23,7 +23,7 @@ static Dispatcher mainDispatcher;
 
 static const hal::Configuration* hardwareConfig = nullptr;
 
-static void register_and_start_system_services() {
+static void registerAndStartSystemServices() {
     TT_LOG_I(TAG, "Registering and starting system services");
     addService(service::sdcard::manifest);
     addService(service::wifi::manifest);
@@ -38,7 +38,7 @@ void initHeadless(const hal::Configuration& config) {
     time::init();
     hal::init(config);
     network::ntp::init();
-    register_and_start_system_services();
+    registerAndStartSystemServices();
 }
 
 

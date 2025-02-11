@@ -1,12 +1,13 @@
 #ifdef ESP_PLATFORM
 
-#include "app/crashdiagnostics/QrHelpers.h"
-#include "app/crashdiagnostics/QrUrl.h"
-#include "app/launcher/Launcher.h"
-#include "lvgl.h"
-#include "lvgl/Statusbar.h"
-#include "qrcode.h"
-#include "service/loader/Loader.h"
+#include "Tactility/app/crashdiagnostics/QrHelpers.h"
+#include "Tactility/app/crashdiagnostics/QrUrl.h"
+#include "Tactility/app/launcher/Launcher.h"
+#include "Tactility/lvgl/Statusbar.h"
+#include "Tactility/service/loader/Loader.h"
+
+#include <lvgl.h>
+#include <qrcode.h>
 
 #define TAG "crash_diagnostics"
 
@@ -69,7 +70,7 @@ public:
         TT_LOG_I(TAG, "Create canvas");
         int32_t available_height = parent_height - top_label_height - bottom_label_height;
         int32_t available_width = lv_display_get_horizontal_resolution(display);
-        int32_t smallest_size = TT_MIN(available_height, available_width);
+        int32_t smallest_size = std::min(available_height, available_width);
         int32_t pixel_size;
         if (qrcode.size * 2 <= smallest_size) {
             pixel_size = 2;

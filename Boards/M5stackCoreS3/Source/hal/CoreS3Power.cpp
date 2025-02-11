@@ -1,35 +1,34 @@
 #include "CoreS3Power.h"
-#include "TactilityCore.h"
-
-#define TAG "core2_power"
 
 bool CoreS3Power::supportsMetric(MetricType type) const {
     switch (type) {
-        case MetricType::BatteryVoltage:
-        case MetricType::IsCharging:
-        case MetricType::ChargeLevel:
+        using enum MetricType;
+        case BatteryVoltage:
+        case IsCharging:
+        case ChargeLevel:
             return true;
-        case MetricType::Current:
+        default:
             return false;
     }
 
     return false; // Safety guard for when new enum values are introduced
 }
 
-bool CoreS3Power::getMetric(Power::MetricType type, Power::MetricData& data) {
+bool CoreS3Power::getMetric(MetricType type, MetricData& data) {
     switch (type) {
-        case MetricType::BatteryVoltage: {
+        using enum MetricType;
+        case BatteryVoltage: {
             float milliVolt;
-            if (axpDevice.getBatteryVoltage(milliVolt)) {
+            if (axpDevice->getBatteryVoltage(milliVolt)) {
                 data.valueAsUint32 = (uint32_t)milliVolt;
                 return true;
             } else {
                 return false;
             }
         }
-        case MetricType::ChargeLevel: {
+        case ChargeLevel: {
             float vbatMillis;
-            if (axpDevice.getBatteryVoltage(vbatMillis)) {
+            if (axpDevice->getBatteryVoltage(vbatMillis)) {
                 float vbat = vbatMillis / 1000.f;
                 float max_voltage = 4.20f;
                 float min_voltage = 2.69f; // From M5Unified
@@ -44,25 +43,23 @@ bool CoreS3Power::getMetric(Power::MetricType type, Power::MetricData& data) {
                 return false;
             }
         }
-        case MetricType::IsCharging: {
+        case IsCharging: {
             Axp2101::ChargeStatus status;
-            if (axpDevice.getChargeStatus(status)) {
+            if (axpDevice->getChargeStatus(status)) {
                 data.valueAsBool = (status == Axp2101::CHARGE_STATUS_CHARGING);
                 return true;
             } else {
                 return false;
             }
         }
-        case MetricType::Current:
+        default:
             return false;
     }
-
-    return false; // Safety guard for when new enum values are introduced
 }
 
 bool CoreS3Power::isAllowedToCharge() const {
     bool enabled;
-    if (axpDevice.isChargingEnabled(enabled)) {
+    if (axpDevice->isChargingEnabled(enabled)) {
         return enabled;
     } else {
         return false;
@@ -70,14 +67,16 @@ bool CoreS3Power::isAllowedToCharge() const {
 }
 
 void CoreS3Power::setAllowedToCharge(bool canCharge) {
-    axpDevice.setChargingEnabled(canCharge);
+    axpDevice->setChargingEnabled(canCharge);
 }
 
-static std::shared_ptr<Power> power;
+static std::shared_ptr<PowerDevice> power;
+extern std::shared_ptr<Axp2101> axp2101;
 
-std::shared_ptr<Power> createPower() {
+std::shared_ptr<PowerDevice> createPower() {
     if (power == nullptr) {
-        power = std::make_shared<CoreS3Power>();
+        power = std::make_shared<CoreS3Power>(axp2101);
     }
+
     return power;
 }

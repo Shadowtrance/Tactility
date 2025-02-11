@@ -1,15 +1,15 @@
-#include "Mutex.h"
-#include "Timer.h"
-#include "Tactility.h"
+#include "Tactility/lvgl/Statusbar.h"
+#include "Tactility/lvgl/LvglSync.h"
 
-#include "hal/Power.h"
-#include "hal/SdCard.h"
-#include "lvgl/Statusbar.h"
-#include "service/ServiceContext.h"
-#include "service/wifi/Wifi.h"
-#include "service/ServiceRegistry.h"
-#include "TactilityHeadless.h"
-#include "lvgl/LvglSync.h"
+#include "Tactility/hal/power/PowerDevice.h"
+#include "Tactility/hal/sdcard/SdCardDevice.h"
+#include <Tactility/Mutex.h>
+#include <Tactility/Tactility.h>
+#include <Tactility/TactilityHeadless.h>
+#include <Tactility/Timer.h>
+#include <Tactility/service/ServiceContext.h>
+#include <Tactility/service/ServiceRegistry.h>
+#include <Tactility/service/wifi/Wifi.h>
 
 namespace tt::service::statusbar {
 
@@ -54,14 +54,15 @@ const char* getWifiStatusIconForRssi(int rssi) {
 static const char* getWifiStatusIcon(wifi::RadioState state, bool secure) {
     int rssi;
     switch (state) {
-        case wifi::RadioState::On:
-        case wifi::RadioState::OnPending:
-        case wifi::RadioState::ConnectionPending:
+        using enum wifi::RadioState;
+        case On:
+        case OnPending:
+        case ConnectionPending:
             return STATUSBAR_ICON_WIFI_SCAN_WHITE;
-        case wifi::RadioState::OffPending:
-        case wifi::RadioState::Off:
+        case OffPending:
+        case Off:
             return STATUSBAR_ICON_WIFI_OFF_WHITE;
-        case wifi::RadioState::ConnectionActive:
+        case ConnectionActive:
             rssi = wifi::getRssi();
             return getWifiStatusIconForRssi(rssi);
         default:
@@ -69,13 +70,14 @@ static const char* getWifiStatusIcon(wifi::RadioState state, bool secure) {
     }
 }
 
-static const char* getSdCardStatusIcon(hal::SdCard::State state) {
+static const char* getSdCardStatusIcon(hal::sdcard::SdCardDevice::State state) {
     switch (state) {
-        case hal::SdCard::State::Mounted:
+        using enum hal::sdcard::SdCardDevice::State;
+        case Mounted:
             return STATUSBAR_ICON_SDCARD;
-        case hal::SdCard::State::Error:
-        case hal::SdCard::State::Unmounted:
-        case hal::SdCard::State::Unknown:
+        case Error:
+        case Unmounted:
+        case Unknown:
             return STATUSBAR_ICON_SDCARD_ALERT;
         default:
             tt_crash("Unhandled SdCard state");
@@ -90,8 +92,8 @@ static _Nullable const char* getPowerStatusIcon() {
 
     auto power = get_power();
 
-    hal::Power::MetricData charge_level;
-    if (!power->getMetric(hal::Power::MetricType::ChargeLevel, charge_level)) {
+    hal::power::PowerDevice::MetricData charge_level;
+    if (!power->getMetric(hal::power::PowerDevice::MetricType::ChargeLevel, charge_level)) {
         return nullptr;
     }
 
@@ -138,11 +140,11 @@ private:
     std::unique_ptr<service::Paths> paths;
 
     void lock() const {
-        tt_check(mutex.acquire(TtWaitForever) == TtStatusOk);
+        mutex.lock();
     }
 
     void unlock() const {
-        tt_check(mutex.release() == TtStatusOk);
+        mutex.unlock();
     }
 
     void updateWifiIcon() {
@@ -179,7 +181,7 @@ private:
         auto sdcard = tt::hal::getConfiguration()->sdcard;
         if (sdcard != nullptr) {
             auto state = sdcard->getState();
-            if (state != hal::SdCard::State::Unknown) {
+            if (state != hal::sdcard::SdCardDevice::State::Unknown) {
                 auto* desired_icon = getSdCardStatusIcon(state);
                 if (sdcard_last_icon != desired_icon) {
                     auto icon_path = paths->getSystemPathLvgl(desired_icon);

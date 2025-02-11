@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -12,7 +12,6 @@ if (DEFINED ENV{ESP_IDF_VERSION})
         REQUIRES lvgl
     )
 
-    add_definitions(-DESP_PLATFORM)
 else()
     file(GLOB SOURCES "Source/*.c*")
     file(GLOB HEADERS "Source/*.h*")
