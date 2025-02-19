@@ -1,4 +1,8 @@
-#include "I2cDevice.h"
+#include "Tactility/hal/i2c/I2cDevice.h"
+
+#include <cstdint>
+
+namespace tt::hal::i2c {
 
 bool I2cDevice::readRegister12(uint8_t reg, float& out) const {
     std::uint8_t data[2] = {0};
@@ -57,3 +61,5 @@ bool I2cDevice::bitOff(uint8_t reg, uint8_t bitmask) const {
         return false;
     }
 }
+
+} // namespace

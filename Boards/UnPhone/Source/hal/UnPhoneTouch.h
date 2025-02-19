@@ -1,11 +1,11 @@
 #pragma once
 
-#include "hal/Touch.h"
-#include "TactilityCore.h"
-#include "esp_lcd_panel_io_interface.h"
-#include "esp_lcd_touch.h"
+#include "Tactility/hal/touch/TouchDevice.h"
+#include <Tactility/TactilityCore.h>
+#include <esp_lcd_panel_io_interface.h>
+#include <esp_lcd_touch.h>
 
-class UnPhoneTouch : public tt::hal::Touch {
+class UnPhoneTouch : public tt::hal::touch::TouchDevice {
 
 private:
 
@@ -17,6 +17,9 @@ private:
     void cleanup();
 
 public:
+
+    std::string getName() const final { return "XPT2046"; }
+    std::string getDescription() const final { return "I2C touch driver"; }
 
     bool start(lv_display_t* display) override;
     bool stop() override;

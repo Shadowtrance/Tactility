@@ -1,10 +1,12 @@
-#include "app/AppContext.h"
-#include "Assets.h"
-#include "DisplaySettings.h"
-#include "Tactility.h"
-#include "lvgl/Toolbar.h"
-#include "lvgl.h"
-#include "hal/Display.h"
+#include "Tactility/app/display/DisplaySettings.h"
+
+#include "Tactility/hal/display/DisplayDevice.h"
+#include "Tactility/lvgl/Toolbar.h"
+
+#include <Tactility/Assets.h>
+#include <Tactility/Tactility.h>
+
+#include <lvgl.h>
 
 namespace tt::app::display {
 
@@ -13,7 +15,6 @@ namespace tt::app::display {
 static bool backlight_duty_set = false;
 static uint8_t backlight_duty = 255;
 
-static bool gamma_set = false;
 static uint8_t gamma = 255;
 
 #define ROTATION_DEFAULT 0
@@ -21,12 +22,15 @@ static uint8_t gamma = 255;
 #define ROTATION_270 2
 #define ROTATION_90 3
 
+static std::shared_ptr<tt::hal::display::DisplayDevice> getHalDisplay() {
+    return hal::findFirstDevice<hal::display::DisplayDevice>(hal::Device::Type::Display);
+}
+
 static void onBacklightSliderEvent(lv_event_t* event) {
     auto* slider = static_cast<lv_obj_t*>(lv_event_get_target(event));
-    auto* lvgl_display = lv_display_get_default();
-    tt_assert(lvgl_display != nullptr);
-    auto* hal_display = (tt::hal::Display*)lv_display_get_user_data(lvgl_display);
-    tt_assert(hal_display != nullptr);
+
+    auto hal_display = getHalDisplay();
+    assert(hal_display != nullptr);
 
     if (hal_display->supportsBacklightDuty()) {
         int32_t slider_value = lv_slider_get_value(slider);
@@ -41,26 +45,17 @@ static void onBacklightSliderEvent(lv_event_t* event) {
 static void onGammaSliderEvent(lv_event_t* event) {
     auto* slider = static_cast<lv_obj_t*>(lv_event_get_target(event));
     auto* lvgl_display = lv_display_get_default();
-    tt_assert(lvgl_display != nullptr);
-    auto* hal_display = (tt::hal::Display*)lv_display_get_user_data(lvgl_display);
-    tt_assert(hal_display != nullptr);
+    assert(lvgl_display != nullptr);
+    auto* hal_display = (tt::hal::display::DisplayDevice*)lv_display_get_user_data(lvgl_display);
+    assert(hal_display != nullptr);
 
     if (hal_display->getGammaCurveCount() > 0) {
         int32_t slider_value = lv_slider_get_value(slider);
 
         gamma = (uint8_t)slider_value;
-        gamma_set = true;
 
         hal_display->setGammaCurve(gamma);
     }
-}
-
-static tt::hal::Display* getHalDisplay(lv_obj_t* widget) {
-    auto* lvgl_display = lv_obj_get_display(widget);
-    tt_assert(lvgl_display != nullptr);
-    auto* hal_display = (tt::hal::Display*)lv_display_get_user_data(lvgl_display);
-    tt_assert(hal_display != nullptr);
-    return hal_display;
 }
 
 static lv_display_rotation_t orientationSettingToDisplayRotation(uint32_t setting) {
@@ -103,39 +98,39 @@ class DisplayApp : public App {
     void onShow(AppContext& app, lv_obj_t* parent) override {
         lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
 
+        auto hal_display = getHalDisplay();
+        assert(hal_display != nullptr);
+
         lvgl::toolbar_create(parent, app);
 
-        lv_obj_t* main_wrapper = lv_obj_create(parent);
+        auto* main_wrapper = lv_obj_create(parent);
         lv_obj_set_flex_flow(main_wrapper, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_width(main_wrapper, LV_PCT(100));
         lv_obj_set_flex_grow(main_wrapper, 1);
 
-        lv_obj_t* wrapper = lv_obj_create(main_wrapper);
+        auto* wrapper = lv_obj_create(main_wrapper);
         lv_obj_set_width(wrapper, LV_PCT(100));
         lv_obj_set_style_pad_all(wrapper, 8, 0);
         lv_obj_set_style_border_width(wrapper, 0, 0);
 
-        lv_obj_t* brightness_label = lv_label_create(wrapper);
+        auto* brightness_label = lv_label_create(wrapper);
         lv_label_set_text(brightness_label, "Brightness");
 
-        lv_obj_t* brightness_slider = lv_slider_create(wrapper);
+        auto* brightness_slider = lv_slider_create(wrapper);
         lv_obj_set_width(brightness_slider, LV_PCT(50));
         lv_obj_align(brightness_slider, LV_ALIGN_TOP_RIGHT, -8, 0);
         lv_slider_set_range(brightness_slider, 0, 255);
         lv_obj_add_event_cb(brightness_slider, onBacklightSliderEvent, LV_EVENT_VALUE_CHANGED, nullptr);
 
-        lv_obj_t* gamma_label = lv_label_create(wrapper);
+        auto* gamma_label = lv_label_create(wrapper);
         lv_label_set_text(gamma_label, "Gamma");
         lv_obj_set_y(gamma_label, 40);
 
-        lv_obj_t* gamma_slider = lv_slider_create(wrapper);
+        auto* gamma_slider = lv_slider_create(wrapper);
         lv_obj_set_width(gamma_slider, LV_PCT(50));
         lv_obj_align(gamma_slider, LV_ALIGN_TOP_RIGHT, -8, 40);
-        lv_slider_set_range(gamma_slider, 0, getHalDisplay(parent)->getGammaCurveCount());
+        lv_slider_set_range(gamma_slider, 0, hal_display->getGammaCurveCount());
         lv_obj_add_event_cb(gamma_slider, onGammaSliderEvent, LV_EVENT_VALUE_CHANGED, nullptr);
-
-        auto* hal_display = getHalDisplay(parent);
-        tt_assert(hal_display != nullptr);
 
         if (!hal_display->supportsBacklightDuty()) {
             lv_slider_set_value(brightness_slider, 255, LV_ANIM_OFF);
@@ -147,7 +142,7 @@ class DisplayApp : public App {
 
         lv_slider_set_value(gamma_slider, 128, LV_ANIM_OFF);
 
-        lv_obj_t* orientation_label = lv_label_create(wrapper);
+        auto* orientation_label = lv_label_create(wrapper);
         lv_label_set_text(orientation_label, "Orientation");
         lv_obj_align(orientation_label, LV_ALIGN_TOP_LEFT, 0, 80);
 
@@ -156,7 +151,7 @@ class DisplayApp : public App {
         auto vertical_px = lv_display_get_vertical_resolution(lvgl_display);
         bool is_landscape_display = horizontal_px > vertical_px;
 
-        lv_obj_t* orientation_dropdown = lv_dropdown_create(wrapper);
+        auto* orientation_dropdown = lv_dropdown_create(wrapper);
         if (is_landscape_display) {
             lv_dropdown_set_options(orientation_dropdown, "Landscape\nLandscape (flipped)\nPortrait Left\nPortrait Right");
         } else {

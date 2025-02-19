@@ -1,46 +1,13 @@
-#include <driver/i2c.h>
-#include <driver/spi_master.h>
-#include <intr_types.h>
-#include "Log.h"
-#include "hal/CoreS3DisplayConstants.h"
-#include "kernel/Kernel.h"
-#include "Axp2101/Axp2101.h"
-#include "Aw9523/Aw9523.h"
+#include <Axp2101.h>
+#include <Aw9523.h>
 
-#define TAG "core2"
+#include <Tactility/Log.h>
+#include <Tactility/kernel/Kernel.h>
 
-#define CORES3_SPI2_PIN_SCLK GPIO_NUM_36
-#define CORES3_SPI2_PIN_MOSI GPIO_NUM_37
-#define CORES3_SPI2_PIN_MISO GPIO_NUM_35
+#define TAG "cores3"
 
-/**
- * For details see https://github.com/espressif/esp-bsp/blob/master/bsp/m5stack_core_s3/m5stack_core_s3.c
- */
-static bool initSpi3() {
-    TT_LOG_I(TAG, LOG_MESSAGE_SPI_INIT_START_FMT, SPI3_HOST);
-    const spi_bus_config_t bus_config = {
-        .mosi_io_num = CORES3_SPI2_PIN_MOSI,
-        .miso_io_num = CORES3_SPI2_PIN_MISO,
-        .sclk_io_num = CORES3_SPI2_PIN_SCLK,
-        .data2_io_num = GPIO_NUM_NC,
-        .data3_io_num = GPIO_NUM_NC,
-        .data4_io_num = GPIO_NUM_NC,
-        .data5_io_num = GPIO_NUM_NC,
-        .data6_io_num = GPIO_NUM_NC,
-        .data7_io_num = GPIO_NUM_NC,
-        .max_transfer_sz = CORES3_LCD_DRAW_BUFFER_SIZE,
-        .flags = 0,
-        .isr_cpu_id = INTR_CPU_ID_AUTO,
-        .intr_flags = 0
-    };
-
-    if (spi_bus_initialize(SPI3_HOST, &bus_config, SPI_DMA_CH_AUTO) != ESP_OK) {
-        TT_LOG_E(TAG, LOG_MESSAGE_SPI_INIT_FAILED_FMT, SPI3_HOST);
-        return false;
-    }
-
-    return true;
-}
+std::shared_ptr<Axp2101> axp2101;
+std::shared_ptr<Aw9523> aw9523;
 
 /**
  * For details see https://github.com/espressif/esp-bsp/blob/master/bsp/m5stack_core_s3/m5stack_core_s3.c
@@ -90,22 +57,19 @@ bool initGpioExpander() {
     // Boost enable
     p1_state |= (1U << 7U);
 
-    Aw9523 aw(I2C_NUM_0);
-
-    if (!aw.writeP0(p0_state)) {
+    if (!aw9523->writeP0(p0_state)) {
         TT_LOG_E(TAG, "AW9523: Failed to set P0");
         return false;
     }
 
-    if (!aw.writeP1(p1_state)) {
+    if (!aw9523->writeP1(p1_state)) {
         TT_LOG_E(TAG, "AW9523: Failed to set P1");
         return false;
     }
 
-    Axp2101 axp(I2C_NUM_0);
-    if (axp.isVBus()) {
+    if (axp2101->isVBus()) {
         float voltage = 0.0f;
-        axp.getVBusVoltage(voltage);
+        axp2101->getVBusVoltage(voltage);
         TT_LOG_I(TAG, "AXP2101: VBus at %.2f", voltage);
     } else {
         TT_LOG_W(TAG, "AXP2101: VBus disabled");
@@ -117,9 +81,8 @@ bool initGpioExpander() {
 bool initPowerControl() {
     TT_LOG_I(TAG, "Init power control (AXP2101)");
 
-    Aw9523 aw(I2C_NUM_0);
     // Source: https://github.com/m5stack/M5Unified/blob/b8cfec7fed046242da7f7b8024a4e92004a51ff7/src/utility/Power_Class.cpp#L61
-    aw.bitOnP1(0b10000000); // SY7088 boost enable
+    aw9523->bitOnP1(0b10000000); // SY7088 boost enable
 
     /** AXP2101 usage
     Source: https://github.com/m5stack/M5Unified/blob/b8cfec7fed046242da7f7b8024a4e92004a51ff7/README.md?plain=1#L223
@@ -166,8 +129,7 @@ bool initPowerControl() {
         0x30, 0x0F // ADC enabled (for voltage measurement)
     };
 
-    Axp2101 axp(I2C_NUM_0);
-    if (axp.setRegisters((uint8_t*)reg_data_array, sizeof(reg_data_array))) {
+    if (axp2101->setRegisters((uint8_t*)reg_data_array, sizeof(reg_data_array))) {
         TT_LOG_I(TAG, "AXP2101 initialized with %d registers", sizeof(reg_data_array) / 2);
         return true;
     } else {
@@ -178,7 +140,11 @@ bool initPowerControl() {
 
 bool initBoot() {
     TT_LOG_I(TAG, "initBoot()");
-    return initPowerControl() &&
-        initGpioExpander() &&
-        initSpi3();
+
+    axp2101 = std::make_shared<Axp2101>(I2C_NUM_0);
+    tt::hal::registerDevice(axp2101);
+    aw9523 = std::make_shared<Aw9523>(I2C_NUM_0);
+    tt::hal::registerDevice(aw9523);
+
+    return initPowerControl() && initGpioExpander();
 }

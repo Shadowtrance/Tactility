@@ -1,17 +1,17 @@
-#include "app/AppManifest.h"
-#include "app/ManifestRegistry.h"
-#include "service/ServiceManifest.h"
-#include "service/gui/Gui.h"
-#include "service/loader/Loader_i.h"
-#include "RtosCompat.h"
+#include "Tactility/app/AppManifest.h"
+#include "Tactility/app/ManifestRegistry.h"
+#include "Tactility/service/gui/Gui.h"
+#include "Tactility/service/loader/Loader_i.h"
+
+#include <Tactility/service/ServiceManifest.h>
+#include <Tactility/RtosCompat.h>
 
 #ifdef ESP_PLATFORM
-#include "TactilityHeadless.h"
-#include "app/ElfApp.h"
-#include "esp_heap_caps.h"
-
+#include "Tactility/app/ElfApp.h"
+#include <Tactility/TactilityHeadless.h>
+#include <esp_heap_caps.h>
 #else
-#include "lvgl/LvglSync.h"
+#include "Tactility/lvgl/LvglSync.h"
 #endif
 
 namespace tt::service::loader {
@@ -44,14 +44,14 @@ static Loader* loader_alloc() {
 }
 
 static void loader_free() {
-    tt_assert(loader_singleton != nullptr);
+    assert(loader_singleton != nullptr);
     delete loader_singleton;
     loader_singleton = nullptr;
 }
 
 void startApp(const std::string& id, std::shared_ptr<const Bundle> parameters) {
     TT_LOG_I(TAG, "Start app %s", id.c_str());
-    tt_assert(loader_singleton);
+    assert(loader_singleton);
     auto message = std::make_shared<LoaderMessageAppStart>(id, std::move(parameters));
     loader_singleton->dispatcherThread->dispatch(onStartAppMessage, message);
 }
@@ -63,14 +63,11 @@ void stopApp() {
 }
 
 std::shared_ptr<app::AppContext> _Nullable getCurrentAppContext() {
-    tt_assert(loader_singleton);
-    if (loader_singleton->mutex.lock(10 / portTICK_PERIOD_MS)) {
-        auto app = loader_singleton->appStack.top();
-        loader_singleton->mutex.unlock();
-        return std::move(app);
-    } else {
-        return nullptr;
-    }
+    assert(loader_singleton);
+    loader_singleton->mutex.lock();
+    auto app = loader_singleton->appStack.top();
+    loader_singleton->mutex.unlock();
+    return app;
 }
 
 std::shared_ptr<app::App> _Nullable getCurrentApp() {
@@ -79,7 +76,7 @@ std::shared_ptr<app::App> _Nullable getCurrentApp() {
 }
 
 std::shared_ptr<PubSub> getPubsub() {
-    tt_assert(loader_singleton);
+    assert(loader_singleton);
     // it's safe to return pubsub without locking
     // because it's never freed and loader is never exited
     // also the loader instance cannot be obtained until the pubsub is created
@@ -88,15 +85,16 @@ std::shared_ptr<PubSub> getPubsub() {
 
 static const char* appStateToString(app::State state) {
     switch (state) {
-        case app::StateInitial:
+        using enum app::State;
+        case Initial:
             return "initial";
-        case app::StateStarted:
+        case Started:
             return "started";
-        case app::StateShowing:
+        case Showing:
             return "showing";
-        case app::StateHiding:
+        case Hiding:
             return "hiding";
-        case app::StateStopped:
+        case Stopped:
             return "stopped";
         default:
             return "?";
@@ -116,31 +114,29 @@ static void transitionAppToState(std::shared_ptr<app::AppInstance> app, app::Sta
     );
 
     switch (state) {
-        case app::StateInitial:
-            app->setState(app::StateInitial);
+        using enum app::State;
+        case Initial:
             break;
-        case app::StateStarted:
-            app->getApp()->onStart(*app);
-            app->setState(app::StateStarted);
+        case Started:
+            app->getApp()->onCreate(*app);
             break;
-        case app::StateShowing: {
+        case Showing: {
             LoaderEvent event_showing = { .type = LoaderEventTypeApplicationShowing };
-            tt_pubsub_publish(loader_singleton->pubsubExternal, &event_showing);
-            app->setState(app::StateShowing);
+            loader_singleton->pubsubExternal->publish(&event_showing);
             break;
         }
-        case app::StateHiding: {
+        case Hiding: {
             LoaderEvent event_hiding = { .type = LoaderEventTypeApplicationHiding };
-            tt_pubsub_publish(loader_singleton->pubsubExternal, &event_hiding);
-            app->setState(app::StateHiding);
+            loader_singleton->pubsubExternal->publish(&event_hiding);
             break;
         }
-        case app::StateStopped:
+        case Stopped:
             // TODO: Verify manifest
-            app->getApp()->onStop(*app);
-            app->setState(app::StateStopped);
+            app->getApp()->onDestroy(*app);
             break;
     }
+
+    app->setState(state);
 }
 
 static LoaderStatus startAppWithManifestInternal(
@@ -151,8 +147,8 @@ static LoaderStatus startAppWithManifestInternal(
 
     TT_LOG_I(TAG, "Start with manifest %s", manifest->id.c_str());
 
-    auto scoped_lock = loader_singleton->mutex.scoped();
-    if (!scoped_lock->lock(50 / portTICK_PERIOD_MS)) {
+    auto lock = loader_singleton->mutex.asScopedLock();
+    if (!lock.lock(50 / portTICK_PERIOD_MS)) {
         return LoaderStatus::ErrorInternal;
     }
 
@@ -163,18 +159,18 @@ static LoaderStatus startAppWithManifestInternal(
     new_app->mutableFlags().showStatusbar = (manifest->type != app::Type::Boot);
 
     loader_singleton->appStack.push(new_app);
-    transitionAppToState(new_app, app::StateInitial);
-    transitionAppToState(new_app, app::StateStarted);
+    transitionAppToState(new_app, app::State::Initial);
+    transitionAppToState(new_app, app::State::Started);
 
     // We might have to hide the previous app first
     if (previous_app != nullptr) {
-        transitionAppToState(previous_app, app::StateHiding);
+        transitionAppToState(previous_app, app::State::Hiding);
     }
 
-    transitionAppToState(new_app, app::StateShowing);
+    transitionAppToState(new_app, app::State::Showing);
 
     LoaderEvent event_external = { .type = LoaderEventTypeApplicationStarted };
-    tt_pubsub_publish(loader_singleton->pubsubExternal, &event_external);
+    loader_singleton->pubsubExternal->publish(&event_external);
 
     return LoaderStatus::Ok;
 }
@@ -206,8 +202,8 @@ static LoaderStatus startAppInternal(
 static void stopAppInternal() {
     tt_check(loader_singleton != nullptr);
 
-    auto scoped_lock = loader_singleton->mutex.scoped();
-    if (!scoped_lock->lock(50 / portTICK_PERIOD_MS)) {
+    auto lock = loader_singleton->mutex.asScopedLock();
+    if (!lock.lock(50 / portTICK_PERIOD_MS)) {
         return;
     }
 
@@ -233,8 +229,8 @@ static void stopAppInternal() {
         result_set = true;
     }
 
-    transitionAppToState(app_to_stop, app::StateHiding);
-    transitionAppToState(app_to_stop, app::StateStopped);
+    transitionAppToState(app_to_stop, app::State::Hiding);
+    transitionAppToState(app_to_stop, app::State::Stopped);
 
     loader_singleton->appStack.pop();
 
@@ -256,16 +252,16 @@ static void stopAppInternal() {
     // If there's a previous app, resume it
     if (!loader_singleton->appStack.empty()) {
         instance_to_resume = loader_singleton->appStack.top();
-        tt_assert(instance_to_resume);
-        transitionAppToState(instance_to_resume, app::StateShowing);
+        assert(instance_to_resume);
+        transitionAppToState(instance_to_resume, app::State::Showing);
     }
 
     // Unlock so that we can send results to app and they can also start/stop new apps while processing these results
-    scoped_lock->unlock();
+    lock.unlock();
     // WARNING: After this point we cannot change the app states from this method directly anymore as we don't have a lock!
 
     LoaderEvent event_external = { .type = LoaderEventTypeApplicationStopped };
-    tt_pubsub_publish(loader_singleton->pubsubExternal, &event_external);
+    loader_singleton->pubsubExternal->publish(&event_external);
 
     if (instance_to_resume != nullptr) {
         if (result_set) {
@@ -295,31 +291,35 @@ static void stopAppInternal() {
 
 // region AppManifest
 
-static void loader_start(TT_UNUSED ServiceContext& service) {
-    tt_check(loader_singleton == nullptr);
-    loader_singleton = loader_alloc();
-    loader_singleton->dispatcherThread->start();
-}
+class LoaderService final : public Service {
 
-static void loader_stop(TT_UNUSED ServiceContext& service) {
-    tt_check(loader_singleton != nullptr);
+public:
 
-    // Send stop signal to thread and wait for thread to finish
-    if (!loader_singleton->mutex.lock(2000 / portTICK_PERIOD_MS)) {
-        TT_LOG_W(TAG, LOG_MESSAGE_MUTEX_LOCK_FAILED_FMT, "loader_stop");
+    void onStart(TT_UNUSED ServiceContext& service) final {
+        tt_check(loader_singleton == nullptr);
+        loader_singleton = loader_alloc();
+        loader_singleton->dispatcherThread->start();
     }
-    loader_singleton->dispatcherThread->stop();
 
-    loader_singleton->mutex.unlock();
+    void onStop(TT_UNUSED ServiceContext& service) final {
+        tt_check(loader_singleton != nullptr);
 
-    loader_free();
-    loader_singleton = nullptr;
-}
+        // Send stop signal to thread and wait for thread to finish
+        if (!loader_singleton->mutex.lock(2000 / portTICK_PERIOD_MS)) {
+            TT_LOG_W(TAG, LOG_MESSAGE_MUTEX_LOCK_FAILED_FMT, "loader_stop");
+        }
+        loader_singleton->dispatcherThread->stop();
+
+        loader_singleton->mutex.unlock();
+
+        loader_free();
+        loader_singleton = nullptr;
+    }
+};
 
 extern const ServiceManifest manifest = {
     .id = "Loader",
-    .onStart = &loader_start,
-    .onStop = &loader_stop
+    .createService = create<LoaderService>
 };
 
 // endregion

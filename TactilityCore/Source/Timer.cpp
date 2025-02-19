@@ -1,12 +1,14 @@
-#include "Timer.h"
+#include "Tactility/Timer.h"
+
+#include "Tactility/Check.h"
+#include "Tactility/RtosCompat.h"
+#include "Tactility/kernel/Kernel.h"
 
 #include <utility>
-#include "Check.h"
-#include "RtosCompat.h"
 
 namespace tt {
 
-static void timer_callback(TimerHandle_t hTimer) {
+void Timer::onCallback(TimerHandle_t hTimer) {
     auto* timer = static_cast<Timer*>(pvTimerGetTimerID(hTimer));
 
     if (timer != nullptr) {
@@ -14,58 +16,63 @@ static void timer_callback(TimerHandle_t hTimer) {
     }
 }
 
-Timer::Timer(Type type, Callback callback, std::shared_ptr<void> callbackContext) {
-    tt_assert((!TT_IS_ISR()) && (callback != nullptr));
-
-    this->callback = callback;
-    this->callbackContext = std::move(callbackContext);
+static inline TimerHandle_t createTimer(Timer::Type type, void* timerId, TimerCallbackFunction_t callback) {
+    assert(timerId != nullptr);
+    assert(callback != nullptr);
 
     UBaseType_t reload;
-    if (type == Type::Once) {
+    if (type == Timer::Type::Once) {
         reload = pdFALSE;
     } else {
         reload = pdTRUE;
     }
 
-    this->timerHandle = xTimerCreate(nullptr, portMAX_DELAY, (BaseType_t)reload, this, timer_callback);
-    tt_assert(this->timerHandle);
+    return xTimerCreate(nullptr, portMAX_DELAY, (BaseType_t)reload, timerId, callback);
+}
+
+Timer::Timer(Type type, Callback callback, std::shared_ptr<void> callbackContext) :
+    callback(callback),
+    callbackContext(std::move(callbackContext)),
+    handle(createTimer(type, this, onCallback))
+{
+    assert(!kernel::isIsr());
+    assert(handle != nullptr);
 }
 
 Timer::~Timer() {
-    tt_assert(!TT_IS_ISR());
-    tt_check(xTimerDelete(timerHandle, portMAX_DELAY) == pdPASS);
+    assert(!kernel::isIsr());
 }
 
 bool Timer::start(TickType_t interval) {
-    tt_assert(!TT_IS_ISR());
-    tt_assert(interval < portMAX_DELAY);
-    return xTimerChangePeriod(timerHandle, interval, portMAX_DELAY) == pdPASS;
+    assert(!kernel::isIsr());
+    assert(interval < portMAX_DELAY);
+    return xTimerChangePeriod(handle.get(), interval, portMAX_DELAY) == pdPASS;
 }
 
 bool Timer::restart(TickType_t interval) {
-    tt_assert(!TT_IS_ISR());
-    tt_assert(interval < portMAX_DELAY);
-    return xTimerChangePeriod(timerHandle, interval, portMAX_DELAY) == pdPASS &&
-        xTimerReset(timerHandle, portMAX_DELAY) == pdPASS;
+    assert(!kernel::isIsr());
+    assert(interval < portMAX_DELAY);
+    return xTimerChangePeriod(handle.get(), interval, portMAX_DELAY) == pdPASS &&
+        xTimerReset(handle.get(), portMAX_DELAY) == pdPASS;
 }
 
 bool Timer::stop() {
-    tt_assert(!TT_IS_ISR());
-    return xTimerStop(timerHandle, portMAX_DELAY) == pdPASS;
+    assert(!kernel::isIsr());
+    return xTimerStop(handle.get(), portMAX_DELAY) == pdPASS;
 }
 
 bool Timer::isRunning() {
-    tt_assert(!TT_IS_ISR());
-    return xTimerIsTimerActive(timerHandle) == pdTRUE;
+    assert(!kernel::isIsr());
+    return xTimerIsTimerActive(handle.get()) == pdTRUE;
 }
 
 TickType_t Timer::getExpireTime() {
-    tt_assert(!TT_IS_ISR());
-    return xTimerGetExpiryTime(timerHandle);
+    assert(!kernel::isIsr());
+    return xTimerGetExpiryTime(handle.get());
 }
 
 bool Timer::setPendingCallback(PendingCallback callback, void* callbackContext, uint32_t callbackArg, TickType_t timeout) {
-    if (TT_IS_ISR()) {
+    if (kernel::isIsr()) {
         assert(timeout == 0);
         return xTimerPendFunctionCallFromISR(callback, callbackContext, callbackArg, nullptr) == pdPASS;
     } else {
@@ -74,10 +81,10 @@ bool Timer::setPendingCallback(PendingCallback callback, void* callbackContext, 
 }
 
 void Timer::setThreadPriority(Thread::Priority priority)  {
-    tt_assert(!TT_IS_ISR());
+    assert(!kernel::isIsr());
 
     TaskHandle_t task_handle = xTimerGetTimerDaemonTaskHandle();
-    tt_assert(task_handle); // Don't call this method before timer task start
+    assert(task_handle); // Don't call this method before timer task start
 
     vTaskPrioritySet(task_handle, static_cast<UBaseType_t>(priority));
 }

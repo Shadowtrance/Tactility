@@ -1,14 +1,17 @@
 #ifdef ESP_PLATFORM
 
-#include "ElfApp.h"
-#include "Log.h"
-#include "StringUtils.h"
-#include "TactilityCore.h"
+#include "Tactility/app/ElfApp.h"
+#include "Tactility/file/File.h"
+#include "Tactility/service/loader/Loader.h"
+
+#include "Tactility/hal/sdcard/SdCardDevice.h"
+#include <Tactility/Log.h>
+#include <Tactility/StringUtils.h>
+
 #include "esp_elf.h"
-#include "file/File.h"
-#include "service/loader/Loader.h"
 
 #include <string>
+#include <utility>
 
 namespace tt::app {
 
@@ -19,13 +22,13 @@ struct ElfManifest {
     std::string name;
     /** Optional icon. */
     std::string icon;
-    CreateData _Nullable createData;
-    DestroyData _Nullable destroyData;
-    OnStart _Nullable onStart;
-    OnStop _Nullable onStop;
-    OnShow _Nullable onShow;
-    OnHide _Nullable onHide;
-    OnResult _Nullable onResult;
+    CreateData _Nullable createData = nullptr;
+    DestroyData _Nullable destroyData = nullptr;
+    OnCreate _Nullable onCreate = nullptr;
+    OnDestroy _Nullable onDestroy = nullptr;
+    OnShow _Nullable onShow = nullptr;
+    OnHide _Nullable onHide = nullptr;
+    OnResult _Nullable onResult = nullptr;
 };
 
 static size_t elfManifestSetCount = 0;
@@ -47,7 +50,10 @@ private:
         assert(elfFileData == nullptr);
 
         size_t size = 0;
-        elfFileData = file::readBinary(filePath, size);
+        hal::sdcard::withSdCardLock<void>(filePath, [this, &size](){
+            elfFileData = file::readBinary(filePath, size);
+        });
+
         if (elfFileData == nullptr) {
             return false;
         }
@@ -88,9 +94,9 @@ private:
 
 public:
 
-    explicit ElfApp(const std::string& filePath) : filePath(filePath) {}
+    explicit ElfApp(std::string filePath) : filePath(std::move(filePath)) {}
 
-    void onStart(AppContext& appContext) override {
+    void onCreate(AppContext& appContext) override {
         auto initial_count = elfManifestSetCount;
         if (startElf()) {
             if (elfManifestSetCount > initial_count) {
@@ -100,8 +106,8 @@ public:
                     data = manifest->createData();
                 }
 
-                if (manifest->onStart != nullptr) {
-                    manifest->onStart(appContext, data);
+                if (manifest->onCreate != nullptr) {
+                    manifest->onCreate(&appContext, data);
                 }
             }
         } else {
@@ -109,11 +115,11 @@ public:
         }
     }
 
-    void onStop(AppContext& appContext) override {
+    void onDestroy(AppContext& appContext) override {
         TT_LOG_I(TAG, "Cleaning up app");
         if (manifest != nullptr) {
-            if (manifest->onStop != nullptr) {
-                manifest->onStop(appContext, data);
+            if (manifest->onDestroy != nullptr) {
+                manifest->onDestroy(&appContext, data);
             }
 
             if (manifest->destroyData != nullptr && data != nullptr) {
@@ -127,19 +133,19 @@ public:
 
     void onShow(AppContext& appContext, lv_obj_t* parent) override {
         if (manifest != nullptr && manifest->onShow != nullptr) {
-            manifest->onShow(appContext, data, parent);
+            manifest->onShow(&appContext, data, parent);
         }
     }
 
     void onHide(AppContext& appContext) override {
         if (manifest != nullptr && manifest->onHide != nullptr) {
-            manifest->onHide(appContext, data);
+            manifest->onHide(&appContext, data);
         }
     }
 
     void onResult(AppContext& appContext, Result result, std::unique_ptr<Bundle> resultBundle) override {
         if (manifest != nullptr && manifest->onResult != nullptr) {
-            manifest->onResult(appContext, data, result, std::move(resultBundle));
+            manifest->onResult(&appContext, data, result, resultBundle.get());
         }
     }
 };
@@ -149,8 +155,8 @@ void setElfAppManifest(
     const char* _Nullable icon,
     CreateData _Nullable createData,
     DestroyData _Nullable destroyData,
-    OnStart _Nullable onStart,
-    OnStop _Nullable onStop,
+    OnCreate _Nullable onCreate,
+    OnDestroy _Nullable onDestroy,
     OnShow _Nullable onShow,
     OnHide _Nullable onHide,
     OnResult _Nullable onResult
@@ -160,8 +166,8 @@ void setElfAppManifest(
         .icon = icon ? icon : "",
         .createData = createData,
         .destroyData = destroyData,
-        .onStart = onStart,
-        .onStop = onStop,
+        .onCreate = onCreate,
+        .onDestroy = onDestroy,
         .onShow = onShow,
         .onHide = onHide,
         .onResult = onResult
@@ -188,8 +194,8 @@ bool registerElfApp(const std::string& filePath) {
 
 std::shared_ptr<App> createElfApp(const std::shared_ptr<AppManifest>& manifest) {
     TT_LOG_I(TAG, "createElfApp");
-    tt_assert(manifest != nullptr);
-    tt_assert(manifest->location.isExternal());
+    assert(manifest != nullptr);
+    assert(manifest->location.isExternal());
     return std::make_shared<ElfApp>(manifest->location.getPath());
 }
 

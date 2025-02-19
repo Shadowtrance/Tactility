@@ -1,13 +1,13 @@
-#include "Wifi.h"
+#include "Tactility/service/wifi/Wifi.h"
 
 #ifndef ESP_PLATFORM
 
-#include "Check.h"
-#include "Log.h"
-#include "MessageQueue.h"
-#include "Mutex.h"
-#include "Pubsub.h"
-#include "service/ServiceContext.h"
+#include "Tactility/service/ServiceContext.h"
+
+#include <Tactility/Check.h>
+#include <Tactility/Log.h>
+#include <Tactility/Mutex.h>
+#include <Tactility/PubSub.h>
 
 namespace tt::service::wifi {
 
@@ -36,7 +36,7 @@ static Wifi* wifi = nullptr;
 
 static void publish_event_simple(Wifi* wifi, EventType type) {
     Event turning_on_event = { .type = type };
-    tt_pubsub_publish(wifi->pubsub, &turning_on_event);
+    wifi->pubsub->publish(&turning_on_event);
 }
 
 // endregion Static
@@ -44,7 +44,7 @@ static void publish_event_simple(Wifi* wifi, EventType type) {
 // region Public functions
 
 std::shared_ptr<PubSub> getPubsub() {
-    tt_assert(wifi);
+    assert(wifi);
     return wifi->pubsub;
 }
 
@@ -57,26 +57,26 @@ std::string getConnectionTarget() {
 }
 
 void scan() {
-    tt_assert(wifi);
+    assert(wifi);
     wifi->scan_active = false; // TODO: enable and then later disable automatically
 }
 
 bool isScanning() {
-    tt_assert(wifi);
+    assert(wifi);
     return wifi->scan_active;
 }
 
 void connect(const settings::WifiApSettings* ap, bool remember) {
-    tt_assert(wifi);
+    assert(wifi);
     // TODO: implement
 }
 
 void disconnect() {
-    tt_assert(wifi);
+    assert(wifi);
 }
 
 void setScanRecords(uint16_t records) {
-    tt_assert(wifi);
+    assert(wifi);
     // TODO: implement
 }
 
@@ -114,7 +114,7 @@ std::vector<ApRecord> getScanResults() {
 }
 
 void setEnabled(bool enabled) {
-    tt_assert(wifi != nullptr);
+    assert(wifi != nullptr);
     if (enabled) {
         wifi->radio_state = RadioState::On;
         wifi->secure_connection = true;
@@ -137,25 +137,25 @@ int getRssi() {
 
 // endregion Public functions
 
-static void service_start(TT_UNUSED ServiceContext& service) {
-    tt_check(wifi == nullptr);
-    wifi = new Wifi();
-}
+class WifiService final : public Service {
 
-static void service_stop(TT_UNUSED ServiceContext& service) {
-    tt_check(wifi != nullptr);
-    delete wifi;
-    wifi = nullptr;
-}
+public:
 
-void wifi_main(void*) {
-    // NO-OP
-}
+    void onStart(TT_UNUSED ServiceContext& service) final {
+        tt_check(wifi == nullptr);
+        wifi = new Wifi();
+    }
+
+    void onStop(TT_UNUSED ServiceContext& service) final {
+        tt_check(wifi != nullptr);
+        delete wifi;
+        wifi = nullptr;
+    }
+};
 
 extern const ServiceManifest manifest = {
     .id = "Wifi",
-    .onStart = &service_start,
-    .onStop = &service_stop
+    .createService = create<WifiService>
 };
 
 } // namespace

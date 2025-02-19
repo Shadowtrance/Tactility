@@ -1,10 +1,11 @@
-#include <TactilityCore.h>
-#include "TextViewer.h"
-#include "lvgl.h"
-#include "lvgl/LabelUtils.h"
-#include "lvgl/Style.h"
-#include "lvgl/Toolbar.h"
-#include "service/loader/Loader.h"
+#include "Tactility/lvgl/LabelUtils.h"
+#include "Tactility/lvgl/Style.h"
+#include "Tactility/lvgl/Toolbar.h"
+#include "Tactility/service/loader/Loader.h"
+
+#include <Tactility/TactilityCore.h>
+
+#include <lvgl.h>
 
 #define TAG "text_viewer"
 #define TEXT_VIEWER_FILE_ARGUMENT "file"
@@ -17,14 +18,14 @@ class TextViewerApp : public App {
         lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
         lvgl::toolbar_create(parent, app);
 
-        lv_obj_t* wrapper = lv_obj_create(parent);
+        auto* wrapper = lv_obj_create(parent);
         lv_obj_set_width(wrapper, LV_PCT(100));
         lv_obj_set_flex_grow(wrapper, 1);
         lv_obj_set_flex_flow(wrapper, LV_FLEX_FLOW_COLUMN);
-        lvgl::obj_set_style_no_padding(wrapper);
+        lv_obj_set_style_pad_all(wrapper, 0, 0);
         lvgl::obj_set_style_bg_invisible(wrapper);
 
-        lv_obj_t* label = lv_label_create(wrapper);
+        auto* label = lv_label_create(wrapper);
         lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
         auto parameters = app.getParameters();
         tt_check(parameters != nullptr, "Parameters missing");

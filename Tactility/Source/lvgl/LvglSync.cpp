@@ -1,24 +1,31 @@
-#include <Mutex.h>
-#include "LvglSync.h"
+#include "Tactility/lvgl/LvglSync.h"
+
+#include <Tactility/Mutex.h>
 
 namespace tt::lvgl {
 
 static Mutex lockMutex;
 
 static bool defaultLock(uint32_t timeoutMillis) {
-    return lockMutex.acquire(timeoutMillis) == TtStatusOk;
+    return lockMutex.lock(timeoutMillis);
 }
 
 static void defaultUnlock() {
-    lockMutex.release();
+    lockMutex.unlock();
 }
 
 static LvglLock lock_singleton = defaultLock;
 static LvglUnlock unlock_singleton = defaultUnlock;
 
 void syncSet(LvglLock lock, LvglUnlock unlock) {
+    auto old_lock = lock_singleton;
+    auto old_unlock = unlock_singleton;
+
+    // Ensure the old lock is not engaged when changing locks
+    old_lock(portMAX_DELAY);
     lock_singleton = lock;
     unlock_singleton = unlock;
+    old_unlock();
 }
 
 bool lock(TickType_t timeout) {
@@ -29,7 +36,7 @@ void unlock() {
     unlock_singleton();
 }
 
-class LvglSync : public Lockable {
+class LvglSync : public Lock {
 public:
     ~LvglSync() override = default;
 
@@ -43,9 +50,9 @@ public:
     }
 };
 
-static std::shared_ptr<Lockable> lvglSync = std::make_shared<LvglSync>();
+static std::shared_ptr<Lock> lvglSync = std::make_shared<LvglSync>();
 
-std::shared_ptr<Lockable> getLvglSyncLockable() {
+std::shared_ptr<Lock> getSyncLock() {
     return lvglSync;
 }
 

@@ -1,25 +1,27 @@
-#include "app/AppContext.h"
-#include "Assets.h"
-#include "lvgl.h"
-#include "Tactility.h"
-#include "Timer.h"
-#include "lvgl/LvglSync.h"
-#include "lvgl/Style.h"
-#include "lvgl/Toolbar.h"
-#include "service/loader/Loader.h"
+#include "Tactility/app/AppContext.h"
+#include "Tactility/lvgl/LvglSync.h"
+#include "Tactility/lvgl/Style.h"
+#include "Tactility/lvgl/Toolbar.h"
+#include "Tactility/service/loader/Loader.h"
+
+#include "Tactility/hal/power/PowerDevice.h"
+#include <Tactility/Assets.h>
+#include <Tactility/Timer.h>
+#include <Tactility/hal/Device.h>
+
+#include <lvgl.h>
 
 namespace tt::app::power {
 
 #define TAG "power"
 
 extern const AppManifest manifest;
-static void onTimer(TT_UNUSED std::shared_ptr<void> context);
 
 class PowerApp;
 
 /** Returns the app data if the app is active. Note that this could clash if the same app is started twice and a background thread is slow. */
 std::shared_ptr<PowerApp> _Nullable optApp() {
-    auto appContext = service::loader::getCurrentAppContext();
+    auto appContext = getCurrentAppContext();
     if (appContext != nullptr && appContext->getManifest().id == manifest.id) {
         return std::static_pointer_cast<PowerApp>(appContext->getApp());
     } else {
@@ -32,7 +34,9 @@ class PowerApp : public App {
 private:
 
     Timer update_timer = Timer(Timer::Type::Periodic, &onTimer, nullptr);
-    std::shared_ptr<tt::hal::Power> power = getConfiguration()->hardware->power();
+
+    std::shared_ptr<hal::power::PowerDevice> power;
+
     lv_obj_t* enableLabel = nullptr;
     lv_obj_t* enableSwitch = nullptr;
     lv_obj_t* batteryVoltageLabel = nullptr;
@@ -67,8 +71,8 @@ private:
 
     void updateUi() {
         const char* charge_state;
-        hal::Power::MetricData metric_data;
-        if (power->getMetric(hal::Power::MetricType::IsCharging, metric_data)) {
+        hal::power::PowerDevice::MetricData metric_data;
+        if (power->getMetric(hal::power::PowerDevice::MetricType::IsCharging, metric_data)) {
             charge_state = metric_data.valueAsBool ? "yes" : "no";
         } else {
             charge_state = "N/A";
@@ -76,7 +80,7 @@ private:
 
         uint8_t charge_level;
         bool charge_level_scaled_set = false;
-        if (power->getMetric(hal::Power::MetricType::ChargeLevel, metric_data)) {
+        if (power->getMetric(hal::power::PowerDevice::MetricType::ChargeLevel, metric_data)) {
             charge_level = metric_data.valueAsUint8;
             charge_level_scaled_set = true;
         }
@@ -86,14 +90,14 @@ private:
 
         int32_t current;
         bool current_set = false;
-        if (power->getMetric(hal::Power::MetricType::Current, metric_data)) {
+        if (power->getMetric(hal::power::PowerDevice::MetricType::Current, metric_data)) {
             current = metric_data.valueAsInt32;
             current_set = true;
         }
 
         uint32_t battery_voltage;
         bool battery_voltage_set = false;
-        if (power->getMetric(hal::Power::MetricType::BatteryVoltage, metric_data)) {
+        if (power->getMetric(hal::power::PowerDevice::MetricType::BatteryVoltage, metric_data)) {
             battery_voltage = metric_data.valueAsUint32;
             battery_voltage_set = true;
         }
@@ -134,10 +138,18 @@ private:
 
 public:
 
+    void onCreate(AppContext& app) override {
+        power = hal::findFirstDevice<hal::power::PowerDevice>(hal::Device::Type::Power);
+    }
+
     void onShow(AppContext& app, lv_obj_t* parent) override {
         lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
 
         lvgl::toolbar_create(parent, app);
+
+        if (power == nullptr) {
+            return;
+        }
 
         lv_obj_t* wrapper = lv_obj_create(parent);
         lv_obj_set_width(wrapper, LV_PCT(100));

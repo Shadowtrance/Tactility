@@ -1,9 +1,7 @@
 #include "UnPhoneDisplay.h"
 #include "UnPhoneDisplayConstants.h"
 #include "UnPhoneTouch.h"
-#include "Log.h"
-
-#include <TactilityCore.h>
+#include <Tactility/Log.h>
 
 #include "UnPhoneFeatures.h"
 #include "esp_err.h"
@@ -13,7 +11,7 @@
 #define TAG "unphone_display"
 #define BUFFER_SIZE (UNPHONE_LCD_HORIZONTAL_RESOLUTION * UNPHONE_LCD_DRAW_BUFFER_HEIGHT * LV_COLOR_DEPTH / 8)
 
-extern UnPhoneFeatures unPhoneFeatures;
+extern std::shared_ptr<UnPhoneFeatures> unPhoneFeatures;
 
 bool UnPhoneDisplay::start() {
     TT_LOG_I(TAG, "Starting");
@@ -30,15 +28,13 @@ bool UnPhoneDisplay::start() {
     lv_display_set_color_format(displayHandle, LV_COLOR_FORMAT_NATIVE);
 
     // TODO malloc to use SPIRAM
-    static auto* buffer1 = (uint8_t*)heap_caps_malloc(BUFFER_SIZE, MALLOC_CAP_SPIRAM);
-    static auto* buffer2 = (uint8_t*)heap_caps_malloc(BUFFER_SIZE, MALLOC_CAP_SPIRAM);
-    assert(buffer1 != nullptr);
-    assert(buffer2 != nullptr);
+    buffer = (uint8_t*)heap_caps_malloc(BUFFER_SIZE, MALLOC_CAP_DMA);
+    assert(buffer != nullptr);
 
     lv_display_set_buffers(
         displayHandle,
-        buffer1,
-        buffer2,
+        buffer,
+        nullptr,
         BUFFER_SIZE,
         LV_DISPLAY_RENDER_MODE_PARTIAL
     );
@@ -47,7 +43,7 @@ bool UnPhoneDisplay::start() {
 
     if (displayHandle != nullptr) {
         TT_LOG_I(TAG, "Finished");
-        unPhoneFeatures.setBacklightPower(true);
+        unPhoneFeatures->setBacklightPower(true);
         return true;
     } else {
         TT_LOG_I(TAG, "Failed");
@@ -56,18 +52,21 @@ bool UnPhoneDisplay::start() {
 }
 
 bool UnPhoneDisplay::stop() {
-    tt_assert(displayHandle != nullptr);
+    assert(displayHandle != nullptr);
 
     lv_display_delete(displayHandle);
     displayHandle = nullptr;
 
+    heap_caps_free(buffer);
+    buffer = nullptr;
+
     return true;
 }
 
-tt::hal::Touch* _Nullable UnPhoneDisplay::createTouch() {
-    return static_cast<tt::hal::Touch*>(new UnPhoneTouch());
+std::shared_ptr<tt::hal::touch::TouchDevice> _Nullable UnPhoneDisplay::createTouch() {
+    return std::make_shared<UnPhoneTouch>();
 }
 
-tt::hal::Display* createDisplay() {
-    return static_cast<tt::hal::Display*>(new UnPhoneDisplay());
+std::shared_ptr<tt::hal::display::DisplayDevice> createDisplay() {
+    return std::make_shared<UnPhoneDisplay>();
 }

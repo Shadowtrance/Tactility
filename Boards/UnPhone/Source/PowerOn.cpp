@@ -1,41 +1,139 @@
-#include "TactilityCore.h"
 #include "UnPhoneFeatures.h"
+#include <Tactility/Preferences.h>
+#include <Tactility/TactilityCore.h>
 #include <esp_sleep.h>
 
 #define TAG "unphone"
 
-extern UnPhoneFeatures unPhoneFeatures;
-
+std::shared_ptr<UnPhoneFeatures> unPhoneFeatures;
 static std::unique_ptr<tt::Thread> powerThread;
 
-static void updatePowerSwitch() {
-    static bool last_on_state = true;
+static const char* bootCountKey = "boot_count";
+static const char* powerOffCountKey = "power_off_count";
+static const char* powerSleepKey = "power_sleep_key";
 
-    if (!unPhoneFeatures.isPowerSwitchOn()) {
-        if (last_on_state) {
+class DeviceStats {
+
+private:
+
+    tt::Preferences preferences = tt::Preferences("unphone");
+
+    int32_t getValue(const char* key) {
+        int32_t value = 0;
+        preferences.optInt32(key, value);
+        return value;
+    }
+
+    void setValue(const char* key, int32_t value) {
+        preferences.putInt32(key, value);
+    }
+
+    void increaseValue(const char* key) {
+        int32_t new_value = getValue(key) + 1;
+        setValue(key, new_value);
+    }
+
+public:
+
+    void notifyBootStart() {
+        increaseValue(bootCountKey);
+    }
+
+    void notifyPowerOff() {
+        increaseValue(powerOffCountKey);
+    }
+
+    void notifyPowerSleep() {
+        increaseValue(powerSleepKey);
+    }
+
+    void printInfo() {
+        TT_LOG_I("TAG", "Device stats:");
+        TT_LOG_I("TAG", "  boot: %ld", getValue(bootCountKey));
+        TT_LOG_I("TAG", "  power off: %ld", getValue(powerOffCountKey));
+        TT_LOG_I("TAG", "  power sleep: %ld", getValue(powerSleepKey));
+    }
+};
+
+DeviceStats bootStats;
+
+enum class PowerState {
+    Initial,
+    On,
+    Off
+};
+
+#define DEBUG_POWER_STATES false
+
+#if DEBUG_POWER_STATES
+/** Helper method to use the buzzer to signal the different power stages */
+static void powerInfoBuzz(uint8_t count) {
+    if (DEBUG_POWER_STATES) {
+        uint8_t index = 0;
+        while (index < count) {
+            unPhoneFeatures.setVibePower(true);
+            tt::kernel::delayMillis(50);
+            unPhoneFeatures.setVibePower(false);
+
+            index++;
+
+            if (index < count) {
+                tt::kernel::delayMillis(100);
+            }
+        }
+    }
+}
+#endif
+
+static void updatePowerSwitch() {
+    static PowerState last_state = PowerState::Initial;
+
+    if (!unPhoneFeatures->isPowerSwitchOn()) {
+        if (last_state != PowerState::Off) {
+            last_state = PowerState::Off;
             TT_LOG_W(TAG, "Power off");
         }
 
-        unPhoneFeatures.turnPeripheralsOff();
+        if (!unPhoneFeatures->isUsbPowerConnected()) { // and usb unplugged we go into shipping mode
+            TT_LOG_W(TAG, "Shipping mode until USB connects");
 
-        if (!unPhoneFeatures.isUsbPowerConnected()) { // and usb unplugged we go into shipping mode
-            if (last_on_state) {
-                TT_LOG_W(TAG, "Shipping mode until USB connects");
-                unPhoneFeatures.setShipping(true); // tell BM to stop supplying power until USB connects
-            }
-        } else { // power switch off and usb plugged in we sleep
-            unPhoneFeatures.wakeOnPowerSwitch();
-            esp_sleep_enable_timer_wakeup(60000000); // ea min: USB? else->shipping
-            esp_deep_sleep_start(); // deep sleep, wait for wakeup on GPIO
+#if DEBUG_POWER_STATES
+            unPhoneFeatures.setExpanderPower(true);
+            powerInfoBuzz(3);
+            unPhoneFeatures.setExpanderPower(false);
+#endif
+
+            unPhoneFeatures->turnPeripheralsOff();
+
+            bootStats.notifyPowerOff();
+
+            unPhoneFeatures->setShipping(true); // tell BM to stop supplying power until USB connects
+        } else { // When power switch is off, but USB is plugged in, we wait (deep sleep) until USB is unplugged.
+            TT_LOG_W(TAG, "Waiting for USB disconnect to power off");
+
+#if DEBUG_POWER_STATES
+            powerInfoBuzz(2);
+#endif
+
+            unPhoneFeatures->turnPeripheralsOff();
+
+            bootStats.notifyPowerSleep();
+
+            // Deep sleep for 1 minute, then awaken to check power state again
+            // GPIO trigger from power switch also awakens the device
+            unPhoneFeatures->wakeOnPowerSwitch();
+            esp_sleep_enable_timer_wakeup(60000000);
+            esp_deep_sleep_start();
         }
-
-        last_on_state = false;
     } else {
-        if (!last_on_state) {
+        if (last_state != PowerState::On) {
+            last_state = PowerState::On;
             TT_LOG_W(TAG, "Power on");
-            unPhoneFeatures.setShipping(false);
+
+#if DEBUG_POWER_STATES
+            powerInfoBuzz(1);
+#endif
         }
-        last_on_state = true;
     }
 }
 
@@ -56,29 +154,34 @@ static void startPowerSwitchThread() {
     powerThread->start();
 }
 
+std::shared_ptr<Bq24295> bq24295;
+
 static bool unPhonePowerOn() {
-    if (!unPhoneFeatures.init()) {
+    // Print early, in case of early crash (info will be from previous boot)
+    bootStats.printInfo();
+    bootStats.notifyBootStart();
+
+    bq24295 = std::make_shared<Bq24295>(I2C_NUM_0);
+    tt::hal::registerDevice(bq24295);
+
+    unPhoneFeatures = std::make_shared<UnPhoneFeatures>(bq24295);
+
+    if (!unPhoneFeatures->init()) {
         TT_LOG_E(TAG, "UnPhoneFeatures init failed");
         return false;
     }
 
-    unPhoneFeatures.printInfo();
+    unPhoneFeatures->printInfo();
 
-    // Vibrate once
-    // Note: Do this before power switching logic, to detect silent boot loops
-    unPhoneFeatures.setVibePower(true);
-    tt::kernel::delayMillis(150);
-    unPhoneFeatures.setVibePower(false);
+    unPhoneFeatures->setBacklightPower(false);
+    unPhoneFeatures->setVibePower(false);
+    unPhoneFeatures->setIrPower(false);
+    unPhoneFeatures->setExpanderPower(false);
 
     // Turn off the device if power switch is on off state,
     // instead of waiting for the Thread to start and continue booting
     updatePowerSwitch();
     startPowerSwitchThread();
-
-    unPhoneFeatures.setBacklightPower(false);
-    unPhoneFeatures.setVibePower(false);
-    unPhoneFeatures.setIrPower(false);
-    unPhoneFeatures.setExpanderPower(false);
 
     return true;
 }

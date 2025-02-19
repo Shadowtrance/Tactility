@@ -1,40 +1,34 @@
-#include <Dispatcher.h>
-#include "TactilityHeadless.h"
-#include "hal/Configuration.h"
-#include "hal/Hal_i.h"
-#include "service/ServiceManifest.h"
-#include "service/ServiceRegistry.h"
-#include "kernel/SystemEvents.h"
-#include "network/NtpPrivate.h"
-#include "time/TimePrivate.h"
+#include "Tactility/TactilityHeadless.h"
+#include "Tactility/hal/Configuration.h"
+#include "Tactility/hal/Hal_i.h"
+#include "Tactility/network/NtpPrivate.h"
+#include "Tactility/service/ServiceManifest.h"
+#include "Tactility/service/ServiceRegistry.h"
+
+#include <Tactility/Dispatcher.h>
+#include <Tactility/time/TimePrivate.h>
 
 #ifdef ESP_PLATFORM
-#include "EspInit.h"
+#include "Tactility/InitEsp.h"
 #endif
 
 namespace tt {
 
 #define TAG "tactility"
 
+namespace service::gps { extern const ServiceManifest manifest; }
 namespace service::wifi { extern const ServiceManifest manifest; }
 namespace service::sdcard { extern const ServiceManifest manifest; }
 
 static Dispatcher mainDispatcher;
 
-static const service::ServiceManifest* const system_services[] = {
-    &service::sdcard::manifest,
-    &service::wifi::manifest
-};
-
 static const hal::Configuration* hardwareConfig = nullptr;
 
-static void register_and_start_system_services() {
+static void registerAndStartSystemServices() {
     TT_LOG_I(TAG, "Registering and starting system services");
-    int app_count = sizeof(system_services) / sizeof(service::ServiceManifest*);
-    for (int i = 0; i < app_count; ++i) {
-        addService(system_services[i]);
-        tt_check(service::startService(system_services[i]->id));
-    }
+    addService(service::gps::manifest);
+    addService(service::sdcard::manifest);
+    addService(service::wifi::manifest);
 }
 
 void initHeadless(const hal::Configuration& config) {
@@ -46,7 +40,7 @@ void initHeadless(const hal::Configuration& config) {
     time::init();
     hal::init(config);
     network::ntp::init();
-    register_and_start_system_services();
+    registerAndStartSystemServices();
 }
 
 

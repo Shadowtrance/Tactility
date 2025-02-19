@@ -1,11 +1,11 @@
 #include "LvglTask.h"
 
-#include "lvgl.h"
-#include "Log.h"
-#include "Thread.h"
-#include "lvgl/LvglSync.h"
+#include <Tactility/Log.h>
+#include <Tactility/lvgl/LvglSync.h>
+#include <Tactility/Mutex.h>
+#include <Tactility/Thread.h>
 
-#include "Mutex.h"
+#include <lvgl.h>
 
 #define TAG "lvgl_task"
 
@@ -17,14 +17,16 @@ static uint32_t task_max_sleep_ms = 10;
 // Mutex for LVGL task state (to modify task_running state)
 static bool task_running = false;
 
+lv_disp_t* displayHandle = nullptr;
+
 static void lvgl_task(void* arg);
 
-static bool task_lock(int timeout_ticks) {
-    return task_mutex.acquire(timeout_ticks) == tt::TtStatusOk;
+static bool task_lock(TickType_t timeout) {
+    return task_mutex.lock(timeout);
 }
 
 static void task_unlock() {
-    task_mutex.release();
+    task_mutex.unlock();
 }
 
 static void task_set_running(bool running) {
@@ -41,15 +43,15 @@ bool lvgl_task_is_running() {
 }
 
 static bool lvgl_lock(uint32_t timeoutMillis) {
-    return lvgl_mutex.acquire(pdMS_TO_TICKS(timeoutMillis)) == tt::TtStatusOk;
+    return lvgl_mutex.lock(pdMS_TO_TICKS(timeoutMillis));
 }
 
 static void lvgl_unlock() {
-    lvgl_mutex.release();
+    lvgl_mutex.unlock();
 }
 
 void lvgl_task_interrupt() {
-    tt_check(task_lock(tt::TtWaitForever));
+    tt_check(task_lock(portMAX_DELAY));
     task_set_running(false); // interrupt task with boolean as flag
     task_unlock();
 }
@@ -69,10 +71,8 @@ void lvgl_task_start() {
         nullptr
     );
 
-    tt_assert(task_result == pdTRUE);
+    assert(task_result == pdTRUE);
 }
-
-lv_disp_t* displayHandle = nullptr;
 
 static void lvgl_task(TT_UNUSED void* arg) {
     TT_LOG_I(TAG, "lvgl task started");

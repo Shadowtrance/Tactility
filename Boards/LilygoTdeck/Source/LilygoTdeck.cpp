@@ -1,26 +1,29 @@
-#include "hal/Configuration.h"
+#include "Tactility/lvgl/LvglSync.h"
 #include "hal/TdeckDisplay.h"
+#include "hal/TdeckDisplayConstants.h"
 #include "hal/TdeckKeyboard.h"
 #include "hal/TdeckPower.h"
 #include "hal/TdeckSdCard.h"
 
-bool tdeck_init_power();
-bool tdeck_init_hardware();
-bool tdeck_init_lvgl();
+#include <Tactility/hal/Configuration.h>
 
-extern const tt::hal::Configuration lilygo_tdeck = {
-    .initBoot = tdeck_init_power,
-    .initHardware = tdeck_init_hardware,
-    .initLvgl = tdeck_init_lvgl,
+#define TDECK_SPI_TRANSFER_SIZE_LIMIT (TDECK_LCD_HORIZONTAL_RESOLUTION * TDECK_LCD_SPI_TRANSFER_HEIGHT * (TDECK_LCD_BITS_PER_PIXEL / 8))
+
+bool tdeckInit();
+
+using namespace tt::hal;
+
+extern const Configuration lilygo_tdeck = {
+    .initBoot = tdeckInit,
     .createDisplay = createDisplay,
     .createKeyboard = createKeyboard,
     .sdcard = createTdeckSdCard(),
     .power = tdeck_get_power,
     .i2c = {
-        tt::hal::i2c::Configuration {
+        i2c::Configuration {
             .name = "Internal",
             .port = I2C_NUM_0,
-            .initMode = tt::hal::i2c::InitMode::ByTactility,
+            .initMode = i2c::InitMode::ByTactility,
             .canReinit = false,
             .hasMutableConfiguration = false,
             .config = (i2c_config_t) {
@@ -35,10 +38,10 @@ extern const tt::hal::Configuration lilygo_tdeck = {
                 .clk_flags = 0
             }
         },
-        tt::hal::i2c::Configuration {
+        i2c::Configuration {
             .name = "External",
             .port = I2C_NUM_1,
-            .initMode = tt::hal::i2c::InitMode::ByTactility,
+            .initMode = i2c::InitMode::Disabled,
             .canReinit = true,
             .hasMutableConfiguration = true,
             .config = (i2c_config_t) {
@@ -52,6 +55,67 @@ extern const tt::hal::Configuration lilygo_tdeck = {
                 },
                 .clk_flags = 0
             }
+        }
+    },
+    .spi {
+        spi::Configuration {
+            .device = SPI2_HOST,
+            .dma = SPI_DMA_CH_AUTO,
+            .config = {
+                .mosi_io_num = GPIO_NUM_41,
+                .miso_io_num = GPIO_NUM_38,
+                .sclk_io_num = GPIO_NUM_40,
+                .quadwp_io_num = -1, // Quad SPI LCD driver is not yet supported
+                .quadhd_io_num = -1, // Quad SPI LCD driver is not yet supported
+                .data4_io_num = 0,
+                .data5_io_num = 0,
+                .data6_io_num = 0,
+                .data7_io_num = 0,
+                .data_io_default_level = false,
+                .max_transfer_sz = TDECK_SPI_TRANSFER_SIZE_LIMIT,
+                .flags = 0,
+                .isr_cpu_id = ESP_INTR_CPU_AFFINITY_AUTO,
+                .intr_flags = 0
+            },
+            .initMode = spi::InitMode::ByTactility,
+            .canReinit = false,
+            .hasMutableConfiguration = false,
+            .lock = tt::lvgl::getSyncLock() // esp_lvgl_port owns the lock for the display
+        }
+    },
+    .uart {
+        uart::Configuration {
+            .port = UART_NUM_1,
+            .initMode = uart::InitMode::Disabled, // Let GPS driver control this interface
+            .canReinit = true,
+            .hasMutableConfiguration = false,
+            .rxPin = GPIO_NUM_44,
+            .txPin = GPIO_NUM_43,
+            .rtsPin = GPIO_NUM_NC,
+            .ctsPin = GPIO_NUM_NC,
+            .rxBufferSize = 1024,
+            .txBufferSize = 1024,
+            .config = {
+                .baud_rate = 38400,
+                .data_bits = UART_DATA_8_BITS,
+                .parity    = UART_PARITY_DISABLE,
+                .stop_bits = UART_STOP_BITS_1,
+                .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+                .rx_flow_ctrl_thresh = 0,
+                .source_clk = UART_SCLK_DEFAULT,
+                .flags = {
+                    .allow_pd = 0,
+                    .backup_before_sleep = 0,
+                }
+            }
+        }
+    },
+    .gps = {
+        gps::GpsDevice::Configuration {
+            .name = "Internal",
+            .uartPort = UART_NUM_1,
+            .baudRate = 38400,
+            .model = gps::GpsModel::UBLOX10
         }
     }
 };

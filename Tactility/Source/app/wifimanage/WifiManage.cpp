@@ -1,30 +1,18 @@
-#include "app/wifimanage/WifiManagePrivate.h"
-#include "app/wifimanage/View.h"
-#include "app/wifimanage/State.h"
+#include "Tactility/app/wifimanage/WifiManagePrivate.h"
+#include "Tactility/app/wifimanage/View.h"
 
-#include "app/AppContext.h"
-#include "app/wifiapsettings/WifiApSettings.h"
-#include "TactilityCore.h"
-#include "service/loader/Loader.h"
-#include "service/wifi/WifiSettings.h"
-#include "lvgl/LvglSync.h"
-#include "app/wificonnect/WifiConnect.h"
+#include "Tactility/app/AppContext.h"
+#include "Tactility/app/wifiapsettings/WifiApSettings.h"
+#include "Tactility/service/loader/Loader.h"
+#include "Tactility/service/wifi/WifiSettings.h"
+#include "Tactility/lvgl/LvglSync.h"
+#include "Tactility/app/wificonnect/WifiConnect.h"
 
 namespace tt::app::wifimanage {
 
 #define TAG "wifi_manage"
 
 extern const AppManifest manifest;
-
-/** Returns the app data if the app is active. Note that this could clash if the same app is started twice and a background thread is slow. */
-std::shared_ptr<WifiManage> _Nullable optWifiManage() {
-    auto appContext = service::loader::getCurrentAppContext();
-    if (appContext != nullptr && appContext->getManifest().id == manifest.id) {
-        return std::static_pointer_cast<WifiManage>(appContext->getApp());
-    } else {
-        return nullptr;
-    }
-}
 
 static void onConnect(const char* ssid) {
     service::wifi::settings::WifiApSettings settings;
@@ -64,11 +52,11 @@ WifiManage::WifiManage() {
 }
 
 void WifiManage::lock() {
-    tt_check(mutex.acquire(TtWaitForever) == TtStatusOk);
+    mutex.lock();
 }
 
 void WifiManage::unlock() {
-    tt_check(mutex.release() == TtStatusOk);
+    mutex.unlock();
 }
 
 void WifiManage::requestViewUpdate() {
@@ -91,14 +79,15 @@ static void wifiManageEventCallback(const void* message, void* context) {
     TT_LOG_I(TAG, "Update with state %s", service::wifi::radioStateToString(radio_state));
     wifi->getState().setRadioState(radio_state);
     switch (event->type) {
-        case tt::service::wifi::EventType::ScanStarted:
+        using enum tt::service::wifi::EventType;
+        case ScanStarted:
             wifi->getState().setScanning(true);
             break;
-        case tt::service::wifi::EventType::ScanFinished:
+        case ScanFinished:
             wifi->getState().setScanning(false);
             wifi->getState().updateApRecords();
             break;
-        case tt::service::wifi::EventType::RadioStateOn:
+        case RadioStateOn:
             if (!service::wifi::isScanning()) {
                 service::wifi::scan();
             }
@@ -111,8 +100,7 @@ static void wifiManageEventCallback(const void* message, void* context) {
 }
 
 void WifiManage::onShow(AppContext& app, lv_obj_t* parent) {
-    auto wifi_pubsub = service::wifi::getPubsub();
-    wifiSubscription = tt_pubsub_subscribe(wifi_pubsub, &wifiManageEventCallback, this);
+    wifiSubscription = service::wifi::getPubsub()->subscribe(&wifiManageEventCallback, this);
 
     // State update (it has its own locking)
     state.setRadioState(service::wifi::getRadioState());
@@ -139,8 +127,7 @@ void WifiManage::onShow(AppContext& app, lv_obj_t* parent) {
 
 void WifiManage::onHide(TT_UNUSED AppContext& app) {
     lock();
-    auto wifi_pubsub = service::wifi::getPubsub();
-    tt_pubsub_unsubscribe(wifi_pubsub, wifiSubscription);
+    service::wifi::getPubsub()->unsubscribe(wifiSubscription);
     wifiSubscription = nullptr;
     isViewEnabled = false;
     unlock();

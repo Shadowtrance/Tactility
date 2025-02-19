@@ -1,20 +1,22 @@
-#include "app/files/FileUtils.h"
-#include "app/files/View.h"
+#include "Tactility/app/files/FileUtils.h"
+#include "Tactility/app/files/View.h"
 
-#include "app/alertdialog/AlertDialog.h"
-#include "app/imageviewer/ImageViewer.h"
-#include "app/inputdialog/InputDialog.h"
-#include "app/textviewer/TextViewer.h"
-#include "app/ElfApp.h"
-#include "lvgl/Toolbar.h"
-#include "lvgl/LvglSync.h"
-#include "Tactility.h"
-#include "StringUtils.h"
+#include "Tactility/app/alertdialog/AlertDialog.h"
+#include "Tactility/app/imageviewer/ImageViewer.h"
+#include "Tactility/app/inputdialog/InputDialog.h"
+#include "Tactility/app/textviewer/TextViewer.h"
+#include "Tactility/app/ElfApp.h"
+#include "Tactility/lvgl/Toolbar.h"
+#include "Tactility/lvgl/LvglSync.h"
+
+#include <Tactility/Tactility.h>
+#include <Tactility/StringUtils.h>
+
 #include <cstring>
 #include <unistd.h>
 
 #ifdef ESP_PLATFORM
-#include "service/loader/Loader.h"
+#include "Tactility/service/loader/Loader.h"
 #endif
 
 #define TAG "files_app"
@@ -226,15 +228,16 @@ void View::showActionsForFile() {
 }
 
 void View::update() {
-    auto scoped_lockable = lvgl::getLvglSyncLockable()->scoped();
+    auto scoped_lockable = lvgl::getSyncLock()->scoped();
     if (scoped_lockable->lock(100 / portTICK_PERIOD_MS)) {
         lv_obj_clean(dir_entry_list);
-        auto entries = state->lockEntries();
-        for (auto entry : entries) {
-            TT_LOG_D(TAG, "Entry: %s %d", entry.d_name, entry.d_type);
-            createDirEntryWidget(dir_entry_list, entry);
-        }
-        state->unlockEntries();
+
+        state->withEntries([this](const std::vector<dirent>& entries) {
+            for (auto entry : entries) {
+                TT_LOG_D(TAG, "Entry: %s %d", entry.d_name, entry.d_type);
+                createDirEntryWidget(dir_entry_list, entry);
+            }
+        });
 
         if (state->getCurrentPath() == "/") {
             lv_obj_add_flag(navigate_up_button, LV_OBJ_FLAG_HIDDEN);
@@ -249,10 +252,10 @@ void View::update() {
 void View::init(lv_obj_t* parent) {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
 
-    lv_obj_t* toolbar = lvgl::toolbar_create(parent, "Files");
+    auto* toolbar = lvgl::toolbar_create(parent, "Files");
     navigate_up_button = lvgl::toolbar_add_button_action(toolbar, LV_SYMBOL_UP, &onNavigateUpPressedCallback, this);
 
-    lv_obj_t* wrapper = lv_obj_create(parent);
+    auto* wrapper = lv_obj_create(parent);
     lv_obj_set_width(wrapper, LV_PCT(100));
     lv_obj_set_style_border_width(wrapper, 0, 0);
     lv_obj_set_style_pad_all(wrapper, 0, 0);
@@ -274,14 +277,14 @@ void View::init(lv_obj_t* parent) {
 }
 
 void View::onDirEntryListScrollBegin() {
-    auto scoped_lockable = lvgl::getLvglSyncLockable()->scoped();
+    auto scoped_lockable = lvgl::getSyncLock()->scoped();
     if (scoped_lockable->lock(100 / portTICK_PERIOD_MS)) {
         lv_obj_add_flag(action_list, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
 void View::onNavigate() {
-    auto scoped_lockable = lvgl::getLvglSyncLockable()->scoped();
+    auto scoped_lockable = lvgl::getSyncLock()->scoped();
     if (scoped_lockable->lock(100 / portTICK_PERIOD_MS)) {
         lv_obj_add_flag(action_list, LV_OBJ_FLAG_HIDDEN);
     }

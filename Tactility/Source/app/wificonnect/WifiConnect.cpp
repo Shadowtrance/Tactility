@@ -1,10 +1,9 @@
-#include "app/wificonnect/WifiConnectPrivate.h"
+#include "Tactility/app/wificonnect/WifiConnect.h"
 
-#include "app/AppContext.h"
-#include "TactilityCore.h"
-#include "service/loader/Loader.h"
-#include "service/wifi/Wifi.h"
-#include "lvgl/LvglSync.h"
+#include "Tactility/app/AppContext.h"
+#include "Tactility/service/loader/Loader.h"
+#include "Tactility/service/wifi/Wifi.h"
+#include "Tactility/lvgl/LvglSync.h"
 
 namespace tt::app::wificonnect {
 
@@ -13,16 +12,6 @@ namespace tt::app::wificonnect {
 #define WIFI_CONNECT_PARAM_PASSWORD "password" // String
 
 extern const AppManifest manifest;
-
-/** Returns the app data if the app is active. Note that this could clash if the same app is started twice and a background thread is slow. */
-std::shared_ptr<WifiConnect> _Nullable optWifiConnect() {
-    auto appContext = service::loader::getCurrentAppContext();
-    if (appContext != nullptr && appContext->getManifest().id == manifest.id) {
-        return std::static_pointer_cast<WifiConnect>(appContext->getApp());
-    } else {
-        return nullptr;
-    }
-}
 
 static void eventCallback(const void* message, void* context) {
     auto* event = static_cast<const service::wifi::Event*>(message);
@@ -56,8 +45,7 @@ static void onConnect(const service::wifi::settings::WifiApSettings* ap_settings
 }
 
 WifiConnect::WifiConnect() {
-    auto wifi_pubsub = service::wifi::getPubsub();
-    wifiSubscription = tt_pubsub_subscribe(wifi_pubsub, &eventCallback, this);
+    wifiSubscription = service::wifi::getPubsub()->subscribe(&eventCallback, this);
     bindings = (Bindings) {
         .onConnectSsid = onConnect,
         .onConnectSsidContext = this,
@@ -65,16 +53,15 @@ WifiConnect::WifiConnect() {
 }
 
 WifiConnect::~WifiConnect() {
-    auto pubsub = service::wifi::getPubsub();
-    tt_pubsub_unsubscribe(pubsub, wifiSubscription);
+    service::wifi::getPubsub()->unsubscribe(wifiSubscription);
 }
 
 void WifiConnect::lock() {
-    tt_check(mutex.acquire(TtWaitForever) == TtStatusOk);
+    mutex.lock();
 }
 
 void WifiConnect::unlock() {
-    tt_check(mutex.release() == TtStatusOk);
+    mutex.unlock();
 }
 
 void WifiConnect::requestViewUpdate() {

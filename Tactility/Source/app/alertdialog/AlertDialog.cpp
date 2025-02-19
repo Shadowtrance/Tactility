@@ -1,9 +1,12 @@
-#include "AlertDialog.h"
-#include "lvgl.h"
-#include "lvgl/Toolbar.h"
-#include "service/loader/Loader.h"
-#include <StringUtils.h>
-#include <TactilityCore.h>
+#include "Tactility/app/alertdialog/AlertDialog.h"
+
+#include "Tactility/lvgl/Toolbar.h"
+#include "Tactility/service/loader/Loader.h"
+
+#include <Tactility/StringUtils.h>
+#include <Tactility/TactilityCore.h>
+
+#include <lvgl.h>
 
 namespace tt::app::alertdialog {
 
@@ -49,9 +52,8 @@ class AlertDialogApp : public App {
 private:
 
     static void onButtonClickedCallback(lv_event_t* e) {
-        auto appContext = service::loader::getCurrentAppContext();
-        tt_assert(appContext != nullptr);
-        auto app = std::static_pointer_cast<AlertDialogApp>(appContext->getApp());
+        auto app = std::static_pointer_cast<AlertDialogApp>(getCurrentApp());
+        assert(app != nullptr);
         app->onButtonClicked(e);
     }
 

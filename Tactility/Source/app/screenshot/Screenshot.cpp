@@ -1,17 +1,19 @@
-#include "TactilityConfig.h"
-#include <Timer.h>
-#include <kernel/Kernel.h>
+#include "Tactility/TactilityConfig.h"
+
+#include <Tactility/Timer.h>
+#include <Tactility/kernel/Kernel.h>
 
 #if TT_FEATURE_SCREENSHOT_ENABLED
 
-#include "TactilityHeadless.h"
-#include "app/App.h"
-#include "app/AppManifest.h"
-#include "lvgl/LvglSync.h"
-#include "lvgl/Toolbar.h"
-#include "service/gui/Gui.h"
-#include "service/loader/Loader.h"
-#include "service/screenshot/Screenshot.h"
+#include "Tactility/app/App.h"
+#include "Tactility/app/AppManifest.h"
+#include "Tactility/lvgl/LvglSync.h"
+#include "Tactility/lvgl/Toolbar.h"
+#include "Tactility/service/gui/Gui.h"
+#include "Tactility/service/loader/Loader.h"
+#include "Tactility/service/screenshot/Screenshot.h"
+
+#include <Tactility/TactilityHeadless.h>
 
 #define TAG "screenshot"
 
@@ -19,7 +21,7 @@ namespace tt::app::screenshot {
 
 extern const AppManifest manifest;
 
-class ScreenshotApp : public App {
+class ScreenshotApp final : public App {
 
     lv_obj_t* modeDropdown = nullptr;
     lv_obj_t* pathTextArea = nullptr;
@@ -37,7 +39,7 @@ class ScreenshotApp : public App {
 public:
 
     ScreenshotApp();
-    ~ScreenshotApp();
+    ~ScreenshotApp() final;
 
     void onShow(AppContext& app, lv_obj_t* parent) override;
     void onStartPressed();
@@ -48,7 +50,7 @@ public:
 
 /** Returns the app data if the app is active. Note that this could clash if the same app is started twice and a background thread is slow. */
 std::shared_ptr<ScreenshotApp> _Nullable optApp() {
-    auto appContext = service::loader::getCurrentAppContext();
+    auto appContext = getCurrentAppContext();
     if (appContext != nullptr && appContext->getManifest().id == manifest.id) {
         return std::static_pointer_cast<ScreenshotApp>(appContext->getApp());
     } else {
@@ -88,7 +90,7 @@ ScreenshotApp::~ScreenshotApp() {
 }
 
 void ScreenshotApp::onTimerTick() {
-    auto lvgl_lock = lvgl::getLvglSyncLockable()->scoped();
+    auto lvgl_lock = lvgl::getSyncLock()->scoped();
     if (lvgl_lock->lock(50 / portTICK_PERIOD_MS)) {
         updateScreenshotMode();
     }
@@ -203,9 +205,13 @@ void ScreenshotApp::createFilePathWidgets(lv_obj_t* parent) {
     lv_textarea_set_one_line(pathTextArea, true);
     lv_obj_set_flex_grow(pathTextArea, 1);
     if (kernel::getPlatform() == kernel::PlatformEsp) {
-        auto sdcard = tt::hal::getConfiguration()->sdcard;
-        if (sdcard != nullptr && sdcard->getState() == hal::SdCard::State::Mounted) {
-            lv_textarea_set_text(pathTextArea, "A:/sdcard");
+        auto sdcard_devices = tt::hal::findDevices<tt::hal::sdcard::SdCardDevice>(tt::hal::Device::Type::SdCard);
+        if (sdcard_devices.size() > 1) {
+            TT_LOG_W(TAG, "Found multiple SD card devices - picking first");
+        }
+        if (!sdcard_devices.empty() && sdcard_devices.front()->isMounted()) {
+            std::string lvgl_mount_path = "A:" + sdcard_devices.front()->getMountPath();
+            lv_textarea_set_text(pathTextArea, lvgl_mount_path.c_str());
         } else {
             lv_textarea_set_text(pathTextArea, "Error: no SD card");
         }

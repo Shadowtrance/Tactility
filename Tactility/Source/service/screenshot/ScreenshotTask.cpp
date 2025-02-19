@@ -1,15 +1,16 @@
-#include "TactilityConfig.h"
+#include "Tactility/TactilityConfig.h"
 
 #if TT_FEATURE_SCREENSHOT_ENABLED
 
-#include <cstring>
-#include "ScreenshotTask.h"
-#include "lv_screenshot.h"
+#include "Tactility/service/screenshot/ScreenshotTask.h"
 
-#include "app/AppContext.h"
-#include "TactilityCore.h"
-#include "service/loader/Loader.h"
-#include "lvgl/LvglSync.h"
+#include "Tactility/service/loader/Loader.h"
+#include "Tactility/lvgl/LvglSync.h"
+
+#include <lv_screenshot.h>
+#include <Tactility/TactilityCore.h>
+
+#include <format>
 
 namespace tt::service::screenshot {
 
@@ -22,8 +23,8 @@ ScreenshotTask::~ScreenshotTask() {
 }
 
 bool ScreenshotTask::isInterrupted() {
-    auto scoped_lockable = mutex.scoped();
-    if (!scoped_lockable->lock(50 / portTICK_PERIOD_MS)) {
+    auto lock = mutex.asScopedLock();
+    if (!lock.lock(50 / portTICK_PERIOD_MS)) {
         TT_LOG_W(TAG, LOG_MESSAGE_MUTEX_LOCK_FAILED);
         return true;
     }
@@ -31,8 +32,8 @@ bool ScreenshotTask::isInterrupted() {
 }
 
 bool ScreenshotTask::isFinished() {
-    auto scoped_lockable = mutex.scoped();
-    if (!scoped_lockable->lock(50 / portTICK_PERIOD_MS)) {
+    auto lock = mutex.asScopedLock();
+    if (!lock.lock(50 / portTICK_PERIOD_MS)) {
         TT_LOG_W(TAG, LOG_MESSAGE_MUTEX_LOCK_FAILED);
         return false;
     }
@@ -40,17 +41,17 @@ bool ScreenshotTask::isFinished() {
 }
 
 void ScreenshotTask::setFinished() {
-    auto scoped_lockable = mutex.scoped();
-    scoped_lockable->lock(TtWaitForever);
+    auto lock = mutex.asScopedLock();
+    lock.lock();
     finished = true;
 }
 
-static void makeScreenshot(const char* filename) {
+static void makeScreenshot(const std::string& filename) {
     if (lvgl::lock(50 / portTICK_PERIOD_MS)) {
-        if (lv_screenshot_create(lv_scr_act(), LV_100ASK_SCREENSHOT_SV_PNG, filename)) {
-            TT_LOG_I(TAG, "Screenshot saved to %s", filename);
+        if (lv_screenshot_create(lv_scr_act(), LV_100ASK_SCREENSHOT_SV_PNG, filename.c_str())) {
+            TT_LOG_I(TAG, "Screenshot saved to %s", filename.c_str());
         } else {
-            TT_LOG_E(TAG, "Screenshot not saved to %s", filename);
+            TT_LOG_E(TAG, "Screenshot not saved to %s", filename.c_str());
         }
         lvgl::unlock();
     } else {
@@ -78,8 +79,7 @@ void ScreenshotTask::taskMain() {
 
             if (!isInterrupted()) {
                 screenshots_taken++;
-                char filename[SCREENSHOT_PATH_LIMIT + 32];
-                sprintf(filename, "%s/screenshot-%d.png", work.path, screenshots_taken);
+                std::string filename = std::format("{}/screenshot-{}.png", work.path, screenshots_taken);
                 makeScreenshot(filename);
 
                 if (work.amount > 0 && screenshots_taken >= work.amount) {
@@ -87,14 +87,13 @@ void ScreenshotTask::taskMain() {
                 }
             }
         } else if (work.type == TASK_WORK_TYPE_APPS) {
-            auto appContext = loader::getCurrentAppContext();
+            auto appContext = app::getCurrentAppContext();
             if (appContext != nullptr) {
                 const app::AppManifest& manifest = appContext->getManifest();
                 if (manifest.id != last_app_id) {
                     kernel::delayMillis(100);
                     last_app_id = manifest.id;
-                    char filename[SCREENSHOT_PATH_LIMIT + 32];
-                    sprintf(filename, "%s/screenshot-%s.png", work.path, manifest.id.c_str());
+                    auto filename = std::format("{}/screenshot-{}.png", work.path, manifest.id);
                     makeScreenshot(filename);
                 }
             }
@@ -107,8 +106,8 @@ void ScreenshotTask::taskMain() {
 }
 
 void ScreenshotTask::taskStart() {
-    auto scoped_lockable = mutex.scoped();
-    if (!scoped_lockable->lock(50 / portTICK_PERIOD_MS)) {
+    auto lock = mutex.asScopedLock();
+    if (!lock.lock(50 / portTICK_PERIOD_MS)) {
         TT_LOG_E(TAG, LOG_MESSAGE_MUTEX_LOCK_FAILED);
         return;
     }
@@ -123,11 +122,9 @@ void ScreenshotTask::taskStart() {
     thread->start();
 }
 
-void ScreenshotTask::startApps(const char* path) {
-    tt_check(strlen(path) < (SCREENSHOT_PATH_LIMIT - 1));
-
-    auto scoped_lockable = mutex.scoped();
-    if (!scoped_lockable->lock(50 / portTICK_PERIOD_MS)) {
+void ScreenshotTask::startApps(const std::string& path) {
+    auto lock = mutex.asScopedLock();
+    if (!lock.lock(50 / portTICK_PERIOD_MS)) {
         TT_LOG_E(TAG, LOG_MESSAGE_MUTEX_LOCK_FAILED);
         return;
     }
@@ -135,17 +132,16 @@ void ScreenshotTask::startApps(const char* path) {
     if (thread == nullptr) {
         interrupted = false;
         work.type = TASK_WORK_TYPE_APPS;
-        strcpy(work.path, path);
+        work.path = path;
         taskStart();
     } else {
         TT_LOG_E(TAG, "Task was already running");
     }
 }
 
-void ScreenshotTask::startTimed(const char* path, uint8_t delay_in_seconds, uint8_t amount) {
-    tt_check(strlen(path) < (SCREENSHOT_PATH_LIMIT - 1));
-    auto scoped_lockable = mutex.scoped();
-    if (!scoped_lockable->lock(50 / portTICK_PERIOD_MS)) {
+void ScreenshotTask::startTimed(const std::string& path, uint8_t delay_in_seconds, uint8_t amount) {
+    auto lock = mutex.asScopedLock();
+    if (!lock.lock(50 / portTICK_PERIOD_MS)) {
         TT_LOG_E(TAG, LOG_MESSAGE_MUTEX_LOCK_FAILED);
         return;
     }
@@ -155,7 +151,7 @@ void ScreenshotTask::startTimed(const char* path, uint8_t delay_in_seconds, uint
         work.type = TASK_WORK_TYPE_DELAY;
         work.delay_in_seconds = delay_in_seconds;
         work.amount = amount;
-        strcpy(work.path, path);
+        work.path = path;
         taskStart();
     } else {
         TT_LOG_E(TAG, "Task was already running");

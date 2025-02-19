@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 add_definitions(-DTT_DEBUG)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_ASM_COMPILE_OBJECT "${CMAKE_CXX_COMPILER_TARGET}")
 
@@ -17,8 +17,9 @@ if (DEFINED ENV{ESP_IDF_VERSION})
 
     set(COMPONENTS App)
     set(EXTRA_COMPONENT_DIRS
-        "Boards"
         "App"
+        "Boards"
+        "Drivers"
         "Tactility"
         "TactilityC"
         "TactilityCore"
@@ -27,6 +28,7 @@ if (DEFINED ENV{ESP_IDF_VERSION})
         "Libraries/elf_loader"
         "Libraries/lvgl"
         "Libraries/lv_screenshot"
+        "Libraries/minmea"
         "Libraries/QRCode"
     )
 
@@ -79,6 +81,7 @@ if (NOT DEFINED ENV{ESP_IDF_VERSION})
     add_subdirectory(Libraries/FreeRTOS-Kernel)
     add_subdirectory(Libraries/lv_screenshot)
     add_subdirectory(Libraries/QRCode)
+    add_subdirectory(Libraries/minmea)
     target_compile_definitions(freertos_kernel PUBLIC "projCOVERAGE_TEST=0")
     target_include_directories(freertos_kernel
         PUBLIC Boards/Simulator/Source # for FreeRTOSConfig.h

@@ -1,21 +1,15 @@
-#include "StringUtils.h"
+#include "Tactility/StringUtils.h"
+
 #include <cstring>
+#include <ranges>
 #include <sstream>
+#include <string>
 
 namespace tt::string {
 
-int findLastIndex(const char* text, size_t from_index, char find) {
-    for (int i = (int)from_index; i >= 0; i--) {
-        if (text[i] == find) {
-            return (int)i;
-        }
-    }
-    return -1;
-}
-
 bool getPathParent(const std::string& path, std::string& output) {
-    int index = findLastIndex(path.c_str(), path.length() - 1, '/');
-    if (index == -1) {
+    auto index = path.find_last_of('/');
+    if (index == std::string::npos) {
         return false;
     } else if (index == 0) {
         output = "/";
@@ -85,6 +79,21 @@ std::string removeFileExtension(const std::string& input) {
     } else {
         return input;
     }
+}
+
+bool isAsciiHexString(const std::string& input) {
+    // Find invalid characters
+    return std::ranges::views::filter(input, [](char character){
+        if (
+           (('0' <= character) && ('9' >= character)) ||
+           (('a' <= character) && ('f' >= character)) ||
+           (('A' <= character) && ('F' >= character))
+        ) {
+            return false;
+        } else {
+            return true;
+        }
+    }).empty();
 }
 
 } // namespace

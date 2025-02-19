@@ -1,15 +1,16 @@
-#include "Mutex.h"
-#include "Timer.h"
-#include "Tactility.h"
+#include "Tactility/lvgl/Statusbar.h"
+#include "Tactility/lvgl/LvglSync.h"
 
-#include "hal/Power.h"
-#include "hal/SdCard.h"
-#include "lvgl/Statusbar.h"
-#include "service/ServiceContext.h"
-#include "service/wifi/Wifi.h"
-#include "service/ServiceRegistry.h"
-#include "TactilityHeadless.h"
-#include "lvgl/LvglSync.h"
+#include "Tactility/hal/power/PowerDevice.h"
+#include "Tactility/hal/sdcard/SdCardDevice.h"
+#include "Tactility/service/gps/Gps.h"
+#include <Tactility/Mutex.h>
+#include <Tactility/Tactility.h>
+#include <Tactility/TactilityHeadless.h>
+#include <Tactility/Timer.h>
+#include <Tactility/service/ServiceContext.h>
+#include <Tactility/service/ServiceRegistry.h>
+#include <Tactility/service/wifi/Wifi.h>
 
 namespace tt::service::statusbar {
 
@@ -39,36 +40,10 @@ namespace tt::service::statusbar {
 #define STATUSBAR_ICON_POWER_90 "power_90.png"
 #define STATUSBAR_ICON_POWER_100 "power_100.png"
 
+// GPS
+#define STATUSBAR_ICON_GPS "location.png"
+
 extern const ServiceManifest manifest;
-
-struct ServiceData {
-    Mutex mutex;
-    std::unique_ptr<Timer> updateTimer;
-    int8_t wifi_icon_id = lvgl::statusbar_icon_add();
-    const char* wifi_last_icon = nullptr;
-    int8_t sdcard_icon_id = lvgl::statusbar_icon_add();
-    const char* sdcard_last_icon = nullptr;
-    int8_t power_icon_id = lvgl::statusbar_icon_add();
-    const char* power_last_icon = nullptr;
-
-    std::unique_ptr<service::Paths> paths;
-
-    ~ServiceData() {
-        lvgl::statusbar_icon_remove(wifi_icon_id);
-        lvgl::statusbar_icon_remove(sdcard_icon_id);
-        lvgl::statusbar_icon_remove(power_icon_id);
-    }
-
-    void lock() const {
-        tt_check(mutex.acquire(TtWaitForever) == TtStatusOk);
-    }
-
-    void unlock() const {
-        tt_check(mutex.release() == TtStatusOk);
-    }
-};
-
-// region wifi
 
 const char* getWifiStatusIconForRssi(int rssi) {
     if (rssi >= -60) {
@@ -83,14 +58,15 @@ const char* getWifiStatusIconForRssi(int rssi) {
 static const char* getWifiStatusIcon(wifi::RadioState state, bool secure) {
     int rssi;
     switch (state) {
-        case wifi::RadioState::On:
-        case wifi::RadioState::OnPending:
-        case wifi::RadioState::ConnectionPending:
+        using enum wifi::RadioState;
+        case On:
+        case OnPending:
+        case ConnectionPending:
             return STATUSBAR_ICON_WIFI_SCAN_WHITE;
-        case wifi::RadioState::OffPending:
-        case wifi::RadioState::Off:
+        case OffPending:
+        case Off:
             return STATUSBAR_ICON_WIFI_OFF_WHITE;
-        case wifi::RadioState::ConnectionActive:
+        case ConnectionActive:
             rssi = wifi::getRssi();
             return getWifiStatusIconForRssi(rssi);
         default:
@@ -98,59 +74,19 @@ static const char* getWifiStatusIcon(wifi::RadioState state, bool secure) {
     }
 }
 
-static void updateWifiIcon(const service::Paths* paths, const std::shared_ptr<ServiceData>& data) {
-    wifi::RadioState radio_state = wifi::getRadioState();
-    bool is_secure = wifi::isConnectionSecure();
-    const char* desired_icon = getWifiStatusIcon(radio_state, is_secure);
-    if (data->wifi_last_icon != desired_icon) {
-        if (desired_icon != nullptr) {
-            auto icon_path = paths->getSystemPathLvgl(desired_icon);
-            lvgl::statusbar_icon_set_image(data->wifi_icon_id, icon_path);
-            lvgl::statusbar_icon_set_visibility(data->wifi_icon_id, true);
-        } else {
-            lvgl::statusbar_icon_set_visibility(data->wifi_icon_id, false);
-        }
-        data->wifi_last_icon = desired_icon;
-    }
-}
-
-// endregion wifi
-
-// region sdcard
-
-static const char* getSdCardStatusIcon(hal::SdCard::State state) {
+static const char* getSdCardStatusIcon(hal::sdcard::SdCardDevice::State state) {
     switch (state) {
-        case hal::SdCard::State::Mounted:
+        using enum hal::sdcard::SdCardDevice::State;
+        case Mounted:
             return STATUSBAR_ICON_SDCARD;
-        case hal::SdCard::State::Error:
-        case hal::SdCard::State::Unmounted:
-        case hal::SdCard::State::Unknown:
+        case Error:
+        case Unmounted:
+        case Unknown:
             return STATUSBAR_ICON_SDCARD_ALERT;
         default:
             tt_crash("Unhandled SdCard state");
     }
 }
-
-static void updateSdCardIcon(const service::Paths* paths, const std::shared_ptr<ServiceData>& data) {
-    auto sdcard = tt::hal::getConfiguration()->sdcard;
-    if (sdcard != nullptr) {
-        auto state = sdcard->getState();
-        if (state != hal::SdCard::State::Unknown) {
-            auto* desired_icon = getSdCardStatusIcon(state);
-            if (data->sdcard_last_icon != desired_icon) {
-                auto icon_path = paths->getSystemPathLvgl(desired_icon);
-                lvgl::statusbar_icon_set_image(data->sdcard_icon_id, icon_path);
-                lvgl::statusbar_icon_set_visibility(data->sdcard_icon_id, true);
-                data->sdcard_last_icon = desired_icon;
-            }
-        }
-        // TODO: Consider tracking how long the SD card has been in unknown status and then show error
-    }
-}
-
-// endregion sdcard
-
-// region power
 
 static _Nullable const char* getPowerStatusIcon() {
     auto get_power = getConfiguration()->hardware->power;
@@ -160,8 +96,8 @@ static _Nullable const char* getPowerStatusIcon() {
 
     auto power = get_power();
 
-    hal::Power::MetricData charge_level;
-    if (!power->getMetric(hal::Power::MetricType::ChargeLevel, charge_level)) {
+    hal::power::PowerDevice::MetricData charge_level;
+    if (!power->getMetric(hal::power::PowerDevice::MetricType::ChargeLevel, charge_level)) {
         return nullptr;
     }
 
@@ -192,69 +128,138 @@ static _Nullable const char* getPowerStatusIcon() {
     }
 }
 
-static void updatePowerStatusIcon(const service::Paths* paths, const std::shared_ptr<ServiceData>& data) {
-    const char* desired_icon = getPowerStatusIcon();
-    if (data->power_last_icon != desired_icon) {
-        if (desired_icon != nullptr) {
-            auto icon_path = paths->getSystemPathLvgl(desired_icon);
-            lvgl::statusbar_icon_set_image(data->power_icon_id, icon_path);
-            lvgl::statusbar_icon_set_visibility(data->power_icon_id, true);
-        } else {
-            lvgl::statusbar_icon_set_visibility(data->power_icon_id, false);
-        }
-        data->power_last_icon = desired_icon;
+class StatusbarService final : public Service {
+
+private:
+
+    Mutex mutex;
+    std::unique_ptr<Timer> updateTimer;
+    int8_t gps_icon_id = lvgl::statusbar_icon_add();
+    bool gps_last_state = false;
+    int8_t wifi_icon_id = lvgl::statusbar_icon_add();
+    const char* wifi_last_icon = nullptr;
+    int8_t sdcard_icon_id = lvgl::statusbar_icon_add();
+    const char* sdcard_last_icon = nullptr;
+    int8_t power_icon_id = lvgl::statusbar_icon_add();
+    const char* power_last_icon = nullptr;
+
+    std::unique_ptr<service::Paths> paths;
+
+    void lock() const {
+        mutex.lock();
     }
-}
 
-// endregion power
+    void unlock() const {
+        mutex.unlock();
+    }
 
-// region service
+    void updateGpsIcon() {
+        auto gps_state = gps::getState();
+        bool show_icon = (gps_state == gps::State::OnPending) || (gps_state == gps::State::On);
+        if (gps_last_state != show_icon) {
+            if (show_icon) {
+                auto icon_path = paths->getSystemPathLvgl(STATUSBAR_ICON_GPS);
+                lvgl::statusbar_icon_set_image(gps_icon_id, icon_path);
+                lvgl::statusbar_icon_set_visibility(gps_icon_id, true);
+            } else {
+                lvgl::statusbar_icon_set_visibility(gps_icon_id, false);
+            }
+            gps_last_state = show_icon;
+        }
+    }
 
-static void service_data_free(ServiceData* data) {
-   free(data);
-}
+    void updateWifiIcon() {
+        wifi::RadioState radio_state = wifi::getRadioState();
+        bool is_secure = wifi::isConnectionSecure();
+        const char* desired_icon = getWifiStatusIcon(radio_state, is_secure);
+        if (wifi_last_icon != desired_icon) {
+            if (desired_icon != nullptr) {
+                auto icon_path = paths->getSystemPathLvgl(desired_icon);
+                lvgl::statusbar_icon_set_image(wifi_icon_id, icon_path);
+                lvgl::statusbar_icon_set_visibility(wifi_icon_id, true);
+            } else {
+                lvgl::statusbar_icon_set_visibility(wifi_icon_id, false);
+            }
+            wifi_last_icon = desired_icon;
+        }
+    }
 
-static void onUpdate(std::shared_ptr<void> parameter) {
-    auto data = std::static_pointer_cast<ServiceData>(parameter);
-    // TODO: Make thread-safe for LVGL
-    auto* paths = data->paths.get();
-    updateWifiIcon(paths, data);
-    updateSdCardIcon(paths, data);
-    updatePowerStatusIcon(paths, data);
-}
+    void updatePowerStatusIcon() {
+        const char* desired_icon = getPowerStatusIcon();
+        if (power_last_icon != desired_icon) {
+            if (desired_icon != nullptr) {
+                auto icon_path = paths->getSystemPathLvgl(desired_icon);
+                lvgl::statusbar_icon_set_image(power_icon_id, icon_path);
+                lvgl::statusbar_icon_set_visibility(power_icon_id, true);
+            } else {
+                lvgl::statusbar_icon_set_visibility(power_icon_id, false);
+            }
+            power_last_icon = desired_icon;
+        }
+    }
 
-static void onStart(ServiceContext& service) {
-    lvgl::lock(TtWaitForever);
-    auto data = std::make_shared<ServiceData>();
-    lvgl::unlock();
+    void updateSdCardIcon() {
+        auto sdcard = tt::hal::getConfiguration()->sdcard;
+        if (sdcard != nullptr) {
+            auto state = sdcard->getState();
+            if (state != hal::sdcard::SdCardDevice::State::Unknown) {
+                auto* desired_icon = getSdCardStatusIcon(state);
+                if (sdcard_last_icon != desired_icon) {
+                    auto icon_path = paths->getSystemPathLvgl(desired_icon);
+                    lvgl::statusbar_icon_set_image(sdcard_icon_id, icon_path);
+                    lvgl::statusbar_icon_set_visibility(sdcard_icon_id, true);
+                    sdcard_last_icon = desired_icon;
+                }
+            }
+            // TODO: Consider tracking how long the SD card has been in unknown status and then show error
+        }
+    }
 
-    data->paths = service.getPaths();
+    void update() {
+        // TODO: Make thread-safe for LVGL
+        updateGpsIcon();
+        updateWifiIcon();
+        updateSdCardIcon();
+        updatePowerStatusIcon();
+    }
 
-    service.setData(data);
+    static void onUpdate(std::shared_ptr<void> parameter) {
+        auto service = std::static_pointer_cast<StatusbarService>(parameter);
+        service->update();
+    }
 
-    // TODO: Make thread-safe for LVGL
-    lvgl::statusbar_icon_set_visibility(data->wifi_icon_id, true);
-    updateWifiIcon(data->paths.get(), data);
-    updateSdCardIcon(data->paths.get(), data); // also updates visibility
-    updatePowerStatusIcon(data->paths.get(), data);
+public:
 
-    data->updateTimer = std::make_unique<Timer>(Timer::Type::Periodic, onUpdate, data);
-    // We want to try and scan more often in case of startup or scan lock failure
-    data->updateTimer->start(1000);
-}
+    ~StatusbarService() final {
+        lvgl::statusbar_icon_remove(wifi_icon_id);
+        lvgl::statusbar_icon_remove(sdcard_icon_id);
+        lvgl::statusbar_icon_remove(power_icon_id);
+    }
 
-static void onStop(ServiceContext& service) {
-    auto data = std::static_pointer_cast<ServiceData>(service.getData());
+    void onStart(ServiceContext& serviceContext) override {
+        paths = serviceContext.getPaths();
 
-    // Stop thread
-    data->updateTimer->stop();
-    data->updateTimer = nullptr;
-}
+        // TODO: Make thread-safe for LVGL
+        lvgl::statusbar_icon_set_visibility(wifi_icon_id, true);
+
+        auto service = findServiceById(manifest.id);
+        assert(service);
+        onUpdate(service);
+
+        updateTimer = std::make_unique<Timer>(Timer::Type::Periodic, onUpdate, service);
+        // We want to try and scan more often in case of startup or scan lock failure
+        updateTimer->start(1000);
+    }
+
+    void onStop(ServiceContext& service) override{
+        updateTimer->stop();
+        updateTimer = nullptr;
+    }
+};
 
 extern const ServiceManifest manifest = {
     .id = "Statusbar",
-    .onStart = onStart,
-    .onStop = onStop
+    .createService = create<StatusbarService>
 };
 
 // endregion service

@@ -1,21 +1,21 @@
-#include "TactilityCore.h"
+#include "Tactility/TactilityCore.h"
 
-#include "app/AppContext.h"
-#include "app/display/DisplaySettings.h"
-#include "app/launcher/Launcher.h"
-#include "hal/Display.h"
-#include "service/loader/Loader.h"
-#include "lvgl/Style.h"
+#include "Tactility/app/AppContext.h"
+#include "Tactility/app/display/DisplaySettings.h"
+#include "Tactility/service/loader/Loader.h"
+#include "Tactility/lvgl/Style.h"
 
-#include "lvgl.h"
-#include "Tactility.h"
-#include "hal/usb/Usb.h"
-#include "kernel/SystemEvents.h"
+#include "Tactility/hal/display/DisplayDevice.h"
+#include <Tactility/TactilityPrivate.h>
+#include <Tactility/hal/usb/Usb.h>
+#include <Tactility/kernel/SystemEvents.h>
+
+#include <lvgl.h>
 
 #ifdef ESP_PLATFORM
-#include "kernel/PanicHandler.h"
-#include "sdkconfig.h"
-#include "app/crashdiagnostics/CrashDiagnostics.h"
+#include "Tactility/app/crashdiagnostics/CrashDiagnostics.h"
+#include <Tactility/kernel/PanicHandler.h>
+#include <sdkconfig.h>
 #else
 #define CONFIG_TT_SPLASH_DURATION 0
 #endif
@@ -23,6 +23,10 @@
 #define TAG "boot"
 
 namespace tt::app::boot {
+
+static std::shared_ptr<tt::hal::display::DisplayDevice> getHalDisplay() {
+    return hal::findFirstDevice<hal::display::DisplayDevice>(hal::Device::Type::Display);
+}
 
 class BootApp : public App {
 
@@ -35,10 +39,8 @@ private:
 
         kernel::systemEventPublish(kernel::SystemEvent::BootSplash);
 
-        auto* lvgl_display = lv_display_get_default();
-        tt_assert(lvgl_display != nullptr);
-        auto* hal_display = (hal::Display*)lv_display_get_user_data(lvgl_display);
-        tt_assert(hal_display != nullptr);
+        auto hal_display = getHalDisplay();
+        assert(hal_display != nullptr);
         if (hal_display->supportsBacklightDuty()) {
             int32_t backlight_duty = app::display::getBacklightDuty();
             hal_display->setBacklightDuty(backlight_duty);
@@ -49,6 +51,8 @@ private:
             hal::usb::resetUsbBootMode();
             hal::usb::startMassStorageWithSdmmc();
         } else {
+            initFromBootApp();
+
             TickType_t end_time = tt::kernel::getTicks();
             TickType_t ticks_passed = end_time - start_time;
             TickType_t minimum_ticks = (CONFIG_TT_SPLASH_DURATION / portTICK_PERIOD_MS);
@@ -73,12 +77,8 @@ private:
 #endif
 
         auto* config = tt::getConfiguration();
-        if (config->autoStartAppId) {
-            TT_LOG_I(TAG, "init auto-starting %s", config->autoStartAppId);
-            tt::service::loader::startApp(config->autoStartAppId);
-        } else {
-            app::launcher::start();
-        }
+        assert(!config->launcherAppId.empty());
+        tt::service::loader::startApp(config->launcherAppId);
     }
 
 public:
@@ -101,7 +101,7 @@ public:
         }
     }
 
-    void onStop(AppContext& app) override {
+    void onDestroy(AppContext& app) override {
         thread.join();
     }
 };

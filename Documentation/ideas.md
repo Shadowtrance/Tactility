@@ -1,20 +1,14 @@
-# Issues
-- WiFi bug: when pressing disconnect while between `WIFI_EVENT_STA_START` and `IP_EVENT_STA_GOT_IP`, then auto-connect becomes active again.
-- ESP32 (CYD) memory issues (or any device without PSRAM):
-  - Boot app doesn't show logo 
-  - WiFi is on and navigating back to Desktop makes desktop icons disappear
-  - WiFi might fail quietly when trying to enable it: this shows no feedback (force it by increasing LVGL buffers to 100kB)
-  Possible mitigations: 
-  - When no PSRAM is available, use simplified desktop buttons
-  - Add statusbar icon for memory pressure.
-  - Show error in WiFi screen (e.g. AlertDialog when SPI is not enabled and available memory is below a certain amount)
-- Clean up static_cast when casting to base class.
-- EventFlag: Fix return value of set/get/wait (the errors are weirdly mixed in)
-- Fix bug in T-Deck/etc: esp_lvgl_port settings has a large stack size (~9kB) to fix an issue where the T-Deck would get a stackoverflow. This sometimes happens when WiFi is auto-enabled and you open the app while it is still connecting.
-- M5Stack Core only shows 4MB of SPIRAM in use
-- Oops crashlog site: Add copy-pasteable addr2line command (e.g. xtensa-esp32s3-elf-addr2line -pfiaC -e Tactility.elf 00000000)
-
 # TODOs
+- Split up boot stages, so the last stage can be done from the splash screen
+- Start using non_null (either via MS GSL, or custom)
+- `hal/Configuration.h` defines C function types: Use C++ std::function instead
+- Fix system time to not be 1980 (use build year as minimum)
+- Use std::span or string_view in StringUtils https://youtu.be/FRkJCvHWdwQ?t=2754 
+- Fix bug in T-Deck/etc: esp_lvgl_port settings has a large stack size (~9kB) to fix an issue where the T-Deck would get a stackoverflow. This sometimes happens when WiFi is auto-enabled and you open the app while it is still connecting.
+- Clean up static_cast when casting to base class.
+- Mutex: Implement give/take from ISR support (works only for non-recursive ones)
+- Extend unPhone power driver: add charging status, usb connection status, etc.
+- Expose app::Paths to TactilityC
 - Experiment with what happens when using C++ code in an external app (without using standard library!)
 - Boards' CMakeLists.txt manually declare each source folder. Update them all to do a recursive search of all folders.
 - We currently build all boards for a given platform (e.g. ESP32S3), but it's better to filter all irrelevant ones based on the Kconfig board settings:
@@ -45,12 +39,10 @@
 - Audio player app
 - Audio recording app
 - OTA updates
-- Web flasher
 - T-Deck Plus: Create separate board config?
 - Support for displays with different DPI. Consider the layer-based system like on Android.
-- Make firmwares available via web serial website
 - If present, use LED to show boot/wifi status
-- T-Deck Power: capacity estimation uses linear voltage curve, but it should use some sort of battery discharge curve.
+- Capacity based on voltage: estimation for various devices uses linear voltage curve, but it should use some sort of battery discharge curve.
 - Statusbar widget to show how much memory is in use?
 - Wrapper for Slider that shows "+" and "-" buttons, and also the value in a label.
 - Display app: Add toggle to display performance measurement overlay (consider showing FPS in statusbar!)
@@ -58,6 +50,10 @@
 - On crash, try to save current log to flash or SD card? (this is risky, though, so ask in Discord first)
  
 # App Ideas
+- Map widget:
+  https://github.com/portapack-mayhem/mayhem-firmware/blob/b66d8b1aa178d8a9cd06436fea788d5d58cb4c8d/firmware/application/ui/ui_geomap.cpp
+  https://github.com/portapack-mayhem/mayhem-firmware/blob/b66d8b1aa178d8a9cd06436fea788d5d58cb4c8d/firmware/tools/generate_world_map.bin.py
+  https://github.com/portapack-mayhem/mayhem-firmware/releases
 - Weather app: https://lab.flipper.net/apps/flip_weather
 - wget app: https://lab.flipper.net/apps/web_crawler (add profiles for known public APIs?)
 - USB implementation to make device act as mass storage device.
