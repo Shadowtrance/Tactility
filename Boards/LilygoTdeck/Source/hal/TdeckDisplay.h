@@ -15,7 +15,7 @@ private:
 
 public:
 
-    std::string getName() const final { return "ST7780"; }
+    std::string getName() const final { return "ST7789"; }
     std::string getDescription() const final { return "SPI display"; }
 
     bool start() override;

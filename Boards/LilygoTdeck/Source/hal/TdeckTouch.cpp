@@ -41,7 +41,7 @@ bool TdeckTouch::start(lv_display_t* display) {
     };
 
     if (esp_lcd_touch_new_i2c_gt911(ioHandle, &config, &touchHandle) != ESP_OK) {
-        TT_LOG_E(TAG, "GT199 driver init failed");
+        TT_LOG_E(TAG, "GT911 driver init failed");
         cleanup();
         return false;
     }
