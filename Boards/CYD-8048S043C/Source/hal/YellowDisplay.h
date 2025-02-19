@@ -1,12 +1,10 @@
 #pragma once
 
-#include "lvgl.h"
-#include "hal/Display.h"
-#include "esp_lcd_panel_io.h"
+#include "Tactility/hal/display/DisplayDevice.h"
+#include <esp_lcd_types.h>
+#include <lvgl.h>
 
-extern lv_disp_t* displayHandle;
-
-class YellowDisplay : public tt::hal::Display {
+class YellowDisplay : public tt::hal::display::DisplayDevice {
 
 private:
 
@@ -16,11 +14,14 @@ private:
 
 public:
 
+    std::string getName() const final { return "ST7262"; }
+    std::string getDescription() const final { return "RGB Display"; }
+
     bool start() override;
 
     bool stop() override;
 
-    tt::hal::Touch* _Nullable createTouch() override;
+    std::shared_ptr<tt::hal::touch::TouchDevice> _Nullable createTouch() override;
 
     void setBacklightDuty(uint8_t backlightDuty) override;
     bool supportsBacklightDuty() const override { return true; }
@@ -28,4 +29,4 @@ public:
     lv_display_t* _Nullable getLvglDisplay() const override { return displayHandle; }
 };
 
-tt::hal::Display* createDisplay();
+std::shared_ptr<tt::hal::display::DisplayDevice> createDisplay();

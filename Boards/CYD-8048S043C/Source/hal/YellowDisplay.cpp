@@ -1,17 +1,17 @@
 #include "YellowDisplay.h"
 #include "YellowDisplayConstants.h"
 #include "YellowTouch.h"
-#include "Log.h"
 
-#include <TactilityCore.h>
+#include <Tactility/Log.h>
+#include <Tactility/TactilityCore.h>
 #include <esp_lcd_panel_commands.h>
 
-#include "driver/gpio.h"
-#include "driver/ledc.h"
-#include "esp_err.h"
-#include "esp_lcd_panel_rgb.h"
-#include "esp_lcd_panel_ops.h"
-#include "esp_lvgl_port.h"
+#include <driver/gpio.h>
+#include <driver/ledc.h>
+#include <esp_err.h>
+#include <esp_lcd_panel_rgb.h>
+#include <esp_lcd_panel_ops.h>
+#include <esp_lvgl_port.h>
 
 #define TAG "yellow_display"
 
@@ -44,6 +44,7 @@ static bool setBacklight(uint8_t duty) {
         .timer_sel = CYD8048S043_LCD_BACKLIGHT_LEDC_TIMER,
         .duty = duty,
         .hpoint = 0,
+        .sleep_mode = LEDC_SLEEP_MODE_NO_ALIVE_NO_PD,
         .flags = {
             .output_invert = false
         }
@@ -63,7 +64,7 @@ bool YellowDisplay::start() {
     const esp_lcd_rgb_panel_config_t panel_config = {
         .clk_src = LCD_CLK_SRC_DEFAULT,
         .timings = {
-            .pclk_hz = 14000000,
+            .pclk_hz = 16000000,
             .h_res = CYD8048S043_LCD_HORIZONTAL_RESOLUTION,
             .v_res = CYD8048S043_LCD_VERTICAL_RESOLUTION,
 
@@ -81,11 +82,10 @@ bool YellowDisplay::start() {
                 .pclk_idle_high = false
             }
         },
-
         .data_width = 16,
         .bits_per_pixel = 0,
         .num_fbs = 2,
-        .bounce_buffer_size_px = 10 * CYD8048S043_LCD_HORIZONTAL_RESOLUTION,
+        .bounce_buffer_size_px = CYD8048S043_LCD_HORIZONTAL_RESOLUTION * 10,
         .sram_trans_align = 8,
         .psram_trans_align = 64,
 
@@ -113,12 +113,12 @@ bool YellowDisplay::start() {
             CYD8048S043_LCD_PIN_DATA15
         },
         .flags = {
-            .disp_active_low = 0,
-            .refresh_on_demand = 0,
+            .disp_active_low = false,
+            .refresh_on_demand = false,
             .fb_in_psram = true,
             .double_fb = true,
-            .no_fb = 0,
-            .bb_invalidate_cache = 0
+            .no_fb = false,
+            .bb_invalidate_cache = false
         }
     };
 
@@ -161,7 +161,7 @@ bool YellowDisplay::start() {
             .sw_rotate = false,
             .swap_bytes = false,
             .full_refresh = false,
-            .direct_mode = false,
+            .direct_mode = false
         }
     };
 
@@ -178,7 +178,7 @@ bool YellowDisplay::start() {
 }
 
 bool YellowDisplay::stop() {
-    tt_assert(displayHandle != nullptr);
+    assert(displayHandle != nullptr);
 
     lvgl_port_remove_disp(displayHandle);
 
@@ -194,6 +194,10 @@ bool YellowDisplay::stop() {
     return true;
 }
 
+std::shared_ptr<tt::hal::touch::TouchDevice> _Nullable YellowDisplay::createTouch() {
+    return std::make_shared<YellowTouch>();
+}
+
 void YellowDisplay::setBacklightDuty(uint8_t backlightDuty) {
     if (!isBacklightInitialized) {
         tt_check(initBacklight());
@@ -205,10 +209,6 @@ void YellowDisplay::setBacklightDuty(uint8_t backlightDuty) {
     }
 }
 
-tt::hal::Touch* _Nullable YellowDisplay::createTouch() {
-    return static_cast<tt::hal::Touch*>(new YellowTouch());
-}
-
-tt::hal::Display* createDisplay() {
-    return static_cast<tt::hal::Display*>(new YellowDisplay());
+std::shared_ptr<tt::hal::display::DisplayDevice> createDisplay() {
+    return std::make_shared<YellowDisplay>();
 }

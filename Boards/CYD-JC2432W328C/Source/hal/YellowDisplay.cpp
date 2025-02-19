@@ -1,17 +1,17 @@
 #include "YellowDisplay.h"
 #include "YellowDisplayConstants.h"
 #include "YellowTouch.h"
-#include "Log.h"
 
-#include <TactilityCore.h>
+#include <Tactility/Log.h>
+#include <Tactility/TactilityCore.h>
 #include <esp_lcd_panel_commands.h>
 
-#include "driver/gpio.h"
-#include "driver/ledc.h"
-#include "esp_err.h"
-#include "esp_lcd_panel_st7789.h"
-#include "esp_lcd_panel_ops.h"
-#include "esp_lvgl_port.h"
+#include <driver/gpio.h>
+#include <driver/ledc.h>
+#include <esp_err.h>
+#include <esp_lcd_panel_st7789.h>
+#include <esp_lcd_panel_ops.h>
+#include <esp_lvgl_port.h>
 
 #define TAG "yellow_display"
 
@@ -44,6 +44,7 @@ static bool setBacklight(uint8_t duty) {
         .timer_sel = JC2432W328C_LCD_BACKLIGHT_LEDC_TIMER,
         .duty = duty,
         .hpoint = 0,
+        .sleep_mode = LEDC_SLEEP_MODE_NO_ALIVE_NO_PD,
         .flags = {
             .output_invert = false
         }
@@ -70,6 +71,8 @@ bool YellowDisplay::start() {
         .user_ctx = nullptr,
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
+        .cs_ena_pretrans = 0,
+        .cs_ena_posttrans = 0,
         .flags = {
             .dc_high_on_cmd = 0,
             .dc_low_on_data = 0,
@@ -155,7 +158,7 @@ bool YellowDisplay::start() {
 }
 
 bool YellowDisplay::stop() {
-    tt_assert(displayHandle != nullptr);
+    assert(displayHandle != nullptr);
 
     lvgl_port_remove_disp(displayHandle);
 
@@ -171,6 +174,10 @@ bool YellowDisplay::stop() {
     return true;
 }
 
+std::shared_ptr<tt::hal::touch::TouchDevice> _Nullable YellowDisplay::createTouch() {
+    return std::make_shared<YellowTouch>();
+}
+
 void YellowDisplay::setBacklightDuty(uint8_t backlightDuty) {
     if (!isBacklightInitialized) {
         tt_check(initBacklight());
@@ -182,10 +189,6 @@ void YellowDisplay::setBacklightDuty(uint8_t backlightDuty) {
     }
 }
 
-tt::hal::Touch* _Nullable YellowDisplay::createTouch() {
-    return static_cast<tt::hal::Touch*>(new YellowTouch());
-}
-
-tt::hal::Display* createDisplay() {
-    return static_cast<tt::hal::Display*>(new YellowDisplay());
+std::shared_ptr<tt::hal::display::DisplayDevice> createDisplay() {
+    return std::make_shared<YellowDisplay>();
 }

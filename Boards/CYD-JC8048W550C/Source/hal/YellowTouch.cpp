@@ -1,13 +1,13 @@
 #include "YellowTouch.h"
-#include "YellowTouchConstants.h"
-#include "Log.h"
-#include "driver/i2c.h"
-#include "esp_err.h"
-#include "esp_lcd_touch_gt911.h"
-#include "esp_lcd_touch.h"
-#include "esp_lvgl_port.h"
+
+#include <Tactility/Log.h>
+#include <esp_err.h>
+#include <esp_lcd_touch_gt911.h>
+#include <esp_lvgl_port.h>
 
 #define TAG "yellow_touch"
+
+#define JC8048W550_TOUCH_I2C_PORT I2C_NUM_0
 
 bool YellowTouch::start(lv_display_t* display) {
     TT_LOG_I(TAG, "Starting");
@@ -18,11 +18,11 @@ bool YellowTouch::start(lv_display_t* display) {
         return false;
     }
 
-    esp_lcd_touch_config_t config = {
+    const esp_lcd_touch_config_t config = {
         .x_max = 800,
         .y_max = 480,
-        .rst_gpio_num = GPIO_NUM_38, //GPIO_NUM_38,
-        .int_gpio_num = GPIO_NUM_NC, //GPIO_NUM_18 (with mod, NC otherwise),
+        .rst_gpio_num = GPIO_NUM_38,
+        .int_gpio_num = GPIO_NUM_NC, //GPIO_NUM_18 (with mod, NC otherwise), see note in YellowTouch.h
         .levels = {
             .reset = 0,
             .interrupt = 0,
