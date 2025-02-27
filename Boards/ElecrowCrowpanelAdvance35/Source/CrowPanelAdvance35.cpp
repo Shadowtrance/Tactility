@@ -25,8 +25,7 @@ extern const Configuration crowpanel_advance_35 = {
             .name = "Main",
             .port = I2C_NUM_0,
             .initMode = i2c::InitMode::ByTactility,
-            .canReinit = false,
-            .hasMutableConfiguration = false,
+            .isMutable = false,
             .config = (i2c_config_t) {
                 .mode = I2C_MODE_MASTER,
                 .sda_io_num = GPIO_NUM_15,
@@ -62,8 +61,7 @@ extern const Configuration crowpanel_advance_35 = {
                 .intr_flags = 0
             },
             .initMode = spi::InitMode::ByTactility,
-            .canReinit = false,
-            .hasMutableConfiguration = false,
+            .isMutable = false,
             .lock = tt::lvgl::getSyncLock() // esp_lvgl_port owns the lock for the display
         },
         // SD card
@@ -87,18 +85,15 @@ extern const Configuration crowpanel_advance_35 = {
                 .intr_flags = 0
             },
             .initMode = spi::InitMode::ByTactility,
-            .canReinit = false,
-            .hasMutableConfiguration = false,
+            .isMutable = false,
             .lock = nullptr // No custom lock needed
         }
     },
     .uart {
         // "UART0-IN"
         uart::Configuration {
+            .name = "UART0",
             .port = UART_NUM_1,
-            .initMode = uart::InitMode::Disabled, // Manual init
-            .canReinit = true,
-            .hasMutableConfiguration = false,
             .rxPin = GPIO_NUM_44,
             .txPin = GPIO_NUM_43,
             .rtsPin = GPIO_NUM_NC,
@@ -121,10 +116,8 @@ extern const Configuration crowpanel_advance_35 = {
         },
         // "UART1-OUT"
         uart::Configuration {
-            .port = UART_NUM_1,
-            .initMode = uart::InitMode::Disabled, // Manual init
-            .canReinit = true,
-            .hasMutableConfiguration = false,
+            .name = "UART1",
+            .port = UART_NUM_2,
             .rxPin = GPIO_NUM_18,
             .txPin = GPIO_NUM_17,
             .rtsPin = GPIO_NUM_NC,

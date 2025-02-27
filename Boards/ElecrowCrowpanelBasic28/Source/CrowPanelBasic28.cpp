@@ -27,8 +27,7 @@ extern const Configuration crowpanel_basic_28 = {
             .name = "Main",
             .port = I2C_NUM_0,
             .initMode = i2c::InitMode::ByTactility,
-            .canReinit = false,
-            .hasMutableConfiguration = false,
+            .isMutable = false,
             .config = (i2c_config_t) {
                 .mode = I2C_MODE_MASTER,
                 .sda_io_num = GPIO_NUM_22,
@@ -64,8 +63,7 @@ extern const Configuration crowpanel_basic_28 = {
                 .intr_flags = 0
             },
             .initMode = spi::InitMode::ByTactility,
-            .canReinit = false,
-            .hasMutableConfiguration = false,
+            .isMutable = false,
             .lock = tt::lvgl::getSyncLock() // esp_lvgl_port owns the lock for the display
         },
         // SD card
@@ -89,18 +87,15 @@ extern const Configuration crowpanel_basic_28 = {
                 .intr_flags = 0
             },
             .initMode = spi::InitMode::ByTactility,
-            .canReinit = false,
-            .hasMutableConfiguration = false,
+            .isMutable = false,
             .lock = nullptr // No custom lock needed
         }
     },
     .uart {
         // "UART1"
         uart::Configuration {
+            .name = "UART1",
             .port = UART_NUM_1,
-            .initMode = uart::InitMode::Disabled, // Manual init
-            .canReinit = true,
-            .hasMutableConfiguration = false,
             .rxPin = GPIO_NUM_16,
             .txPin = GPIO_NUM_17,
             .rtsPin = GPIO_NUM_NC,
