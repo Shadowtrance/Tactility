@@ -9,6 +9,7 @@ std::shared_ptr<tt::hal::display::DisplayDevice> createDisplay() {
         SPI2_HOST,
         GPIO_NUM_39,
         GPIO_NUM_38,
+        GPIO_NUM_42,
         240,
         240,
         nullptr,
