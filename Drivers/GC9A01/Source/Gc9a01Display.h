@@ -97,13 +97,13 @@ public:
 
     std::shared_ptr<tt::hal::touch::TouchDevice> _Nullable getTouchDevice() override { return configuration->touch; }
 
-    void setBacklightDuty(uint8_t backlightDuty) override {
+/*     void setBacklightDuty(uint8_t backlightDuty) override {
         if (configuration->backlightDutyFunction != nullptr) {
             configuration->backlightDutyFunction(backlightDuty);
         }
     }
 
-    bool supportsBacklightDuty() const override { return configuration->backlightDutyFunction != nullptr; }
+    bool supportsBacklightDuty() const override { return configuration->backlightDutyFunction != nullptr; } */
 };
 
 std::shared_ptr<tt::hal::display::DisplayDevice> createDisplay();

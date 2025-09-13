@@ -9,15 +9,6 @@ on:
 permissions: read-all
 
 jobs:
-  cyd-8048s043c:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: "Build"
-      uses: ./.github/actions/build-firmware
-      with:
-        board_id: cyd-8048s043c
-        arch: esp32s3
   waveshare-s3-touch-lcd-128:
     runs-on: ubuntu-latest
     steps:
