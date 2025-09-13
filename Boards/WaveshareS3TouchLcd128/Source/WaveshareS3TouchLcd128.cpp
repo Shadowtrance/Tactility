@@ -19,8 +19,8 @@ static DeviceVector createDevices() {
 static bool initBoot() {
     //return driver::pwmbacklight::init(GPIO_NUM_2);
     gpio_config_t bk_gpio_config = {
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = 1ULL << GPIO_NUM_2
+        .pin_bit_mask = 1ULL << GPIO_NUM_2,
+        .mode = GPIO_MODE_OUTPUT
     };
     ESP_ERROR_CHECK(gpio_config(&bk_gpio_config));
     gpio_set_level(GPIO_NUM_2, 1);
