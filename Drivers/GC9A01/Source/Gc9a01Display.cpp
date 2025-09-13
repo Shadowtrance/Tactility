@@ -115,7 +115,7 @@ lvgl_port_display_cfg_t Gc9a01Display::getLvglPortDisplayConfig(esp_lcd_panel_io
             .buff_dma = true,
             .buff_spiram = false,
             .sw_rotate = false,
-            .swap_bytes = false,
+            .swap_bytes = true,
             .full_refresh = false,
             .direct_mode = false
         }
