@@ -38,7 +38,7 @@ std::shared_ptr<tt::hal::display::DisplayDevice> createDisplay() {
         LCD_RGB_ELEMENT_ORDER_BGR
     );
 
-    //configuration->backlightDutyFunction = driver::pwmbacklight::setBacklightDuty;
+    configuration->backlightDutyFunction = driver::pwmbacklight::setBacklightDuty;
 
     auto display = std::make_shared<Gc9a01Display>(std::move(configuration));
     return std::reinterpret_pointer_cast<tt::hal::display::DisplayDevice>(display);
