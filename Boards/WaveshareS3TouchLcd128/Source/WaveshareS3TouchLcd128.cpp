@@ -33,8 +33,8 @@ extern const Configuration waveshare_s3_touch_lcd_128 = {
                 .mode = I2C_MODE_MASTER,
                 .sda_io_num = GPIO_NUM_6,
                 .scl_io_num = GPIO_NUM_7,
-                .sda_pullup_en = true,
-                .scl_pullup_en = true,
+                .sda_pullup_en = false,
+                .scl_pullup_en = false,
                 .master = {
                     .clk_speed = 400000
                 },

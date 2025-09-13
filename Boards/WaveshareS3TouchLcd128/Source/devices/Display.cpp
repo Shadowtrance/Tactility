@@ -11,9 +11,7 @@ std::shared_ptr<tt::hal::touch::TouchDevice> _Nullable createTouch() {
         240,
         false,
         true,
-        false,
-        GPIO_NUM_13,
-        GPIO_NUM_5
+        false
     );
 
     return std::make_shared<Cst816sTouch>(std::move(configuration));
