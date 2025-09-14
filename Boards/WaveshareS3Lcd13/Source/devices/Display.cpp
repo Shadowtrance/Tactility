@@ -9,7 +9,6 @@ std::shared_ptr<tt::hal::display::DisplayDevice> createDisplay() {
         SPI2_HOST,
         GPIO_NUM_39,
         GPIO_NUM_38,
-        GPIO_NUM_42,
         240,
         240,
         nullptr,
@@ -19,7 +18,9 @@ std::shared_ptr<tt::hal::display::DisplayDevice> createDisplay() {
         true
     );
 
-    //configuration->backlightDutyFunction = driver::pwmbacklight::setBacklightDuty;
+
+    configuration->resetPin = GPIO_NUM_42;
+    configuration->backlightDutyFunction = driver::pwmbacklight::setBacklightDuty;
 
     auto display = std::make_shared<St7789Display>(std::move(configuration));
     return std::reinterpret_pointer_cast<tt::hal::display::DisplayDevice>(display);

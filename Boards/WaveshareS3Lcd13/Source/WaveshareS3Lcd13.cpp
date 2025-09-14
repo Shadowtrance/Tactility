@@ -15,10 +15,7 @@ static DeviceVector createDevices() {
 }
 
 static bool initBoot() {
-    //return driver::pwmbacklight::init(GPIO_NUM_20);
-    gpio_set_direction(GPIO_NUM_20, GPIO_MODE_OUTPUT);
-    gpio_set_level(GPIO_NUM_20, 1);
-    return true;
+    return driver::pwmbacklight::init(GPIO_NUM_20, 256);
 }
 
 extern const Configuration waveshare_s3_lcd_13 = {
