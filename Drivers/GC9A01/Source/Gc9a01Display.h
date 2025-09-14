@@ -25,7 +25,6 @@ public:
             spi_host_device_t spiHostDevice,
             gpio_num_t csPin,
             gpio_num_t dcPin,
-            gpio_num_t resetPin,
             unsigned int horizontalResolution,
             unsigned int verticalResolution,
             std::shared_ptr<tt::hal::touch::TouchDevice> touch,
@@ -56,7 +55,7 @@ public:
         spi_host_device_t spiHostDevice;
         gpio_num_t csPin;
         gpio_num_t dcPin;
-        gpio_num_t resetPin;
+        gpio_num_t resetPin = GPIO_NUM_NC;
         unsigned int pixelClockFrequency = 80'000'000; // Hertz
         size_t transactionQueueDepth = 10;
         unsigned int horizontalResolution;

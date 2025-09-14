@@ -26,7 +26,6 @@ std::shared_ptr<tt::hal::display::DisplayDevice> createDisplay() {
         SPI2_HOST,
         GPIO_NUM_9,
         GPIO_NUM_8,
-        GPIO_NUM_14,
         240,
         240,
         touch,
@@ -38,6 +37,7 @@ std::shared_ptr<tt::hal::display::DisplayDevice> createDisplay() {
         LCD_RGB_ELEMENT_ORDER_BGR
     );
 
+    configuration->resetPin = GPIO_NUM_14;
     configuration->backlightDutyFunction = driver::pwmbacklight::setBacklightDuty;
 
     auto display = std::make_shared<Gc9a01Display>(std::move(configuration));
