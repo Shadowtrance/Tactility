@@ -67,7 +67,9 @@ extern const Configuration waveshare_s3_touch_lcd_128 = {
             .isMutable = false,
             .lock = tt::lvgl::getSyncLock() // esp_lvgl_port owns the lock for the display
         },
-        // SD card
+        // SD card available via external sd card module and uses VSYS (5V) / GND / IO15 / IO16 / IO17 / IO18 pins.
+        // Common micro sd card module you'd find on aliexpress with voltage regulator onboard. Others may work.
+        // JST SH 1.0 Header, GND / VSYS (5V) / RESET / BOOT / GND / 3.3V / IO15 / IO16 / IO17 / IO18 / IO21 / IO33
          spi::Configuration {
             .device = SPI3_HOST,
             .dma = SPI_DMA_CH_AUTO,
