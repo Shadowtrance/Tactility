@@ -42,7 +42,7 @@ extern const Configuration hardwareConfiguration = {
                 .clk_flags = 0
             }
         },
-        //some header
+        //P3 (JST SH 1.0)/ P4 (JST SH 1.25) headers - GND 3.3V IO17 IO18
         i2c::Configuration {
             .name = "External",
             .port = I2C_NUM_1,
@@ -50,8 +50,8 @@ extern const Configuration hardwareConfiguration = {
             .isMutable = true,
             .config = (i2c_config_t) {
                 .mode = I2C_MODE_MASTER,
-                .sda_io_num = GPIO_NUM_NC,
-                .scl_io_num = GPIO_NUM_NC,
+                .sda_io_num = GPIO_NUM_17,
+                .scl_io_num = GPIO_NUM_18,
                 .sda_pullup_en = false,
                 .scl_pullup_en = false,
                 .master = {
@@ -112,7 +112,7 @@ extern const Configuration hardwareConfiguration = {
         }
     },
     .uart {
-        //some header
+        //P1 header, JST SH 1.25, 5V / TXD (43) / RXD (44) / GND
         uart::Configuration {
             .name = "UART0",
             .port = UART_NUM_0,
