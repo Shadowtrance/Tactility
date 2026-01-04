@@ -58,6 +58,7 @@ namespace service {
 #if TT_FEATURE_SCREENSHOT_ENABLED
     namespace screenshot { extern const ServiceManifest manifest; }
 #endif
+    namespace webserver { extern const ServiceManifest manifest; }
 
 }
 
@@ -102,6 +103,7 @@ namespace app {
     namespace wifiapsettings { extern const AppManifest manifest; }
     namespace wificonnect { extern const AppManifest manifest; }
     namespace wifimanage { extern const AppManifest manifest; }
+    namespace webserversettings { extern const AppManifest manifest; }
 #if TT_FEATURE_SCREENSHOT_ENABLED
         namespace screenshot { extern const AppManifest manifest; }
 #endif
@@ -144,6 +146,7 @@ static void registerInternalApps() {
     addAppManifest(app::wifiapsettings::manifest);
     addAppManifest(app::wificonnect::manifest);
     addAppManifest(app::wifimanage::manifest);
+    addAppManifest(app::webserversettings::manifest);
 
 #if defined(CONFIG_TINYUSB_MSC_ENABLED) && CONFIG_TINYUSB_MSC_ENABLED
     addAppManifest(app::usbsettings::manifest);
@@ -261,6 +264,7 @@ static void registerAndStartPrimaryServices() {
 #ifdef CONFIG_ESP_WIFI_ENABLED
     addService(service::espnow::manifest);
 #endif
+    addService(service::webserver::manifest);
 }
 
 void createTempDirectory(const std::string& rootPath) {
