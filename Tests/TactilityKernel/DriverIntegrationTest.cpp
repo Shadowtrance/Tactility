@@ -26,10 +26,10 @@ static int stop(Device* device) {
 static Driver integration_driver = {
     .name = "integration_test_driver",
     .compatible = (const char*[]) { "integration", nullptr },
-    .start_device = start,
-    .stop_device = stop,
+    .startDevice = start,
+    .stopDevice = stop,
     .api = nullptr,
-    .device_type = nullptr,
+    .deviceType = nullptr,
     .internal = { 0 }
 };
 
@@ -47,18 +47,18 @@ TEST_CASE("driver with with start success and stop success should start and stop
         .parent = nullptr,
     };
 
-    CHECK_EQ(driver_construct(&integration_driver), 0);
+    CHECK_EQ(driver_construct(&integration_driver), ERROR_NONE);
 
-    CHECK_EQ(device_construct(&integration_device), 0);
+    CHECK_EQ(device_construct(&integration_device), ERROR_NONE);
     device_add(&integration_device);
     CHECK_EQ(startCalled, 0);
-    CHECK_EQ(driver_bind(&integration_driver, &integration_device), 0);
+    CHECK_EQ(driver_bind(&integration_driver, &integration_device), ERROR_NONE);
     CHECK_EQ(startCalled, 1);
     CHECK_EQ(stopCalled, 0);
-    CHECK_EQ(driver_unbind(&integration_driver, &integration_device), 0);
+    CHECK_EQ(driver_unbind(&integration_driver, &integration_device), ERROR_NONE);
     CHECK_EQ(stopCalled, 1);
-    CHECK_EQ(device_remove(&integration_device), 0);
-    CHECK_EQ(device_destruct(&integration_device), 0);
+    CHECK_EQ(device_remove(&integration_device), ERROR_NONE);
+    CHECK_EQ(device_destruct(&integration_device), ERROR_NONE);
 
-    CHECK_EQ(driver_destruct(&integration_driver), 0);
+    CHECK_EQ(driver_destruct(&integration_driver), ERROR_NONE);
 }
