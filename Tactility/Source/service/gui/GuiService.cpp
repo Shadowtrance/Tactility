@@ -1,5 +1,7 @@
 #include <Tactility/service/gui/GuiService.h>
 
+#include <cstring>
+
 #include <Tactility/app/AppInstance.h>
 #include <Tactility/Logger.h>
 #include <Tactility/LogMessages.h>
@@ -14,6 +16,15 @@ namespace tt::service::gui {
 extern const ServiceManifest manifest;
 static const auto LOGGER = Logger("GuiService");
 using namespace loader;
+
+constexpr auto* GUI_TASK_NAME = "gui";
+
+void warnIfRunningOnGuiTask(const char* context) {
+    const char* task_name = pcTaskGetName(nullptr);
+    if (strcmp(GUI_TASK_NAME, task_name) == 0) {
+        LOGGER.warn("{} shouldn't run on the GUI task", context);
+    }
+}
 
 // region AppManifest
 
@@ -114,7 +125,7 @@ void GuiService::redraw() {
     unlock();
 }
 
-bool GuiService::onStart(TT_UNUSED ServiceContext& service) {
+bool GuiService::onStart(ServiceContext& service) {
     auto* screen_root = lv_screen_active();
     if (screen_root == nullptr) {
         LOGGER.error("No display found");
@@ -122,10 +133,12 @@ bool GuiService::onStart(TT_UNUSED ServiceContext& service) {
     }
 
     thread = new Thread(
-        "gui",
+        GUI_TASK_NAME,
         4096, // Last known minimum was 2800 for launching desktop
         []() { return guiMain(); }
     );
+
+    thread->setPriority(THREAD_PRIORITY_SERVICE);
 
     const auto loader = findLoaderService();
     assert(loader != nullptr);
@@ -169,7 +182,7 @@ bool GuiService::onStart(TT_UNUSED ServiceContext& service) {
     return true;
 }
 
-void GuiService::onStop(TT_UNUSED ServiceContext& service) {
+void GuiService::onStop(ServiceContext& service) {
     lock();
 
     const auto loader = findLoaderService();
@@ -186,7 +199,7 @@ void GuiService::onStop(TT_UNUSED ServiceContext& service) {
 
     unlock();
 
-    tt_check(lvgl::lock(1000 / portTICK_PERIOD_MS));
+    check(lvgl::lock(1000 / portTICK_PERIOD_MS));
     lv_group_delete(keyboardGroup);
     lvgl::unlock();
 }
