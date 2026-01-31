@@ -4,6 +4,13 @@
 #include <vector>
 
 #include <tactility/device.h>
+#include <tactility/module.h>
+
+static Module module = {
+    .name = "test_module",
+    .start = nullptr,
+    .stop = nullptr
+};
 
 TEST_CASE("device_construct and device_destruct should set and unset the correct fields") {
     Device device = { 0 };
@@ -11,16 +18,16 @@ TEST_CASE("device_construct and device_destruct should set and unset the correct
     error_t error = device_construct(&device);
     CHECK_EQ(error, ERROR_NONE);
 
-    CHECK_NE(device.internal.data, nullptr);
+    CHECK_NE(device.internal.device_private, nullptr);
     CHECK_NE(device.internal.mutex.handle, nullptr);
 
     CHECK_EQ(device_destruct(&device), ERROR_NONE);
 
-    CHECK_EQ(device.internal.data, nullptr);
+    CHECK_EQ(device.internal.device_private, nullptr);
     CHECK_EQ(device.internal.mutex.handle, nullptr);
 
     Device comparison_device = { 0 };
-    comparison_device.internal.data = device.internal.data;
+    comparison_device.internal.device_private = device.internal.device_private;
     comparison_device.internal.mutex.handle = device.internal.mutex.handle;
 
     // Check that no other data was set
@@ -164,7 +171,8 @@ TEST_CASE("device_is_ready should return true only when it is started") {
         .stopDevice = nullptr,
         .api = nullptr,
         .deviceType = nullptr,
-        .internal = { 0 }
+        .owner = &module,
+        .driver_private = nullptr
     };
 
     Device device = { 0 };

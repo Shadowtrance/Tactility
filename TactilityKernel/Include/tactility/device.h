@@ -16,6 +16,7 @@ extern "C" {
 #include <tactility/concurrent/mutex.h>
 
 struct Driver;
+struct DevicePrivate;
 
 /** Enables discovering devices of the same type */
 struct DeviceType {
@@ -46,8 +47,18 @@ struct Device {
             bool added : 1;
         } state;
         /** Private data */
-        void* data;
+        struct DevicePrivate* device_private;
     } internal;
+};
+
+/**
+ * Holds a device pointer and a compatible string.
+ * The device must not be constructed, added or started yet.
+ * This is used by the devicetree code generator and the application init sequence.
+ */
+struct CompatibleDevice {
+    struct Device* device;
+    const char* compatible;
 };
 
 /**
