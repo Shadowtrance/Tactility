@@ -90,6 +90,11 @@ static int get_options(Device* device, gpio_pin_t pin, gpio_flags_t* options) {
     return ERROR_NONE;
 }
 
+error_t get_pin_count(struct Device* device, uint32_t* count) {
+    *count = GET_CONFIG(device)->gpioCount;
+    return ERROR_NONE;
+}
+
 static error_t start(Device* device) {
     ESP_LOGI(TAG, "start %s", device->name);
     return ERROR_NONE;
@@ -104,7 +109,8 @@ const static GpioControllerApi esp32_gpio_api  = {
     .set_level = set_level,
     .get_level = get_level,
     .set_options = set_options,
-    .get_options = get_options
+    .get_options = get_options,
+    .get_pin_count = get_pin_count
 };
 
 extern struct Module platform_module;
@@ -115,7 +121,7 @@ Driver esp32_gpio_driver = {
     .startDevice = start,
     .stopDevice = stop,
     .api =  (void*)&esp32_gpio_api,
-    .deviceType = nullptr,
+    .deviceType = &GPIO_CONTROLLER_TYPE,
     .owner = &platform_module,
     .driver_private = nullptr
 };
