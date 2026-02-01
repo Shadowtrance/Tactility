@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
+file(GLOB_RECURSE SOURCE_FILES "Source/*.c*")
+
 if (DEFINED ENV{ESP_IDF_VERSION})
-    file(GLOB_RECURSE SOURCE_FILES Source/*.c*)
 
     list(APPEND REQUIRES_LIST
         TactilityKernel
@@ -21,21 +22,15 @@ if (DEFINED ENV{ESP_IDF_VERSION})
 
 else ()
 
-    file(GLOB_RECURSE SOURCES "Source/*.c*")
+    add_library(hal-device-module OBJECT)
 
-    add_library(hal-device OBJECT)
+    target_sources(hal-device-module PRIVATE ${SOURCE_FILES})
 
-    target_sources(hal-device PRIVATE ${SOURCES})
-
-    target_include_directories(hal-device
-        PRIVATE Private/
+    target_include_directories(hal-device-module
         PUBLIC Include/
     )
 
-    add_definitions(-D_Nullable=)
-    add_definitions(-D_Nonnull=)
-
-    target_link_libraries(hal-device PUBLIC
+    target_link_libraries(hal-device-module PUBLIC
         TactilityFreeRtos
         TactilityCore
         TactilityKernel

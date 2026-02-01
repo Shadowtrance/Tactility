@@ -36,14 +36,13 @@ else ()
         TactilityCore
         TactilityFreeRtos
         TactilityKernel
-        hal-device
+        hal-device-module
+        lvgl-module
         Simulator
         PlatformPosix
         SDL2::SDL2-static SDL2-static
     )
 
-    add_definitions(-D_Nullable=)
-    add_definitions(-D_Nonnull=)
 endif ()
 
 add_custom_target(AlwaysRun

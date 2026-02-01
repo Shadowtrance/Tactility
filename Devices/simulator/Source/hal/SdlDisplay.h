@@ -4,10 +4,9 @@
 #include <tactility/check.h>
 #include <Tactility/hal/display/DisplayDevice.h>
 
-/** Hack: variable comes from LvglTask.cpp */
-extern lv_disp_t* displayHandle;
-
 class SdlDisplay final : public tt::hal::display::DisplayDevice {
+
+    lv_disp_t* displayHandle = nullptr;
 
 public:
 
@@ -15,15 +14,29 @@ public:
     std::string getDescription() const override { return ""; }
 
     bool start() override { return true; }
-    bool stop() override { check(false, "Not supported"); }
+
+    bool stop() override { return true; }
 
     bool supportsLvgl() const override { return true; }
-    bool startLvgl() override { return displayHandle != nullptr; }
-    bool stopLvgl() override { check(false, "Not supported"); }
-    lv_display_t* _Nullable getLvglDisplay() const override { return displayHandle; }
 
-    std::shared_ptr<tt::hal::touch::TouchDevice> _Nullable getTouchDevice() override { return std::make_shared<SdlTouch>(); }
+    bool startLvgl() override {
+        if (displayHandle) return true; // already started
+        displayHandle = lv_sdl_window_create(320, 240);
+        lv_sdl_window_set_title(displayHandle, "Tactility");
+        return displayHandle != nullptr;
+    }
+
+    bool stopLvgl() override {
+        if (!displayHandle) return true;
+        lv_display_delete(displayHandle);
+        displayHandle = nullptr;
+        return true;
+    }
+
+    lv_display_t* getLvglDisplay() const override { return displayHandle; }
+
+    std::shared_ptr<tt::hal::touch::TouchDevice> getTouchDevice() override { return std::make_shared<SdlTouch>(); }
 
     bool supportsDisplayDriver() const override { return false; }
-    std::shared_ptr<tt::hal::display::DisplayDriver> _Nullable getDisplayDriver() override { return nullptr; }
+    std::shared_ptr<tt::hal::display::DisplayDriver> getDisplayDriver() override { return nullptr; }
 };

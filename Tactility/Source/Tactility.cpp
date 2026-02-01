@@ -2,11 +2,15 @@
 #include <sdkconfig.h>
 #endif
 
+#include <format>
+#include <map>
+
 #include <Tactility/Tactility.h>
 #include <Tactility/TactilityConfig.h>
 
 #include <Tactility/app/AppManifestParsing.h>
 #include <Tactility/app/AppRegistration.h>
+#include <Tactility/CpuAffinity.h>
 #include <Tactility/DispatcherThread.h>
 #include <Tactility/file/File.h>
 #include <Tactility/file/FileLock.h>
@@ -19,14 +23,12 @@
 #include <Tactility/network/NtpPrivate.h>
 #include <Tactility/service/ServiceManifest.h>
 #include <Tactility/service/ServiceRegistration.h>
-#include <Tactility/service/loader/Loader.h>
 #include <Tactility/settings/TimePrivate.h>
 
+#include <tactility/concurrent/thread.h>
 #include <tactility/kernel_init.h>
 #include <tactility/hal_device_module.h>
-
-#include <map>
-#include <format>
+#include <tactility/lvgl_module.h>
 
 #ifdef ESP_PLATFORM
 #include <Tactility/InitEsp.h>
@@ -336,8 +338,9 @@ void run(const Configuration& config, Module* platformModule, Module* deviceModu
         return;
     }
 
-    // HAL compatibility module: it creates kernel driver wrappers for tt::hal::Device
+    // Module parent
     check(module_parent_construct(&tactility_module_parent) == ERROR_NONE);
+    // hal-device-module
     check(module_set_parent(&hal_device_module, &tactility_module_parent) == ERROR_NONE);
     check(module_start(&hal_device_module) == ERROR_NONE);
 
@@ -355,7 +358,22 @@ void run(const Configuration& config, Module* platformModule, Module* deviceModu
     network::ntp::init();
 
     registerAndStartPrimaryServices();
-    lvgl::init(hardware);
+
+    lvgl_module_configure((LvglModuleConfig) {
+        .on_start = lvgl::attachDevices,
+        .on_stop = lvgl::detachDevices,
+        .task_priority = THREAD_PRIORITY_HIGHER,
+        /** Minimum seems to be about 3500. In some scenarios, the WiFi app crashes at 8192,
+         * so we now have 9120 to run in a stable manner. We should figure out a way to avoid this.
+         * Perhaps we can give apps their own stack space and deal with lvgl callback handlers in a clever way. */
+        .task_stack_size = 9120,
+#ifdef ESP_PLATFORM
+        .task_affinity = getCpuAffinityConfiguration().graphics
+#endif
+    });
+    check(module_set_parent(&lvgl_module, &tactility_module_parent) == ERROR_NONE);
+    lvgl::start();
+
     registerAndStartSecondaryServices();
 
     LOGGER.info("Core systems ready");
@@ -371,7 +389,8 @@ void run(const Configuration& config, Module* platformModule, Module* deviceModu
     }
 }
 
-const Configuration* _Nullable getConfiguration() {
+/** return the configuration or nullptr if it's not initialized */
+const Configuration* getConfiguration() {
     return config_instance;
 }
 

@@ -1,9 +1,11 @@
 #pragma once
 
-#include <Tactility/hal/Configuration.h>
+#include <Tactility/lvgl/Lvgl.h>
 
 namespace tt::lvgl {
 
-void init(const hal::Configuration& config);
+void attachDevices();
 
-} // namespace
+void detachDevices();
+
+}

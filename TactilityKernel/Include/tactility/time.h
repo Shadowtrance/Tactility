@@ -5,6 +5,9 @@
  */
 #pragma once
 
+#ifndef __cplusplus
+#include <assert.h>
+#endif
 #include <stdint.h>
 
 #include "defines.h"
@@ -17,8 +20,16 @@
 #include <time.h>
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Projects that include this header must align with Tactility's frequency (e.g. apps)
+#ifdef __cplusplus
 static_assert(configTICK_RATE_HZ == 1000);
+#else
+static_assert(configTICK_RATE_HZ == 1000, "configTICK_RATE_HZ must be 1000");
+#endif
 
 static inline uint32_t get_tick_frequency() {
     return configTICK_RATE_HZ;
@@ -54,26 +65,30 @@ static inline int64_t get_micros_since_boot() {
 #ifdef ESP_PLATFORM
     return esp_timer_get_time();
 #else
-    timespec ts;
+    struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
-        return (static_cast<int64_t>(ts.tv_sec) * 1000000LL) + (ts.tv_nsec / 1000);
+        return ((int64_t)ts.tv_sec * 1000000LL) + (ts.tv_nsec / 1000);
     }
-    timeval tv;
-    gettimeofday(&tv, nullptr);
-    return (static_cast<int64_t>(tv.tv_sec) * 1000000LL) + tv.tv_usec;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return ((int64_t)tv.tv_sec * 1000000LL) + tv.tv_usec;
 #endif
 }
 
 /** Convert seconds to ticks */
 static inline TickType_t seconds_to_ticks(uint32_t seconds) {
-    return static_cast<uint64_t>(seconds) * 1000U / portTICK_PERIOD_MS;
+    return (uint64_t)seconds * 1000U / portTICK_PERIOD_MS;
 }
 
 /** Convert milliseconds to ticks */
 static inline TickType_t millis_to_ticks(uint32_t milliSeconds) {
 #if configTICK_RATE_HZ == 1000
-    return static_cast<TickType_t>(milliSeconds);
+    return (TickType_t)milliSeconds;
 #else
     return static_cast<TickType_t>(((float)configTICK_RATE_HZ) / 1000.0f * (float)milliSeconds);
 #endif
 }
+
+#ifdef __cplusplus
+}
+#endif

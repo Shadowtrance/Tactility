@@ -8,8 +8,8 @@ if (DEFINED ENV{ESP_IDF_VERSION})
         PlatformEsp32
         TactilityCore
         TactilityFreeRtos
-        hal-device
-        lvgl
+        hal-device-module
+        lvgl-module
         driver
         elf_loader
         lv_screenshot
@@ -17,7 +17,6 @@ if (DEFINED ENV{ESP_IDF_VERSION})
         esp_http_server
         esp_http_client
         esp-tls
-        esp_lvgl_port
         esp_wifi
         json
         minitar
@@ -63,16 +62,14 @@ else()
         PUBLIC Include/
     )
 
-    add_definitions(-D_Nullable=)
-    add_definitions(-D_Nonnull=)
-
     target_link_libraries(Tactility PUBLIC
         cJSON
         TactilityFreeRtos
         TactilityCore
         TactilityKernel
         PlatformPosix
-        hal-device
+        hal-device-module
+        lvgl-module
         freertos_kernel
         lvgl
         lv_screenshot
