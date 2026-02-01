@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <tactility/freertos/task.h>
 #include <tactility/log.h>
 
@@ -31,7 +32,7 @@ __attribute__((noreturn)) void __crash(void) {
 #ifdef ESP_PLATFORM
     esp_system_abort("System halted. Connect debugger for more info.");
 #else
-    while (true) { /* Indefinite lock-up */ }
+    exit(1);
 #endif
     __builtin_unreachable();
 }
