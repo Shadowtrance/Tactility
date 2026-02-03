@@ -12,9 +12,13 @@ set(Cyan "${Esc}[36m")
 file(READ version.txt TACTILITY_VERSION)
 add_compile_definitions(TT_VERSION="${TACTILITY_VERSION}")
 
+# tactility_add_module() macro
+include("Buildscripts/module.cmake")
+
 # Determine device identifier and project location
+include("Buildscripts/device.cmake")
+
 if (DEFINED ENV{ESP_IDF_VERSION})
-    include("Buildscripts/device.cmake")
     init_tactility_globals("sdkconfig")
     get_property(TACTILITY_DEVICE_PROJECT GLOBAL PROPERTY TACTILITY_DEVICE_PROJECT)
     get_property(TACTILITY_DEVICE_ID GLOBAL PROPERTY TACTILITY_DEVICE_ID)
