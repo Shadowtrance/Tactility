@@ -1,6 +1,7 @@
 #include <tactility/device.h>
 #include <tactility/driver.h>
 #include <tactility/drivers/i2c_controller.h>
+#include <tactility/drivers/i2s_controller.h>
 #include <tactility/drivers/gpio_controller.h>
 #include <tactility/concurrent/dispatcher.h>
 #include <tactility/concurrent/event_group.h>
@@ -58,6 +59,7 @@ const struct ModuleSymbol KERNEL_SYMBOLS[] = {
     DEFINE_MODULE_SYMBOL(gpio_controller_set_options),
     DEFINE_MODULE_SYMBOL(gpio_controller_get_options),
     DEFINE_MODULE_SYMBOL(gpio_controller_get_pin_count),
+    DEFINE_MODULE_SYMBOL(GPIO_CONTROLLER_TYPE),
     // drivers/i2c_controller
     DEFINE_MODULE_SYMBOL(i2c_controller_read),
     DEFINE_MODULE_SYMBOL(i2c_controller_write),
@@ -66,6 +68,14 @@ const struct ModuleSymbol KERNEL_SYMBOLS[] = {
     DEFINE_MODULE_SYMBOL(i2c_controller_write_register),
     DEFINE_MODULE_SYMBOL(i2c_controller_write_register_array),
     DEFINE_MODULE_SYMBOL(i2c_controller_has_device_at_address),
+    DEFINE_MODULE_SYMBOL(I2C_CONTROLLER_TYPE),
+    // drivers/i2s_controller
+    DEFINE_MODULE_SYMBOL(i2s_controller_read),
+    DEFINE_MODULE_SYMBOL(i2s_controller_write),
+    DEFINE_MODULE_SYMBOL(i2s_controller_set_config),
+    DEFINE_MODULE_SYMBOL(i2s_controller_get_config),
+    DEFINE_MODULE_SYMBOL(i2s_controller_reset),
+    DEFINE_MODULE_SYMBOL(I2S_CONTROLLER_TYPE),
     // concurrent/dispatcher
     DEFINE_MODULE_SYMBOL(dispatcher_alloc),
     DEFINE_MODULE_SYMBOL(dispatcher_free),
