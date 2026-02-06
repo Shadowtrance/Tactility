@@ -12,23 +12,14 @@
 
 #define TAG "driver"
 
-struct DriverPrivate {
-    Mutex mutex { 0 };
+struct DriverInternal {
     int use_count = 0;
     bool destroying = false;
-
-    DriverPrivate() {
-        mutex_construct(&mutex);
-    }
-
-    ~DriverPrivate() {
-        mutex_destruct(&mutex);
-    }
 };
 
 struct DriverLedger {
     std::vector<Driver*> drivers;
-    Mutex mutex { 0 };
+    Mutex mutex {};
 
     DriverLedger() { mutex_construct(&mutex); }
     ~DriverLedger() { mutex_destruct(&mutex); }
@@ -37,43 +28,32 @@ struct DriverLedger {
     void unlock() { mutex_unlock(&mutex); }
 };
 
-static DriverLedger& get_ledger() {
-    static DriverLedger ledger;
-    return ledger;
-}
-
-#define ledger get_ledger()
-
-#define get_driver_private(driver) static_cast<DriverPrivate*>(driver->driver_private)
-#define driver_lock(driver) mutex_lock(&get_driver_private(driver)->mutex);
-#define driver_unlock(driver) mutex_unlock(&get_driver_private(driver)->mutex);
+static DriverLedger ledger;
 
 extern "C" {
 
 error_t driver_construct(Driver* driver) {
-    driver->driver_private = new(std::nothrow) DriverPrivate;
-    if (driver->driver_private == nullptr) {
+    driver->internal = new(std::nothrow) DriverInternal;
+    if (driver->internal == nullptr) {
         return ERROR_OUT_OF_MEMORY;
     }
     return ERROR_NONE;
 }
 
 error_t driver_destruct(Driver* driver) {
-    driver_lock(driver);
-    // No module means the system owns it and it cannot be destroyed
+    auto* internal = driver->internal;
+
     if (driver->owner == nullptr) {
-        driver_unlock(driver);
         return ERROR_NOT_ALLOWED;
     }
-    if (get_driver_private(driver)->use_count != 0 || get_driver_private(driver)->destroying) {
-        driver_unlock(driver);
+    if (internal->use_count != 0 || internal->destroying) {
         return ERROR_INVALID_STATE;
     }
-    get_driver_private(driver)->destroying = true;
+    internal->destroying = true;
 
-    driver_unlock(driver);
-    delete get_driver_private(driver);
-    driver->driver_private = nullptr;
+    // Nullify internal reference before deletion to prevent use-after-free
+    driver->internal = nullptr;
+    delete internal;
 
     return ERROR_NONE;
 }
@@ -143,10 +123,8 @@ Driver* driver_find_compatible(const char* compatible) {
 }
 
 error_t driver_bind(Driver* driver, Device* device) {
-    driver_lock(driver);
-
     error_t error = ERROR_NONE;
-    if (get_driver_private(driver)->destroying || !device_is_added(device)) {
+    if (driver->internal->destroying || !device_is_added(device)) {
         error = ERROR_INVALID_STATE;
         goto error;
     }
@@ -158,23 +136,18 @@ error_t driver_bind(Driver* driver, Device* device) {
         }
     }
 
-    get_driver_private(driver)->use_count++;
-    driver_unlock(driver);
+    driver->internal->use_count++;
 
     LOG_I(TAG, "bound %s to %s", driver->name, device->name);
     return ERROR_NONE;
 
 error:
-
-    driver_unlock(driver);
     return error;
 }
 
 error_t driver_unbind(Driver* driver, Device* device) {
-    driver_lock(driver);
-
     error_t error = ERROR_NONE;
-    if (get_driver_private(driver)->destroying || !device_is_added(device)) {
+    if (driver->internal->destroying || !device_is_added(device)) {
         error = ERROR_INVALID_STATE;
         goto error;
     }
@@ -186,16 +159,13 @@ error_t driver_unbind(Driver* driver, Device* device) {
         }
     }
 
-    get_driver_private(driver)->use_count--;
-    driver_unlock(driver);
+    driver->internal->use_count--;
 
     LOG_I(TAG, "unbound %s from %s", driver->name, device->name);
 
     return ERROR_NONE;
 
 error:
-
-    driver_unlock(driver);
     return error;
 }
 

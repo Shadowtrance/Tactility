@@ -23,12 +23,12 @@ TEST_CASE("Module construction and destruction") {
         .start = test_start,
         .stop = test_stop,
         .symbols = nullptr,
-        .internal = {.started = false}
+        .internal = nullptr
     };
 
     // Test successful construction
     CHECK_EQ(module_construct(&module), ERROR_NONE);
-    CHECK_EQ(module.internal.started, false);
+    CHECK_EQ(module_is_started(&module), false);
 
     // Test successful destruction
     CHECK_EQ(module_destruct(&module), ERROR_NONE);
@@ -40,7 +40,7 @@ TEST_CASE("Module registration") {
         .start = test_start,
         .stop = test_stop,
         .symbols = nullptr,
-        .internal = {.started = false}
+        .internal = nullptr
     };
 
     // module_add should succeed
@@ -61,8 +61,10 @@ TEST_CASE("Module lifecycle") {
         .start = test_start,
         .stop = test_stop,
         .symbols = nullptr,
-        .internal = {.started = false}
+        .internal = nullptr
     };
+
+    CHECK_EQ(module_construct(&module), ERROR_NONE);
 
     // 1. Successful start (no parent required anymore)
     CHECK_EQ(module_start(&module), ERROR_NONE);
@@ -104,6 +106,8 @@ TEST_CASE("Module lifecycle") {
     // Clean up: fix stop result so we can stop it
     test_stop_result = ERROR_NONE;
     CHECK_EQ(module_stop(&module), ERROR_NONE);
+
+    CHECK_EQ(module_destruct(&module), ERROR_NONE);
 }
 
 TEST_CASE("Global symbol resolution") {
@@ -117,8 +121,10 @@ TEST_CASE("Global symbol resolution") {
         .start = test_start,
         .stop = test_stop,
         .symbols = test_symbols,
-        .internal = {.started = false}
+        .internal = nullptr
     };
+
+    REQUIRE_EQ(module_construct(&module), ERROR_NONE);
 
     uintptr_t addr;
     // Should fail as it is not added or started
@@ -128,8 +134,8 @@ TEST_CASE("Global symbol resolution") {
     REQUIRE_EQ(module_start(&module), ERROR_NONE);
     // Still fails as symbols are null
     CHECK_EQ(module_resolve_symbol_global("symbol_test_function", &addr), true);
-
     // Cleanup
     CHECK_EQ(module_remove(&module), ERROR_NONE);
+
     CHECK_EQ(module_destruct(&module), ERROR_NONE);
 }

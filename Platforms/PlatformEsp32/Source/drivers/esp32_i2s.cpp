@@ -31,7 +31,7 @@ struct InternalData {
 };
 
 #define GET_CONFIG(device) ((Esp32I2sConfig*)device->config)
-#define GET_DATA(device) ((InternalData*)device->internal.driver_data)
+#define GET_DATA(device) ((InternalData*)device_get_driver_data(device))
 
 #define lock(data) mutex_lock(&data->mutex);
 #define unlock(data) mutex_unlock(&data->mutex);
@@ -236,7 +236,7 @@ Driver esp32_i2s_driver = {
     .api = (void*)&esp32_i2s_api,
     .device_type = &I2S_CONTROLLER_TYPE,
     .owner = &platform_module,
-    .driver_private = nullptr
+    .internal = nullptr
 };
 
 } // extern "C"
