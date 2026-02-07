@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include <tactility/concurrent/mutex.h>
+#include <tactility/freertos/freertos.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -212,9 +213,10 @@ void device_lock(struct Device* device);
  * Try to lock the device for exclusive access.
  *
  * @param[in,out] device non-null device pointer
+ * @param[in] timeout how long to wait for the lock
  * @return true if the device was locked successfully
  */
-bool device_try_lock(struct Device* device);
+bool device_try_lock(struct Device* device, TickType_t timeout);
 
 /**
  * Unlock the device.
@@ -256,6 +258,22 @@ void device_for_each_child(struct Device* device, void* callback_context, bool(*
  * @param[in] on_device the function to call for each filtered device. return true to continue iterating or false to stop.
  */
 void device_for_each_of_type(const struct DeviceType* type, void* callback_context, bool(*on_device)(struct Device* device, void* context));
+
+/**
+ * Check if a device of the specified type exists.
+ *
+ * @param[in] type the type to check
+ * @return true if a device of the specified type exists
+ */
+bool device_exists_of_type(const struct DeviceType* type);
+
+/**
+ * Find a device by its name.
+ *
+ * @param[in] name non-null device name to look up
+ * @return the device pointer if found, or NULL if not found
+ */
+struct Device* device_find_by_name(const char* name);
 
 #ifdef __cplusplus
 }

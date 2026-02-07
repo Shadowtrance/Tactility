@@ -293,8 +293,8 @@ void device_lock(struct Device* device) {
     mutex_lock(&device->internal->mutex);
 }
 
-bool device_try_lock(struct Device* device) {
-    return mutex_try_lock(&device->internal->mutex);
+bool device_try_lock(struct Device* device, TickType_t timeout) {
+    return mutex_try_lock(&device->internal->mutex, timeout);
 }
 
 void device_unlock(struct Device* device) {
@@ -336,6 +336,33 @@ void device_for_each_of_type(const DeviceType* type, void* callbackContext, bool
         }
     }
     ledger_unlock();
+}
+
+bool device_exists_of_type(const DeviceType* type) {
+    bool found = false;
+    ledger_lock();
+    for (auto* device : ledger.devices) {
+        auto* driver = device->internal->driver;
+        if (driver != nullptr && driver->device_type == type) {
+            found = true;
+            break;
+        }
+    }
+    ledger_unlock();
+    return found;
+}
+
+Device* device_find_by_name(const char* name) {
+    Device* found = nullptr;
+    ledger_lock();
+    for (auto* device : ledger.devices) {
+        if (device->name != nullptr && std::strcmp(device->name, name) == 0) {
+            found = device;
+            break;
+        }
+    }
+    ledger_unlock();
+    return found;
 }
 
 } // extern "C"
