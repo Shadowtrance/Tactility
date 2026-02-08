@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Tactility/hal/display/DisplayDevice.h>
-#include <Tactility/hal/spi/Spi.h>
+#include <driver/spi_common.h>
 
 #include <EspLcdDisplay.h>
 #include <functional>
@@ -78,7 +78,6 @@ private:
 public:
 
     explicit St7796Display(std::unique_ptr<Configuration> inConfiguration) :
-        EspLcdDisplay(tt::hal::spi::getLock(inConfiguration->spiHostDevice)),
         configuration(std::move(inConfiguration)
     ) {
         assert(configuration != nullptr);

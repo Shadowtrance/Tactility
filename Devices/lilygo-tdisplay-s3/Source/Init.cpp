@@ -4,12 +4,8 @@
 #include "PwmBacklight.h"
 #include "Tactility/kernel/SystemEvents.h"
 #include <Tactility/TactilityCore.h>
-#include <Tactility/hal/spi/Spi.h>
 
 #define TAG "tdisplay-s3"
-
-// Power on
-
 
 static bool powerOn() {
     gpio_config_t power_signal_config = {

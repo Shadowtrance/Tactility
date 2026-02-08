@@ -47,8 +47,8 @@ static void dispatchDisconnectButKeepActive(std::shared_ptr<Wifi> wifi);
 class Wifi {
 
     std::atomic<RadioState> radio_state = RadioState::Off;
-    bool scan_active = false;
-    bool secure_connection = false;
+    std::atomic<bool> scan_active = false;
+    std::atomic<bool> secure_connection = false;
 
 public:
 
@@ -81,54 +81,34 @@ public:
     kernel::SystemEventSubscription bootEventSubscription = kernel::NoSystemEventSubscription;
 
     RadioState getRadioState() const {
-        auto lock = dataMutex.asScopedLock();
-        lock.lock();
-        // TODO: Handle lock failure
         return radio_state;
     }
 
     void setRadioState(RadioState newState) {
-        auto lock = dataMutex.asScopedLock();
-        lock.lock();
-        // TODO: Handle lock failure
         radio_state = newState;
     }
 
     bool isScanning() const {
-        auto lock = dataMutex.asScopedLock();
-        lock.lock();
-        // TODO: Handle lock failure
         return scan_active;
     }
 
     void setScanning(bool newState) {
-        auto lock = dataMutex.asScopedLock();
-        lock.lock();
-        // TODO: Handle lock failure
         scan_active = newState;
     }
 
     bool isScanActive() const {
-        auto lock = dataMutex.asScopedLock();
-        lock.lock();
         return scan_active;
     }
 
     void setScanActive(bool newState) {
-        auto lock = dataMutex.asScopedLock();
-        lock.lock();
         scan_active = newState;
     }
 
     bool isSecureConnection() const {
-        auto lock = dataMutex.asScopedLock();
-        lock.lock();
         return secure_connection;
     }
 
     void setSecureConnection(bool newState) {
-        auto lock = dataMutex.asScopedLock();
-        lock.lock();
         secure_connection = newState;
     }
 };
@@ -321,11 +301,6 @@ void setEnabled(bool enabled) {
 bool isConnectionSecure() {
     auto wifi = wifi_singleton;
     if (wifi == nullptr) {
-        return false;
-    }
-
-    auto lock = wifi->dataMutex.asScopedLock();
-    if (!lock.lock(10 / portTICK_PERIOD_MS)) {
         return false;
     }
 
@@ -878,7 +853,7 @@ static void dispatchDisconnectButKeepActive(std::shared_ptr<Wifi> wifi) {
 
 static bool shouldScanForAutoConnect(std::shared_ptr<Wifi> wifi) {
     auto lock = wifi->dataMutex.asScopedLock();
-    if (!lock.lock(100)) {
+    if (!lock.lock(100 / portTICK_PERIOD_MS)) {
         return false;
     }
 
@@ -912,8 +887,12 @@ void onAutoConnectTimer() {
 std::string getIp() {
     auto wifi = std::static_pointer_cast<Wifi>(wifi_singleton);
 
+    if (wifi == nullptr) return "127.0.0.1";
+
     auto lock = wifi->dataMutex.asScopedLock();
-    lock.lock();
+    if (!lock.lock(100 / portTICK_PERIOD_MS)) {
+        return "127.0.0.1";
+    }
 
     return std::format("{}.{}.{}.{}", IP2STR(&wifi->ip_info.ip));
 }

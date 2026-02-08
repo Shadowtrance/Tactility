@@ -1,19 +1,16 @@
 #pragma once
 
-#include "Tactility/hal/spi/Spi.h"
-
 #include <EspLcdDisplay.h>
 #include <Tactility/hal/display/DisplayDevice.h>
 
 #include <driver/gpio.h>
+#include <driver/spi_common.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_types.h>
 #include <functional>
 #include <lvgl.h>
 
 class St7735Display final : public EspLcdDisplay {
-
-    std::shared_ptr<tt::Lock> lock;
 
 public:
 
@@ -88,12 +85,8 @@ private:
 public:
 
     explicit St7735Display(std::unique_ptr<Configuration> inConfiguration) :
-        EspLcdDisplay(tt::hal::spi::getLock(inConfiguration->spiHostDevice)),
         configuration(std::move(inConfiguration)
-    ) {
-        assert(configuration != nullptr);
-        assert(getLock() != nullptr);
-    }
+    ) {}
 
     std::string getName() const override { return "ST7735"; }
 

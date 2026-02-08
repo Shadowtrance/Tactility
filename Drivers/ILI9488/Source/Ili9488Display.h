@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Tactility/hal/display/DisplayDevice.h>
-#include <Tactility/hal/spi/Spi.h>
+#include <driver/spi_common.h>
 
 #include <EspLcdDisplay.h>
 
@@ -28,7 +28,7 @@ public:
             bool mirrorX = false,
             bool mirrorY = false,
             bool invertColor = false,
-            uint32_t bufferSize = 0 // Size in pixel count. 0 means default, which is 1/20 of the screen size
+            uint32_t bufferSize = 0 // Size in pixel count. 0 means default, which is 1/10 of the screen size
         ) : spiHostDevice(spiHostDevice),
             csPin(csPin),
             dcPin(dcPin),
@@ -75,7 +75,6 @@ private:
 public:
 
     explicit Ili9488Display(std::unique_ptr<Configuration> inConfiguration) :
-        EspLcdDisplay(tt::hal::spi::getLock(inConfiguration->spiHostDevice)),
         configuration(std::move(inConfiguration)
     ) {
         assert(configuration != nullptr);

@@ -3,13 +3,13 @@
 #include <PwmBacklight.h>
 #include <St7735Display.h>
 
-#define LCD_SPI_HOST SPI3_HOST
+#define LCD_SPI_HOST SPI2_HOST
 #define LCD_PIN_CS GPIO_NUM_4
 #define LCD_PIN_DC GPIO_NUM_2
 #define LCD_PIN_RESET GPIO_NUM_1
 #define LCD_HORIZONTAL_RESOLUTION 80
 #define LCD_VERTICAL_RESOLUTION 160
-#define LCD_SPI_TRANSFER_HEIGHT LCD_VERTICAL_RESOLUTION / 4
+#define LCD_SPI_TRANSFER_HEIGHT (LCD_VERTICAL_RESOLUTION / 4)
 
 std::shared_ptr<tt::hal::display::DisplayDevice> createDisplay() {
     auto configuration = std::make_unique<St7735Display::Configuration>(

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <Tactility/Lock.h>
 #include <tactility/check.h>
 #include <Tactility/hal/display/DisplayDevice.h>
 
@@ -14,8 +13,8 @@ class EspLcdDisplay : public tt::hal::display::DisplayDevice {
     esp_lcd_panel_handle_t panelHandle = nullptr;
     lv_display_t* lvglDisplay = nullptr;
     std::shared_ptr<tt::hal::display::DisplayDriver> displayDriver;
-    std::shared_ptr<tt::Lock> lock;
-    lcd_rgb_element_order_t rgbElementOrder;
+    /** @warning This is never changed, so a driver that needs BGR is not supported */
+    lcd_rgb_element_order_t rgbElementOrder = LCD_RGB_ELEMENT_ORDER_RGB;
 
 protected:
 
@@ -34,11 +33,9 @@ protected:
 
 public:
 
-    EspLcdDisplay(std::shared_ptr<tt::Lock> lock) : lock(lock) {}
+    EspLcdDisplay() = default;
 
     ~EspLcdDisplay() override;
-
-    std::shared_ptr<tt::Lock> getLock() const { return lock; }
 
     bool start() final;
 
