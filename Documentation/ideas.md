@@ -12,8 +12,6 @@
 ## Higher Priority
 
 - Make a root device type so it can be discovered more easily.
-- DTS/yaml: Consider support for default values.
-- DTS: throw custom exceptions and catch them to show cleaner error messages.
 - When device.py selects a new device, it should automatically delete the build dirs (build/, cmake-*/) when it detects that the platform has changed.
 - Add font design tokens such as "regular", "title" and "smaller". Perhaps via the LVGL kernel module.
 - Add kernel listening mechanism so that the root device init can be notified when a device becomes available: 
@@ -69,8 +67,6 @@
 
 ## Lower Priority
 
-- Rename `Lock::lock()` and `Lock::unlock()` to `Lock::acquire()` and `Lock::release()`?
-- Implement system suspend that turns off the screen
 - The boot button on some devices can be used as GPIO_NUM_0 at runtime
 - Localize all apps
 - Support hot-plugging SD card (note: this is not possible if they require the CS pin hack)
