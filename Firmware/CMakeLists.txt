@@ -53,7 +53,7 @@ add_custom_command(
         "${GENERATED_DIR}/devicetree.h"
     COMMAND pip install lark==1.3.1 pyyaml==6.0.3
     COMMAND python "${CMAKE_SOURCE_DIR}/Buildscripts/DevicetreeCompiler/compile.py"
-    "${DEVICETREE_LOCATION}" "${GENERATED_DIR}"
+        "${DEVICETREE_LOCATION}" "${GENERATED_DIR}"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     DEPENDS AlwaysRun "${DEVICETREE_LOCATION}/devicetree.yaml" # AlwaysRun ensures it always gets built
     COMMENT "Generating devicetree source files..."

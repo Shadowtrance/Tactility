@@ -2,6 +2,7 @@
 #pragma once
 
 #include <tactility/drivers/i2s_controller.h>
+#include <tactility/drivers/gpio.h>
 #include <driver/i2s_common.h>
 
 #ifdef __cplusplus
@@ -10,11 +11,11 @@ extern "C" {
 
 struct Esp32I2sConfig {
     i2s_port_t port;
-    int pin_bclk;
-    int pin_ws;
-    int pin_data_out;
-    int pin_data_in;
-    int pin_mclk;
+    struct GpioPinSpec pin_bclk;
+    struct GpioPinSpec pin_ws;
+    struct GpioPinSpec pin_data_out;
+    struct GpioPinSpec pin_data_in;
+    struct GpioPinSpec pin_mclk;
 };
 
 #ifdef __cplusplus

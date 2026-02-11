@@ -18,16 +18,16 @@
 		compatible = "espressif,esp32-i2c";
 		port = <I2C_NUM_0>;
 		clock-frequency = <400000>;
-		pin-sda = <41>;
-		pin-scl = <42>;
+		pin-sda = <&gpio0 41 GPIO_FLAG_NONE>;
+		pin-scl = <&gpio0 42 GPIO_FLAG_NONE>;
 	};
 
 	spi0 {
 		compatible = "espressif,esp32-spi";
 		host = <SPI2_HOST>;
-		pin-mosi = <38>;
-		pin-miso = <40>;
-		pin-sclk = <39>;
+		pin-mosi = <&gpio0 38 GPIO_FLAG_NONE>;
+		pin-miso = <&gpio0 40 GPIO_FLAG_NONE>;
+		pin-sclk = <&gpio0 39 GPIO_FLAG_NONE>;
 		max-transfer-size = <4096>;
 	};
 };

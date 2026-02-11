@@ -10,106 +10,136 @@ extern "C" {
 #include <tactility/error.h>
 
 struct Device;
+struct GpioDescriptor;
 
 struct GpioControllerApi {
     /**
      * @brief Sets the logical level of a GPIO pin.
-     * @param[in] device the GPIO controller device
-     * @param[in] pin the pin index
+     * @param[in,out] descriptor the pin descriptor
      * @param[in] high true to set the pin high, false to set it low
      * @return ERROR_NONE if successful
      */
-    error_t (*set_level)(struct Device* device, gpio_pin_t pin, bool high);
+    error_t (*set_level)(struct GpioDescriptor* descriptor, bool high);
 
     /**
      * @brief Gets the logical level of a GPIO pin.
-     * @param[in] device the GPIO controller device
-     * @param[in] pin the pin index
+     * @param[in] descriptor the pin descriptor
      * @param[out] high pointer to store the pin level
      * @return ERROR_NONE if successful
      */
-    error_t (*get_level)(struct Device* device, gpio_pin_t pin, bool* high);
+    error_t (*get_level)(struct GpioDescriptor* descriptor, bool* high);
 
     /**
      * @brief Configures the options for a GPIO pin.
-     * @param[in] device the GPIO controller device
-     * @param[in] pin the pin index
-     * @param[in] options configuration flags (direction, pull-up/down, etc.)
+     * @param[in,out] descriptor the pin descriptor
+     * @param[in] flags configuration flags (direction, pull-up/down, etc.)
      * @return ERROR_NONE if successful
      */
-    error_t (*set_options)(struct Device* device, gpio_pin_t pin, gpio_flags_t options);
+    error_t (*set_flags)(struct GpioDescriptor* descriptor, gpio_flags_t flags);
 
     /**
      * @brief Gets the configuration options for a GPIO pin.
-     * @param[in] device the GPIO controller device
-     * @param[in] pin the pin index
-     * @param[out] options pointer to store the configuration flags
+     * @param[in] descriptor the pin descriptor
+     * @param[out] flags pointer to store the configuration flags
      * @return ERROR_NONE if successful
      */
-    error_t (*get_options)(struct Device* device, gpio_pin_t pin, gpio_flags_t* options);
+    error_t (*get_flags)(struct GpioDescriptor* descriptor, gpio_flags_t* flags);
 
     /**
-     * @brief Gets the number of pins supported by the controller.
-     * @param[in] device the GPIO controller device
-     * @param[out] count pointer to store the number of pins
+     * @brief Gets the native pin number associated with a descriptor.
+     * @param[in] descriptor the pin descriptor
+     * @param[out] pin_number pointer to store the pin number
      * @return ERROR_NONE if successful
      */
-    error_t (*get_pin_count)(struct Device* device, uint32_t* count);
+    error_t (*get_native_pin_number)(struct GpioDescriptor* descriptor, void* pin_number);
 };
+
+struct GpioDescriptor* gpio_descriptor_acquire(
+    struct Device* controller,
+    gpio_pin_t pin_number,
+    enum GpioOwnerType owner
+);
+
+error_t gpio_descriptor_release(struct GpioDescriptor* descriptor);
+
+/**
+ * @brief Gets the pin number associated with a descriptor.
+ * @param[in] descriptor the pin descriptor
+ * @param[out] pin pointer to store the pin number
+ * @return ERROR_NONE if successful
+ */
+error_t gpio_descriptor_get_pin_number(struct GpioDescriptor* descriptor, gpio_pin_t* pin);
+
+/**
+ * @brief Gets the pin owner type associated with a descriptor.
+ * @param[in] descriptor the pin descriptor
+ * @param[out] owner_type pointer to output owner type
+ * @return ERROR_NONE if successful
+ */
+error_t gpio_descriptor_get_owner_type(struct GpioDescriptor* descriptor, enum GpioOwnerType* owner_type);
 
 /**
  * @brief Sets the logical level of a GPIO pin.
- * @param[in] device the GPIO controller device
- * @param[in] pin the pin index
+ * @param[in] descriptor the pin descriptor
  * @param[in] high true to set the pin high, false to set it low
  * @return ERROR_NONE if successful
  */
-error_t gpio_controller_set_level(struct Device* device, gpio_pin_t pin, bool high);
+error_t gpio_descriptor_set_level(struct GpioDescriptor* descriptor, bool high);
 
 /**
  * @brief Gets the logical level of a GPIO pin.
- * @param[in] device the GPIO controller device
- * @param[in] pin the pin index
+ * @param[in] descriptor the pin descriptor
  * @param[out] high pointer to store the pin level
  * @return ERROR_NONE if successful
  */
-error_t gpio_controller_get_level(struct Device* device, gpio_pin_t pin, bool* high);
+error_t gpio_descriptor_get_level(struct GpioDescriptor* descriptor, bool* high);
 
 /**
  * @brief Configures the options for a GPIO pin.
- * @param[in] device the GPIO controller device
- * @param[in] pin the pin index
- * @param[in] options configuration flags (direction, pull-up/down, etc.)
+ * @param[in] descriptor the pin descriptor
+ * @param[in] flags configuration flags (direction, pull-up/down, etc.)
  * @return ERROR_NONE if successful
  */
-error_t gpio_controller_set_options(struct Device* device, gpio_pin_t pin, gpio_flags_t options);
+error_t gpio_descriptor_set_flags(struct GpioDescriptor* descriptor, gpio_flags_t flags);
 
 /**
  * @brief Gets the configuration options for a GPIO pin.
- * @param[in] device the GPIO controller device
- * @param[in] pin the pin index
- * @param[out] options pointer to store the configuration flags
+ * @param[in] descriptor the pin descriptor
+ * @param[out] flags pointer to store the configuration flags
  * @return ERROR_NONE if successful
  */
-error_t gpio_controller_get_options(struct Device* device, gpio_pin_t pin, gpio_flags_t* options);
+error_t gpio_descriptor_get_flags(struct GpioDescriptor* descriptor, gpio_flags_t* flags);
 
 /**
-     * @brief Gets the number of pins supported by the controller.
-     * @param[in] device the GPIO controller device
-     * @param[out] count pointer to store the number of pins
-     * @return ERROR_NONE if successful
-     */
+ * @brief Gets the native pin number associated with a descriptor.
+ * @param[in] descriptor the pin descriptor
+ * @param[out] pin_number pointer to store the pin number
+ * @return ERROR_NONE if successful
+ */
+error_t gpio_descriptor_get_native_pin_number(struct GpioDescriptor* descriptor, void* pin_number);
+
+/**
+ * @brief Gets the number of pins supported by the controller.
+ * @param[in] device the GPIO controller device
+ * @param[out] count pointer to store the number of pins
+ * @return ERROR_NONE if successful
+ */
 error_t gpio_controller_get_pin_count(struct Device* device, uint32_t* count);
 
 /**
- * @brief Configures the options for a GPIO pin using a pin configuration structure.
- * @param[in] device the GPIO controller device
- * @param[in] config the pin configuration structure
+ * @brief Initializes GPIO descriptors for a controller.
+ * @param[in,out] device the GPIO controller device
+ * @param[in] controller_context pointer to store in the controller's internal data
  * @return ERROR_NONE if successful
  */
-static inline error_t gpio_set_options_config(struct Device* device, const struct GpioPinConfig* config) {
-    return gpio_controller_set_options(device, config->pin, config->flags);
-}
+error_t gpio_controller_init_descriptors(struct Device* device, uint32_t pin_count, void* controller_context);
+
+/**
+ * @brief Deinitializes GPIO descriptors for a controller.
+ * @param[in,out] device the GPIO controller device
+ * @return ERROR_NONE if successful
+ */
+error_t gpio_controller_deinit_descriptors(struct Device* device);
 
 extern const struct DeviceType GPIO_CONTROLLER_TYPE;
 

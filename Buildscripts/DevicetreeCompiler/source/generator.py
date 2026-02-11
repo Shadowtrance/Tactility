@@ -57,7 +57,7 @@ def find_phandle(devices: list[Device], phandle: str):
     for device in devices:
         if device.node_name == phandle or device.node_alias == phandle:
             return f"&{get_device_node_name_safe(device)}"
-    raise DevicetreeException(f"phandle '{phandle}' not found in device tree")
+    raise DevicetreeException(f"phandle '{phandle}' not found in devicetree")
 
 def property_to_string(property: DeviceProperty, devices: list[Device]) -> str:
     type = property.type
@@ -77,6 +77,20 @@ def property_to_string(property: DeviceProperty, devices: list[Device]) -> str:
         return "{ " + ",".join(value_list) + " }"
     elif type == "phandle":
         return find_phandle(devices, property.value)
+    elif type == "phandle-array":
+        value_list = list()
+        if isinstance(property.value, list):
+            for item in property.value:
+                if isinstance(item, PropertyValue):
+                    value_list.append(property_to_string(DeviceProperty(name="", type=item.type, value=item.value), devices))
+                else:
+                    value_list.append(str(item))
+            return "{ " + ",".join(value_list) + " }"
+        elif isinstance(property.value, str):
+            # If it's a string, assume it's a #define and show it as-is
+            return property.value
+        else:
+            raise Exception(f"Unsupported phandle-array type for {property.value}")
     else:
         raise DevicetreeException(f"property_to_string() has an unsupported type: {type}")
 
@@ -167,7 +181,15 @@ def write_device_structs(file, device: Device, parent_device: Device, bindings: 
     for child_device in device.devices:
         write_device_structs(file, child_device, device, bindings, devices, verbose)
 
-def write_device_init(file, device: Device, bindings: list[Binding], verbose: bool):
+def get_device_status_variable(device: Device):
+    if device.status == "okay" or device.status is None:
+        return "DTS_DEVICE_STATUS_OKAY"
+    elif device.status == "disabled":
+        return "DTS_DEVICE_STATUS_DISABLED"
+    else:
+        raise DevicetreeException(f"Unsupported device status '{device.status}'")
+
+def write_device_list_entry(file, device: Device, bindings: list[Binding], verbose: bool):
     if verbose:
         print(f"Processing device init code for '{device.node_name}'")
     # Assemble some pre-requisites
@@ -177,11 +199,12 @@ def write_device_init(file, device: Device, bindings: list[Binding], verbose: bo
     # Type & instance names
     node_name = get_device_node_name_safe(device)
     device_variable = node_name
+    status = get_device_status_variable(device)
     # Write device struct
-    file.write("\t{ " f"&{device_variable}, \"{compatible_property.value}\"" " },\n")
+    file.write("\t{ " f"&{device_variable}, \"{compatible_property.value}\", {status}" " },\n")
     # Write children
     for child_device in device.devices:
-        write_device_init(file, child_device, bindings, verbose)
+        write_device_list_entry(file, child_device, bindings, verbose)
 
 # Walk the tree and gather all devices
 def gather_devices(device: Device, output: list[Device]):
@@ -201,6 +224,7 @@ def generate_devicetree_c(filename: str, items: list[object], bindings: list[Bin
         file.write(dedent('''\
         // Default headers
         #include <tactility/device.h>
+        #include <tactility/dts.h>
         // DTS headers
         '''))
 
@@ -216,14 +240,11 @@ def generate_devicetree_c(filename: str, items: list[object], bindings: list[Bin
         for item in items:
             if type(item) is Device:
                 write_device_structs(file, item, None, bindings, devices, verbose)
-        # Init function body start
-        file.write("struct CompatibleDevice devicetree_devices[] = {\n")
-        # Init function body logic
+        file.write("struct DtsDevice dts_devices[] = {\n")
         for item in items:
             if type(item) is Device:
-                write_device_init(file, item, bindings, verbose)
-        # Init function body end
-        file.write("\t{ NULL, NULL },\n")
+                write_device_list_entry(file, item, bindings, verbose)
+        file.write("\tDTS_DEVICE_TERMINATOR\n")
         file.write("};\n")
 
 def generate_devicetree_h(filename: str):
@@ -231,12 +252,13 @@ def generate_devicetree_h(filename: str):
         file.write(dedent('''\
         #pragma once
         #include <tactility/error.h>
+        #include <tactility/dts.h>
         
         #ifdef __cplusplus
         extern "C" {
         #endif
         
-        extern struct CompatibleDevice devicetree_devices[];
+        extern struct DtsDevice dts_devices[];
         
         #ifdef __cplusplus
         }

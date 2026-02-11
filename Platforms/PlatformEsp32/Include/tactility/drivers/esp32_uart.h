@@ -3,6 +3,7 @@
 
 #include <driver/uart.h>
 #include <tactility/drivers/uart_controller.h>
+#include <tactility/drivers/gpio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -10,10 +11,10 @@ extern "C" {
 
 struct Esp32UartConfig {
     uart_port_t port;
-    int pinTx;
-    int pinRx;
-    int pinCts;
-    int pinRts;
+    struct GpioPinSpec pin_tx;
+    struct GpioPinSpec pin_rx;
+    struct GpioPinSpec pin_cts;
+    struct GpioPinSpec pin_rts;
 };
 
 #ifdef __cplusplus

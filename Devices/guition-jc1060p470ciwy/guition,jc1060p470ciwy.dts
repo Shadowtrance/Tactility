@@ -26,17 +26,17 @@
 		compatible = "espressif,esp32-i2c";
 		port = <I2C_NUM_0>;
 		clock-frequency = <400000>;
-		pin-sda = <7>;
-		pin-scl = <8>;
+		pin-sda = <&gpio0 7 GPIO_FLAG_NONE>;
+		pin-scl = <&gpio0 8 GPIO_FLAG_NONE>;
 	};
 
 	i2s0 {
 		compatible = "espressif,esp32-i2s";
 		port = <I2S_NUM_0>;
-		pin-bclk = <12>;
-		pin-ws = <10>;
-		pin-data-out = <9>;
-		pin-data-in = <48>;
-		pin-mclk = <13>;
+		pin-bclk = <&gpio0 12 GPIO_FLAG_NONE>;
+		pin-ws = <&gpio0 10 GPIO_FLAG_NONE>;
+		pin-data-out = <&gpio0 9 GPIO_FLAG_NONE>;
+		pin-data-in = <&gpio0 48 GPIO_FLAG_NONE>;
+		pin-mclk = <&gpio0 13 GPIO_FLAG_NONE>;
 	};
 };

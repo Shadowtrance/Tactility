@@ -21,24 +21,24 @@
 		compatible = "espressif,esp32-i2c";
 		port = <I2C_NUM_0>;
 		clock-frequency = <400000>;
-		pin-sda = <21>;
-		pin-scl = <22>;
+		pin-sda = <&gpio0 21 GPIO_FLAG_NONE>;
+		pin-scl = <&gpio0 22 GPIO_FLAG_NONE>;
 	};
 
 	i2c_port_a {
 		compatible = "espressif,esp32-i2c";
 		port = <I2C_NUM_1>;
 		clock-frequency = <400000>;
-		pin-sda = <32>;
-		pin-scl = <33>;
+		pin-sda = <&gpio0 32 GPIO_FLAG_NONE>;
+		pin-scl = <&gpio0 33 GPIO_FLAG_NONE>;
 	};
 
 	spi0 {
 		compatible = "espressif,esp32-spi";
 		host = <SPI2_HOST>;
-		pin-mosi = <23>;
-		pin-miso = <38>;
-		pin-sclk = <18>;
+		pin-mosi = <&gpio0 23 GPIO_FLAG_NONE>;
+		pin-miso = <&gpio0 38 GPIO_FLAG_NONE>;
+		pin-sclk = <&gpio0 18 GPIO_FLAG_NONE>;
 	};
 
 	// NS4168: Speaker and microphone
@@ -46,16 +46,17 @@
 	i2s0 {
 		compatible = "espressif,esp32-i2s";
 		port = <I2S_NUM_0>;
-		pin-bclk = <12>;
-		pin-ws = <0>;
-		pin-data-out = <2>;
-		pin-data-in = <34>;
+		pin-bclk = <&gpio0 12 GPIO_FLAG_NONE>;
+		pin-ws = <&gpio0 0 GPIO_FLAG_NONE>;
+		pin-data-out = <&gpio0 2 GPIO_FLAG_NONE>;
+		pin-data-in = <&gpio0 34 GPIO_FLAG_NONE>;
 	};
 
 	uart_port_a: uart1 {
 		compatible = "espressif,esp32-uart";
+		status = "disabled";
 		port = <UART_NUM_1>;
-		pin-tx = <33>;
-		pin-rx = <32>;
+		pin-tx = <&gpio0 33 GPIO_FLAG_NONE>;
+		pin-rx = <&gpio0 32 GPIO_FLAG_NONE>;
 	};
 };

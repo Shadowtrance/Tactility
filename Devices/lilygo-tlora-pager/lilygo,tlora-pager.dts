@@ -21,16 +21,16 @@
 		compatible = "espressif,esp32-i2c";
 		port = <I2C_NUM_0>;
 		clock-frequency = <100000>;
-		pin-sda = <3>;
-		pin-scl = <2>;
+		pin-sda = <&gpio0 3 GPIO_FLAG_NONE>;
+		pin-scl = <&gpio0 2 GPIO_FLAG_NONE>;
 	};
 
 	spi0 {
 		compatible = "espressif,esp32-spi";
 		host = <SPI2_HOST>;
-		pin-mosi = <34>;
-		pin-miso = <33>;
-		pin-sclk = <35>;
+		pin-mosi = <&gpio0 34 GPIO_FLAG_NONE>;
+		pin-miso = <&gpio0 33 GPIO_FLAG_NONE>;
+		pin-sclk = <&gpio0 35 GPIO_FLAG_NONE>;
 	};
 
 	// ES8311
@@ -38,24 +38,24 @@
 	i2s0 {
 		compatible = "espressif,esp32-i2s";
 		port = <I2S_NUM_0>;
-		pin-bclk = <11>;
-		pin-ws = <18>;
-		pin-data-out = <45>;
-		pin-data-in = <17>;
-		pin-mclk = <10>;
+		pin-bclk = <&gpio0 11 GPIO_FLAG_NONE>;
+		pin-ws = <&gpio0 18 GPIO_FLAG_NONE>;
+		pin-data-out = <&gpio0 45 GPIO_FLAG_NONE>;
+		pin-data-in = <&gpio0 17 GPIO_FLAG_NONE>;
+		pin-mclk = <&gpio0 10 GPIO_FLAG_NONE>;
 	};
 
 	uart_internal: uart0 {
 		compatible = "espressif,esp32-uart";
 		port = <UART_NUM_0>;
-		pin-tx = <12>;
-		pin-rx = <4>;
+		pin-tx = <&gpio0 12 GPIO_FLAG_NONE>;
+		pin-rx = <&gpio0 4 GPIO_FLAG_NONE>;
 	};
 
 	uart_external: uart1 {
 		compatible = "espressif,esp32-uart";
 		port = <UART_NUM_1>;
-		pin-tx = <43>;
-		pin-rx = <44>;
+		pin-tx = <&gpio0 43 GPIO_FLAG_NONE>;
+		pin-rx = <&gpio0 44 GPIO_FLAG_NONE>;
 	};
 };

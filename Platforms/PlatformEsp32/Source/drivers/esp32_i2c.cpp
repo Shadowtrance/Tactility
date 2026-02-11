@@ -1,31 +1,38 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <driver/i2c.h>
 
-#include <tactility/driver.h>
-#include <tactility/drivers/i2c_controller.h>
-#include <tactility/log.h>
+#include <new>
 
-#include <tactility/time.h>
 #include <tactility/error_esp32.h>
+#include <tactility/driver.h>
+#include <tactility/drivers/gpio_controller.h>
+#include <tactility/drivers/i2c_controller.h>
 #include <tactility/drivers/esp32_i2c.h>
+#include <tactility/log.h>
+#include <tactility/time.h>
 
 #define TAG "esp32_i2c"
 #define ACK_CHECK_EN 1
 
-struct Esp32SpiInternal {
-    Mutex mutex { 0 };
+struct Esp32I2cInternal {
+    Mutex mutex {};
+    GpioDescriptor* sda_descriptor = nullptr;
+    GpioDescriptor* scl_descriptor = nullptr;
 
-    Esp32SpiInternal() {
+    Esp32I2cInternal(GpioDescriptor* sda_descriptor, GpioDescriptor* scl_descriptor) :
+        sda_descriptor(sda_descriptor),
+        scl_descriptor(scl_descriptor)
+    {
         mutex_construct(&mutex);
     }
 
-    ~Esp32SpiInternal() {
+    ~Esp32I2cInternal() {
         mutex_destruct(&mutex);
     }
 };
 
 #define GET_CONFIG(device) ((Esp32I2cConfig*)device->config)
-#define GET_DATA(device) ((Esp32SpiInternal*)device_get_driver_data(device))
+#define GET_DATA(device) ((Esp32I2cInternal*)device_get_driver_data(device))
 
 #define lock(data) mutex_lock(&data->mutex);
 #define unlock(data) mutex_unlock(&data->mutex);
@@ -149,12 +156,35 @@ static error_t start(Device* device) {
     ESP_LOGI(TAG, "start %s", device->name);
     auto dts_config = GET_CONFIG(device);
 
+    auto& sda_spec = dts_config->pinSda;
+    auto& scl_spec = dts_config->pinScl;
+    auto* sda_descriptor = gpio_descriptor_acquire(sda_spec.gpio_controller, sda_spec.pin, GPIO_OWNER_GPIO);
+    if (!sda_descriptor) {
+        LOG_E(TAG, "Failed to acquire pin %u", sda_spec.pin);
+        return ERROR_RESOURCE;
+    }
+
+    auto* scl_descriptor = gpio_descriptor_acquire(scl_spec.gpio_controller, scl_spec.pin, GPIO_OWNER_GPIO);
+    if (!scl_descriptor) {
+        LOG_E(TAG, "Failed to acquire pin %u", scl_spec.pin);
+        gpio_descriptor_release(sda_descriptor);
+        return ERROR_RESOURCE;
+    }
+
+    gpio_num_t sda_pin, scl_pin;
+    check(gpio_descriptor_get_native_pin_number(sda_descriptor, &sda_pin) == ERROR_NONE);
+    check(gpio_descriptor_get_native_pin_number(scl_descriptor, &scl_pin) == ERROR_NONE);
+
+    gpio_flags_t sda_flags, scl_flags;
+    check(gpio_descriptor_get_flags(sda_descriptor, &sda_flags) == ERROR_NONE);
+    check(gpio_descriptor_get_flags(scl_descriptor, &scl_flags) == ERROR_NONE);
+
     i2c_config_t esp_config = {
         .mode = I2C_MODE_MASTER,
-        .sda_io_num = dts_config->pinSda,
-        .scl_io_num = dts_config->pinScl,
-        .sda_pullup_en = dts_config->pinSdaPullUp,
-        .scl_pullup_en = dts_config->pinSclPullUp,
+        .sda_io_num = sda_pin,
+        .scl_io_num = scl_pin,
+        .sda_pullup_en = (sda_flags & GPIO_FLAG_PULL_UP) != 0,
+        .scl_pullup_en = (scl_flags & GPIO_FLAG_PULL_UP) != 0,
         .master {
             .clk_speed = dts_config->clockFrequency
         },
@@ -164,22 +194,33 @@ static error_t start(Device* device) {
     esp_err_t error = i2c_param_config(dts_config->port, &esp_config);
     if (error != ESP_OK) {
         LOG_E(TAG, "Failed to configure port %d: %s", static_cast<int>(dts_config->port), esp_err_to_name(error));
+        check(gpio_descriptor_release(sda_descriptor) == ERROR_NONE);
+        check(gpio_descriptor_release(scl_descriptor) == ERROR_NONE);
         return ERROR_RESOURCE;
     }
 
     error = i2c_driver_install(dts_config->port, esp_config.mode, 0, 0, 0);
     if (error != ESP_OK) {
         LOG_E(TAG, "Failed to install driver at port %d: %s", static_cast<int>(dts_config->port), esp_err_to_name(error));
+        check(gpio_descriptor_release(sda_descriptor) == ERROR_NONE);
+        check(gpio_descriptor_release(scl_descriptor) == ERROR_NONE);
         return ERROR_RESOURCE;
     }
-    auto* data = new Esp32SpiInternal();
+
+    auto* data = new(std::nothrow) Esp32I2cInternal(sda_descriptor, scl_descriptor);
+    if (data == nullptr) {
+        check(gpio_descriptor_release(sda_descriptor) == ERROR_NONE);
+        check(gpio_descriptor_release(scl_descriptor) == ERROR_NONE);
+        return ERROR_OUT_OF_MEMORY;
+    }
+
     device_set_driver_data(device, data);
     return ERROR_NONE;
 }
 
 static error_t stop(Device* device) {
     ESP_LOGI(TAG, "stop %s", device->name);
-    auto* driver_data = static_cast<Esp32SpiInternal*>(device_get_driver_data(device));
+    auto* driver_data = static_cast<Esp32I2cInternal*>(device_get_driver_data(device));
 
     i2c_port_t port = GET_CONFIG(device)->port;
     esp_err_t result = i2c_driver_delete(port);
@@ -187,6 +228,9 @@ static error_t stop(Device* device) {
         LOG_E(TAG, "Failed to delete driver at port %d: %s", static_cast<int>(port), esp_err_to_name(result));
         return ERROR_RESOURCE;
     }
+
+    check(gpio_descriptor_release(driver_data->sda_descriptor) == ERROR_NONE);
+    check(gpio_descriptor_release(driver_data->scl_descriptor) == ERROR_NONE);
 
     device_set_driver_data(device, nullptr);
     delete driver_data;
