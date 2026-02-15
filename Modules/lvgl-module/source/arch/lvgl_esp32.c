@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: Apache-2.0
 #ifdef ESP_PLATFORM
 
 #include <esp_lvgl_port.h>
@@ -16,7 +16,7 @@ bool lvgl_lock(void) {
     return lvgl_port_lock(portMAX_DELAY);
 }
 
-bool lvgl_try_lock_timed(uint32_t timeout) {
+bool lvgl_try_lock(uint32_t timeout) {
     if (!initialized) return true; // We allow (fake) locking because it's safe to do so as LVGL is not running yet
     return lvgl_port_lock(millis_to_ticks(timeout));
 }
