@@ -1,9 +1,10 @@
+#include <Tactility/Tactility.h>
+
 #include <Tactility/RecursiveMutex.h>
+#include <Tactility/StringUtils.h>
 #include <Tactility/app/localesettings/TextResources.h>
 #include <Tactility/lvgl/Toolbar.h>
 #include <Tactility/service/loader/Loader.h>
-#include <Tactility/settings/Time.h>
-#include <Tactility/StringUtils.h>
 #include <Tactility/settings/Language.h>
 #include <Tactility/settings/SystemSettings.h>
 
@@ -85,8 +86,6 @@ class LocaleSettingsApp final : public App {
 public:
 
     void onShow(AppContext& app, lv_obj_t* parent) override {
-        auto ui_scale = hal::getConfiguration()->uiScale;
-
         textResources.load();
 
         lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);

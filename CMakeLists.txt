@@ -25,6 +25,8 @@ if (DEFINED ENV{ESP_IDF_VERSION})
 else ()
     set(TACTILITY_DEVICE_PROJECT "Devices/simulator")
     set(TACTILITY_DEVICE_ID "simulator")
+    set_property(GLOBAL PROPERTY TACTILITY_DEVICE_PROJECT ${TACTILITY_DEVICE_PROJECT})
+    set_property(GLOBAL PROPERTY TACTILITY_DEVICE_ID ${TACTILITY_DEVICE_ID})
 endif ()
 
 if (DEFINED ENV{ESP_IDF_VERSION})
@@ -37,7 +39,7 @@ if (DEFINED ENV{ESP_IDF_VERSION})
         "Devices/${TACTILITY_DEVICE_PROJECT}"
         "Drivers"
         "Modules"
-        "Platforms/PlatformEsp32"
+        "Platforms/platform-esp32"
         "TactilityKernel"
         "Tactility"
         "TactilityC"
@@ -82,7 +84,7 @@ if (NOT DEFINED ENV{ESP_IDF_VERSION})
     add_subdirectory(TactilityCore)
     add_subdirectory(TactilityFreeRtos)
     add_subdirectory(TactilityKernel)
-    add_subdirectory(Platforms/PlatformPosix)
+    add_subdirectory(Platforms/platform-posix)
     add_subdirectory(Devices/simulator)
     add_subdirectory(Libraries/cJSON)
     add_subdirectory(Libraries/lv_screenshot)
