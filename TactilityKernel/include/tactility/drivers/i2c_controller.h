@@ -163,6 +163,50 @@ error_t i2c_controller_write_register_array(struct Device* device, uint8_t addre
  */
 error_t i2c_controller_has_device_at_address(struct Device* device, uint8_t address, TickType_t timeout);
 
+/**
+ * @brief Sets the value of an 8-bit register of an I2C device.
+ * @param[in] device the I2C controller device
+ * @param[in] address the 7-bit I2C address of the slave device
+ * @param[in] reg the register address to set
+ * @param[in] value the value to set the register to
+ * @param[in] timeout the maximum time to wait for the operation to complete
+ * @retval ERROR_NONE when the write operation was successful
+ */
+error_t i2c_controller_register8_set(struct Device* device, uint8_t address, uint8_t reg, uint8_t value, TickType_t timeout);
+
+/**
+ * @brief Gets the value of an 8-bit register of an I2C device.
+ * @param[in] device the I2C controller device
+ * @param[in] address the 7-bit I2C address of the slave device
+ * @param[in] reg the register address to get
+ * @param[out] value a pointer to the variable to store the register value
+ * @param[in] timeout the maximum time to wait for the operation to complete
+ * @retval ERROR_NONE when the read operation was successful
+ */
+error_t i2c_controller_register8_get(struct Device* device, uint8_t address, uint8_t reg, uint8_t* value, TickType_t timeout);
+
+/**
+ * @brief Sets specific bits in an 8-bit register of an I2C device.
+ * @param[in] device the I2C controller device
+ * @param[in] address the 7-bit I2C address of the slave device
+ * @param[in] reg the register address
+ * @param[in] bits_to_set a bitmask of bits to set (set to 1)
+ * @param[in] timeout the maximum time to wait for the operation to complete
+ * @retval ERROR_NONE when the operation was successful
+ */
+error_t i2c_controller_register8_set_bits(struct Device* device, uint8_t address, uint8_t reg, uint8_t bits_to_set, TickType_t timeout);
+
+/**
+ * @brief Resets specific bits in an 8-bit register of an I2C device.
+ * @param[in] device the I2C controller device
+ * @param[in] address the 7-bit I2C address of the slave device
+ * @param[in] reg the register address
+ * @param[in] bits_to_reset a bitmask of bits to reset (set to 0)
+ * @param[in] timeout the maximum time to wait for the operation to complete
+ * @retval ERROR_NONE when the operation was successful
+ */
+error_t i2c_controller_register8_reset_bits(struct Device* device, uint8_t address, uint8_t reg, uint8_t bits_to_reset, TickType_t timeout);
+
 extern const struct DeviceType I2C_CONTROLLER_TYPE;
 
 #ifdef __cplusplus
