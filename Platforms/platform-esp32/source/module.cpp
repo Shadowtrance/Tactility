@@ -32,8 +32,7 @@ static error_t stop() {
     return ERROR_NONE;
 }
 
-// The name must be exactly "platform_module"
-struct Module platform_module = {
+struct Module platform_esp32_module = {
     .name = "platform-esp32",
     .start = start,
     .stop = stop,
