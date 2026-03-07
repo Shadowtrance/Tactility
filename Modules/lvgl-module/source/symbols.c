@@ -60,6 +60,8 @@ const struct ModuleSymbol lvgl_module_symbols[] = {
     DEFINE_MODULE_SYMBOL(lv_obj_get_group),
     DEFINE_MODULE_SYMBOL(lv_obj_get_user_data),
     DEFINE_MODULE_SYMBOL(lv_obj_get_state),
+    DEFINE_MODULE_SYMBOL(lv_obj_get_scroll_bottom),
+    DEFINE_MODULE_SYMBOL(lv_obj_get_scroll_y),
     DEFINE_MODULE_SYMBOL(lv_obj_has_flag),
     DEFINE_MODULE_SYMBOL(lv_obj_has_flag_any),
     DEFINE_MODULE_SYMBOL(lv_obj_has_state),
@@ -158,7 +160,15 @@ const struct ModuleSymbol lvgl_module_symbols[] = {
     DEFINE_MODULE_SYMBOL(lv_obj_set_style_min_height),
     DEFINE_MODULE_SYMBOL(lv_obj_set_style_max_height),
     // lv_font
+    DEFINE_MODULE_SYMBOL(lv_font_get_bitmap_fmt_txt),
     DEFINE_MODULE_SYMBOL(lv_font_get_default),
+    DEFINE_MODULE_SYMBOL(lv_font_get_glyph_bitmap),
+    DEFINE_MODULE_SYMBOL(lv_font_get_glyph_dsc),
+    DEFINE_MODULE_SYMBOL(lv_font_get_glyph_dsc_fmt_txt),
+    DEFINE_MODULE_SYMBOL(lv_font_get_glyph_static_bitmap),
+    DEFINE_MODULE_SYMBOL(lv_font_get_glyph_width),
+    DEFINE_MODULE_SYMBOL(lv_font_get_line_height),
+    DEFINE_MODULE_SYMBOL(lv_font_set_kerning),
     // lv_theme
     DEFINE_MODULE_SYMBOL(lv_theme_get_color_primary),
     DEFINE_MODULE_SYMBOL(lv_theme_get_color_secondary),
@@ -422,5 +432,8 @@ const struct ModuleSymbol lvgl_module_symbols[] = {
     DEFINE_MODULE_SYMBOL(lv_spangroup_refresh),
     DEFINE_MODULE_SYMBOL(lv_span_get_style),
     DEFINE_MODULE_SYMBOL(lv_span_set_text),
+    // lv_binfont
+    DEFINE_MODULE_SYMBOL(lv_binfont_create),
+    DEFINE_MODULE_SYMBOL(lv_binfont_destroy),
     MODULE_SYMBOL_TERMINATOR
 };

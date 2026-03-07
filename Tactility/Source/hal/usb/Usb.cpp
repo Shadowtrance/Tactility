@@ -1,10 +1,13 @@
 #ifdef ESP_PLATFORM
 
+#include <soc/soc_caps.h>
+
 #include <Tactility/hal/usb/Usb.h>
 #include <Tactility/hal/sdcard/SpiSdCardDevice.h>
 #include <Tactility/hal/usb/UsbTusb.h>
 
 #include <Tactility/Logger.h>
+#include <tactility/drivers/esp32_sdmmc.h>
 
 namespace tt::hal::usb {
 
@@ -21,29 +24,41 @@ static Mode currentMode = Mode::Default;
 static RTC_NOINIT_ATTR BootModeData bootModeData;
 
 sdmmc_card_t* getCard() {
-    auto sdcards = findDevices<sdcard::SpiSdCardDevice>(Device::Type::SdCard);
+    sdmmc_card_t* sdcard = nullptr;
 
-    std::shared_ptr<sdcard::SpiSdCardDevice> usable_sdcard;
-    for (auto& sdcard : sdcards) {
-        auto sdcard_candidate = std::static_pointer_cast<sdcard::SpiSdCardDevice>(sdcard);
-        if (sdcard_candidate != nullptr && sdcard_candidate->isMounted() && sdcard_candidate->getCard() != nullptr) {
-            usable_sdcard = sdcard_candidate;
+    // Find old HAL SD card device:
+    auto sdcards = findDevices<sdcard::SpiSdCardDevice>(Device::Type::SdCard);
+    for (auto& device : sdcards) {
+        auto sdcard_device= std::static_pointer_cast<sdcard::SpiSdCardDevice>(device);
+        if (sdcard_device != nullptr && sdcard_device->isMounted() && sdcard_device->getCard() != nullptr) {
+            sdcard = sdcard_device->getCard();
             break;
         }
     }
 
-    if (usable_sdcard == nullptr) {
-        LOGGER.warn("Couldn't find a mounted SpiSdCard");
-        return nullptr;
+#if SOC_SDMMC_HOST_SUPPORTED
+    // Find ESP32 SDMMC device:
+    if (sdcard == nullptr) {
+        device_for_each(&sdcard, [](auto* device, void* context) {
+            if (device_is_ready(device) && device_is_compatible(device, "espressif,esp32-sdmmc")) {
+                auto** sdcard = static_cast<sdmmc_card_t**>(context);
+                auto* sdmmc_card = esp32_sdmmc_get_card(device);
+                if (sdmmc_card) {
+                    *sdcard = sdmmc_card;
+                    return false;
+                }
+                return true;
+            }
+            return true;
+        });
+    }
+#endif
+
+    if (sdcard == nullptr) {
+        LOGGER.warn("Couldn't find a mounted SD card");
     }
 
-    auto* sdmmc_card = usable_sdcard->getCard();
-    if (sdmmc_card == nullptr) {
-        LOGGER.warn("SD card has no card object available");
-        return nullptr;
-    }
-
-    return sdmmc_card;
+    return sdcard;
 }
 
 static bool canStartNewMode() {

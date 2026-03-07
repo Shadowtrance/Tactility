@@ -2,9 +2,14 @@
 
 #include <string>
 
+#include <tactility/filesystem/file_system.h>
+
+
 namespace tt {
 
 bool findFirstMountedSdCardPath(std::string& path);
+
+FileSystem* findSdcardFileSystem(bool mustBeMounted);
 
 std::string getSystemRootPath();
 

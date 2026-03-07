@@ -33,6 +33,7 @@
 #include <cstring>
 #include <ctime>
 #include <ctype.h>
+#include <driver/ledc.h>
 #include <getopt.h>
 #include <dirent.h>
 #include <esp_log.h>
@@ -44,6 +45,7 @@
 #include <lwip/sockets.h>
 #include <lwip/netdb.h>
 #include <lwip/inet.h>
+#include <miniz.h>
 #include <sys/select.h>
 #include <locale.h>
 #include <setjmp.h>
@@ -221,6 +223,7 @@ const esp_elfsym main_symbols[] {
     ESP_ELFSYM_EXPORT(strtod),
     ESP_ELFSYM_EXPORT(strrchr),
     ESP_ELFSYM_EXPORT(strtol),
+    ESP_ELFSYM_EXPORT(strtoul),
     ESP_ELFSYM_EXPORT(strcspn),
     ESP_ELFSYM_EXPORT(strncat),
     ESP_ELFSYM_EXPORT(strpbrk),
@@ -393,6 +396,7 @@ const esp_elfsym main_symbols[] {
     ESP_ELFSYM_EXPORT(gpio_config),
     ESP_ELFSYM_EXPORT(gpio_get_level),
     ESP_ELFSYM_EXPORT(gpio_set_level),
+    ESP_ELFSYM_EXPORT(gpio_reset_pin),
     // driver/i2s_common.h
     ESP_ELFSYM_EXPORT(i2s_new_channel),
     ESP_ELFSYM_EXPORT(i2s_del_channel),
@@ -409,8 +413,30 @@ const esp_elfsym main_symbols[] {
     ESP_ELFSYM_EXPORT(i2s_channel_reconfig_std_clock),
     ESP_ELFSYM_EXPORT(i2s_channel_reconfig_std_slot),
     ESP_ELFSYM_EXPORT(i2s_channel_reconfig_std_gpio),
+    // miniz.h
+    ESP_ELFSYM_EXPORT(tinfl_decompress),
+    ESP_ELFSYM_EXPORT(tinfl_decompress_mem_to_callback),
+    ESP_ELFSYM_EXPORT(tinfl_decompress_mem_to_mem),
+    // ledc
+    ESP_ELFSYM_EXPORT(ledc_update_duty),
+    ESP_ELFSYM_EXPORT(ledc_set_freq),
+    ESP_ELFSYM_EXPORT(ledc_channel_config),
+    ESP_ELFSYM_EXPORT(ledc_set_duty),
+    ESP_ELFSYM_EXPORT(ledc_set_fade),
+    ESP_ELFSYM_EXPORT(ledc_set_fade_with_step),
+    ESP_ELFSYM_EXPORT(ledc_set_fade_with_time),
+    ESP_ELFSYM_EXPORT(ledc_set_fade_step_and_start),
+    ESP_ELFSYM_EXPORT(ledc_set_fade_time_and_start),
+    ESP_ELFSYM_EXPORT(ledc_set_pin),
+    ESP_ELFSYM_EXPORT(ledc_timer_config),
+    ESP_ELFSYM_EXPORT(ledc_timer_pause),
+    ESP_ELFSYM_EXPORT(ledc_timer_resume),
+    ESP_ELFSYM_EXPORT(ledc_timer_rst),
     // esp_heap_caps.h
     ESP_ELFSYM_EXPORT(heap_caps_get_total_size),
+    ESP_ELFSYM_EXPORT(heap_caps_get_allocated_size),
+    ESP_ELFSYM_EXPORT(heap_caps_get_free_size),
+    ESP_ELFSYM_EXPORT(heap_caps_get_largest_free_block),
     // delimiter
     ESP_ELFSYM_END
 };

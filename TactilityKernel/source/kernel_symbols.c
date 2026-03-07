@@ -1,3 +1,7 @@
+#include <tactility/concurrent/dispatcher.h>
+#include <tactility/concurrent/event_group.h>
+#include <tactility/concurrent/thread.h>
+#include <tactility/concurrent/timer.h>
 #include <tactility/device.h>
 #include <tactility/driver.h>
 #include <tactility/drivers/gpio_controller.h>
@@ -6,13 +10,13 @@
 #include <tactility/drivers/root.h>
 #include <tactility/drivers/spi_controller.h>
 #include <tactility/drivers/uart_controller.h>
-#include <tactility/concurrent/dispatcher.h>
-#include <tactility/concurrent/event_group.h>
-#include <tactility/concurrent/thread.h>
-#include <tactility/concurrent/timer.h>
 #include <tactility/error.h>
-#include <tactility/log.h>
+#include <tactility/filesystem/file_system.h>
 #include <tactility/module.h>
+
+#ifndef ESP_PLATFORM
+#include <tactility/log.h>
+#endif
 
 /**
  * This file is a C file instead of C++, so we can import all headers as C code.
@@ -153,6 +157,11 @@ const struct ModuleSymbol KERNEL_SYMBOLS[] = {
     DEFINE_MODULE_SYMBOL(timer_set_callback_priority),
     // error
     DEFINE_MODULE_SYMBOL(error_to_string),
+    // file system
+    DEFINE_MODULE_SYMBOL(file_system_mount),
+    DEFINE_MODULE_SYMBOL(file_system_unmount),
+    DEFINE_MODULE_SYMBOL(file_system_is_mounted),
+    DEFINE_MODULE_SYMBOL(file_system_get_path),
     // log
 #ifndef ESP_PLATFORM
     DEFINE_MODULE_SYMBOL(log_generic),

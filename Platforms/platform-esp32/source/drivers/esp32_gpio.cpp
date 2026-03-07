@@ -12,7 +12,12 @@
 
 #define TAG "esp32_gpio"
 
+struct Esp32GpioInternal {
+    uint8_t isr_service_ref_count = 0;
+};
+
 #define GET_CONFIG(device) ((struct Esp32GpioConfig*)device->config)
+#define GET_INTERNAL_FROM_DESCRIPTOR(gpio_descriptor) ((struct Esp32GpioInternal*)gpio_descriptor->controller_context)
 
 extern "C" {
 
@@ -97,15 +102,76 @@ static error_t get_native_pin_number(GpioDescriptor* descriptor, void* pin_numbe
     return ERROR_NONE;
 }
 
+static error_t add_callback(GpioDescriptor* descriptor, void (*callback)(void*), void* arg) {
+    auto* internal = GET_INTERNAL_FROM_DESCRIPTOR(descriptor);
+    if (internal->isr_service_ref_count == 0) {
+        auto esp_error = gpio_install_isr_service(0);
+        if (esp_error != ESP_OK && esp_error != ESP_ERR_INVALID_STATE) {
+            return esp_err_to_error(esp_error);
+        }
+    }
+
+    auto esp_error = gpio_isr_handler_add(static_cast<gpio_num_t>(descriptor->pin), callback, arg);
+
+    if (esp_error == ESP_OK) {
+        internal->isr_service_ref_count++;
+    } else if (internal->isr_service_ref_count == 0) {
+        gpio_uninstall_isr_service();
+    }
+
+    return esp_err_to_error(esp_error);
+}
+
+static error_t remove_callback(GpioDescriptor* descriptor) {
+    auto esp_error = gpio_isr_handler_remove(static_cast<gpio_num_t>(descriptor->pin));
+    if (esp_error == ESP_OK) {
+        auto* internal = GET_INTERNAL_FROM_DESCRIPTOR(descriptor);
+        check(internal->isr_service_ref_count > 0);
+        internal->isr_service_ref_count--;
+        if (internal->isr_service_ref_count == 0) {
+            gpio_uninstall_isr_service();
+        }
+    }
+    return esp_err_to_error(esp_error);
+}
+
+static error_t enable_interrupt(GpioDescriptor* descriptor) {
+    auto esp_error = gpio_intr_enable(static_cast<gpio_num_t>(descriptor->pin));
+    return esp_err_to_error(esp_error);
+}
+
+static error_t disable_interrupt(GpioDescriptor* descriptor) {
+    auto esp_error = gpio_intr_disable(static_cast<gpio_num_t>(descriptor->pin));
+    return esp_err_to_error(esp_error);
+}
+
 static error_t start(Device* device) {
-    ESP_LOGI(TAG, "start %s", device->name);
-    auto pin_count = GET_CONFIG(device)->gpioCount;
-    return gpio_controller_init_descriptors(device, pin_count, nullptr);
+    LOG_I(TAG, "start %s", device->name);
+    const Esp32GpioConfig* config = GET_CONFIG(device);
+    auto* internal = new Esp32GpioInternal();
+    return gpio_controller_init_descriptors(device, config->gpioCount, internal);
 }
 
 static error_t stop(Device* device) {
-    ESP_LOGI(TAG, "stop %s", device->name);
-    return gpio_controller_deinit_descriptors(device);
+    LOG_I(TAG, "stop %s", device->name);
+    const Esp32GpioConfig* config = GET_CONFIG(device);
+    auto* internal = static_cast<Esp32GpioInternal*>(gpio_controller_get_controller_context(device));
+
+    // First, remove all ISR handlers to prevent callbacks during cleanup
+    for (uint8_t i = 0; i < config->gpioCount; ++i) {
+        gpio_isr_handler_remove(static_cast<gpio_num_t>(i));
+    }
+
+    // Then uninstall ISR service
+    if (internal->isr_service_ref_count > 0) {
+        gpio_uninstall_isr_service();
+    }
+
+    // Now safe to deinit descriptors and delete internal
+    check(gpio_controller_deinit_descriptors(device) == ERROR_NONE);
+    delete internal;
+
+    return ERROR_NONE;
 }
 
 const static GpioControllerApi esp32_gpio_api  = {
@@ -113,17 +179,21 @@ const static GpioControllerApi esp32_gpio_api  = {
     .get_level = get_level,
     .set_flags = set_flags,
     .get_flags = get_flags,
-    .get_native_pin_number = get_native_pin_number
+    .get_native_pin_number = get_native_pin_number,
+    .add_callback = add_callback,
+    .remove_callback = remove_callback,
+    .enable_interrupt = enable_interrupt,
+    .disable_interrupt = disable_interrupt
 };
 
-extern struct Module platform_esp32_module;
+extern Module platform_esp32_module;
 
 Driver esp32_gpio_driver = {
     .name = "esp32_gpio",
     .compatible = (const char*[]) { "espressif,esp32-gpio", nullptr },
     .start_device = start,
     .stop_device = stop,
-    .api =  (void*)&esp32_gpio_api,
+    .api = static_cast<const void*>(&esp32_gpio_api),
     .device_type = &GPIO_CONTROLLER_TYPE,
     .owner = &platform_esp32_module,
     .internal = nullptr

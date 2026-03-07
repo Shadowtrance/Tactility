@@ -7,10 +7,9 @@ extern "C" {
 #endif
 
 #include <tactility/device.h>
-#include <stdbool.h>
 #include <stdint.h>
 
-#define GPIO_FLAGS_MASK 0x1f
+#define GPIO_FLAGS_MASK 0xff
 
 #define GPIO_PIN_NONE -1
 
@@ -27,6 +26,7 @@ extern "C" {
 #define GPIO_FLAG_INTERRUPT_BITMASK (0b111 << 5) // 3 bits to hold the values [0, 5]
 #define GPIO_FLAG_INTERRUPT_FROM_OPTIONS(options) (gpio_int_type_t)((options & GPIO_FLAG_INTERRUPT_BITMASK) >> 5)
 #define GPIO_FLAG_INTERRUPT_TO_OPTIONS(options, interrupt) (options | (interrupt << 5))
+#define GPIO_FLAG_HIGH_IMPEDANCE (1 << 8)
 
 typedef enum {
     GPIO_INTERRUPT_DISABLE = 0,
