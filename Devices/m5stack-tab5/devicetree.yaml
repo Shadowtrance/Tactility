@@ -3,4 +3,8 @@ dependencies:
 - Drivers/pi4ioe5v6408-module
 - Drivers/bmi270-module
 - Drivers/rx8130ce-module
+- Drivers/usb-host-module
+- Drivers/usb-host-hid-module
+- Drivers/usb-host-msc-module
+- Drivers/usb-host-midi-module
 dts: m5stack,tab5.dts

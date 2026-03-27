@@ -1,3 +1,7 @@
 dependencies:
-  - Platforms/platform-esp32
+- Platforms/platform-esp32
+- Drivers/usb-host-module
+- Drivers/usb-host-hid-module
+- Drivers/usb-host-msc-module
+- Drivers/usb-host-midi-module
 dts: bigtreetech,panda-touch.dts

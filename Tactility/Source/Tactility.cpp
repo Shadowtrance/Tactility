@@ -48,6 +48,7 @@ static Dispatcher mainDispatcher;
 // region Default services
 namespace service {
     // Primary
+    namespace bluetooth { extern const ServiceManifest manifest; }
     namespace gps { extern const ServiceManifest manifest; }
     namespace wifi { extern const ServiceManifest manifest; }
 #ifdef ESP_PLATFORM
@@ -105,6 +106,7 @@ namespace app {
     namespace timedatesettings { extern const AppManifest manifest; }
     namespace timezone { extern const AppManifest manifest; }
     namespace usbsettings { extern const AppManifest manifest; }
+    namespace btmanage { extern const AppManifest manifest; }
     namespace wifiapsettings { extern const AppManifest manifest; }
     namespace wificonnect { extern const AppManifest manifest; }
     namespace wifimanage { extern const AppManifest manifest; }
@@ -154,6 +156,7 @@ static void registerInternalApps() {
     addAppManifest(app::systeminfo::manifest);
     addAppManifest(app::timedatesettings::manifest);
     addAppManifest(app::timezone::manifest);
+    addAppManifest(app::btmanage::manifest);
     addAppManifest(app::wifiapsettings::manifest);
     addAppManifest(app::wificonnect::manifest);
     addAppManifest(app::wifimanage::manifest);
@@ -261,6 +264,7 @@ static void registerAndStartSecondaryServices() {
 
 static void registerAndStartPrimaryServices() {
     LOGGER.info("Registering and starting primary system services");
+    addService(service::bluetooth::manifest);
     addService(service::gps::manifest);
     addService(service::wifi::manifest);
 #ifdef ESP_PLATFORM
