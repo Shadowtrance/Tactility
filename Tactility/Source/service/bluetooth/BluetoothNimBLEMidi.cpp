@@ -60,6 +60,10 @@ const struct ble_gatt_chr_def midi_chars[] = {
     { 0 }
 };
 
+// Forward declaration so midiStartInternal() can call the Device* overload below
+// without resolving to the public bool midiStart() declared in Bluetooth.h.
+static error_t midiStart(struct Device* device);
+
 error_t midiStartInternal() {
     return midiStart(nullptr);
 }
@@ -82,11 +86,10 @@ static void midiKeepaliveCallback(void* /*arg*/) {
     static const uint8_t as_pkt[3] = { 0x80, 0x80, 0xFE };
     struct os_mbuf* om = ble_hs_mbuf_from_flat(as_pkt, 3);
     if (om == nullptr) return;
-    if (bt->midiUseIndicate) {
-        ble_gatts_indicate_custom(bt->midiConnHandle, midi_io_handle, om);
-    } else {
-        ble_gatts_notify_custom(bt->midiConnHandle, midi_io_handle, om);
-    }
+    int rc = bt->midiUseIndicate
+        ? ble_gatts_indicate_custom(bt->midiConnHandle, midi_io_handle, om)
+        : ble_gatts_notify_custom(bt->midiConnHandle, midi_io_handle, om);
+    if (rc != 0) os_mbuf_free_chain(om);
 }
 
 // MIDI (BLE MIDI)
@@ -101,9 +104,16 @@ static error_t midiStart(struct Device* device) {
         args.callback = midiKeepaliveCallback;
         args.dispatch_method = ESP_TIMER_TASK;
         args.name = "midi_as";
-        esp_timer_create(&args, &bt->midiKeepaliveTimer);
+        int crc = esp_timer_create(&args, &bt->midiKeepaliveTimer);
+        if (crc != ESP_OK) {
+            LOGGER.error("midiStart: keepalive timer create failed (rc={})", crc);
+            return ERROR_INVALID_STATE;
+        }
     }
-    esp_timer_start_periodic(bt->midiKeepaliveTimer, 2'000'000); // 2 seconds
+    int src = esp_timer_start_periodic(bt->midiKeepaliveTimer, 2'000'000); // 2 seconds
+    if (src != ESP_OK) {
+        LOGGER.error("midiStart: keepalive timer start failed (rc={})", src);
+    }
     startAdvertising(&MIDI_SVC_UUID);
     return ERROR_NONE;
 }
@@ -138,15 +148,17 @@ static error_t midiSend(struct Device* device, const uint8_t* msg, size_t len) {
     uint8_t header[2] = { static_cast<uint8_t>(0x80 | (timestamp >> 7)), static_cast<uint8_t>(0x80 | (timestamp & 0x7F)) };
     struct os_mbuf* om = ble_hs_mbuf_from_flat(header, 2);
     if (om == nullptr) return ERROR_INVALID_STATE;
-    os_mbuf_append(om, msg, len);
-    LOGGER.info("midiSend {} bytes (indicate={})", len, bt->midiUseIndicate);
-    int rc;
-    if (bt->midiUseIndicate) {
-        rc = ble_gatts_indicate_custom(bt->midiConnHandle, midi_io_handle, om);
-    } else {
-        rc = ble_gatts_notify_custom(bt->midiConnHandle, midi_io_handle, om);
+    if (os_mbuf_append(om, msg, len) != 0) {
+        os_mbuf_free_chain(om);
+        LOGGER.error("midiSend: mbuf append failed");
+        return ERROR_INVALID_STATE;
     }
+    LOGGER.info("midiSend {} bytes (indicate={})", len, (bool)bt->midiUseIndicate);
+    int rc = bt->midiUseIndicate
+        ? ble_gatts_indicate_custom(bt->midiConnHandle, midi_io_handle, om)
+        : ble_gatts_notify_custom(bt->midiConnHandle, midi_io_handle, om);
     if (rc != 0) {
+        os_mbuf_free_chain(om);
         LOGGER.error("midiSend failed rc={}", rc);
     }
     return (rc == 0) ? ERROR_NONE : ERROR_INVALID_STATE;

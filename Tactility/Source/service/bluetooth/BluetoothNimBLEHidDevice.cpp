@@ -358,21 +358,32 @@ void switchGattProfile(HidProfile profile) {
     ble_svc_gatt_init();
 
     const struct ble_gatt_svc_def* svcs = gatt_svcs_none;
+    const uint8_t* new_rpt_map     = nullptr;
+    size_t         new_rpt_map_len = 0;
     switch (profile) {
-        case HidProfile::KbConsumer: svcs = gatt_svcs_kb_consumer; active_hid_rpt_map = hid_rpt_map_kb_consumer; active_hid_rpt_map_len = sizeof(hid_rpt_map_kb_consumer); break;
-        case HidProfile::Mouse:      svcs = gatt_svcs_mouse;        active_hid_rpt_map = hid_rpt_map_mouse;        active_hid_rpt_map_len = sizeof(hid_rpt_map_mouse);        break;
-        case HidProfile::KbMouse:    svcs = gatt_svcs_kb_mouse;     active_hid_rpt_map = hid_rpt_map_kb_mouse;     active_hid_rpt_map_len = sizeof(hid_rpt_map_kb_mouse);     break;
-        case HidProfile::Gamepad:    svcs = gatt_svcs_gamepad;      active_hid_rpt_map = hid_rpt_map_gamepad;      active_hid_rpt_map_len = sizeof(hid_rpt_map_gamepad);      break;
-        default:                     svcs = gatt_svcs_none;          active_hid_rpt_map = nullptr;                  active_hid_rpt_map_len = 0;                                break;
+        case HidProfile::KbConsumer: svcs = gatt_svcs_kb_consumer; new_rpt_map = hid_rpt_map_kb_consumer; new_rpt_map_len = sizeof(hid_rpt_map_kb_consumer); break;
+        case HidProfile::Mouse:      svcs = gatt_svcs_mouse;        new_rpt_map = hid_rpt_map_mouse;        new_rpt_map_len = sizeof(hid_rpt_map_mouse);        break;
+        case HidProfile::KbMouse:    svcs = gatt_svcs_kb_mouse;     new_rpt_map = hid_rpt_map_kb_mouse;     new_rpt_map_len = sizeof(hid_rpt_map_kb_mouse);     break;
+        case HidProfile::Gamepad:    svcs = gatt_svcs_gamepad;      new_rpt_map = hid_rpt_map_gamepad;      new_rpt_map_len = sizeof(hid_rpt_map_gamepad);      break;
+        default:                     svcs = gatt_svcs_none;          new_rpt_map = nullptr;                  new_rpt_map_len = 0;                                break;
     }
 
     int rc = ble_gatts_count_cfg(svcs);
     if (rc == 0) {
         rc = ble_gatts_add_svcs(svcs);
-        if (rc != 0) LOGGER.error("switchGattProfile: gatts_add_svcs failed rc={}", rc);
+        if (rc != 0) {
+            LOGGER.error("switchGattProfile: gatts_add_svcs failed rc={}", rc);
+            return; // don't update profile or report map — GATT state is inconsistent
+        }
     } else {
         LOGGER.error("switchGattProfile: gatts_count_cfg failed rc={}", rc);
+        return; // don't update profile or report map — GATT state is inconsistent
     }
+
+    // Only update report map pointers after GATT registration succeeded, so they
+    // stay consistent with current_hid_profile (updated at the end of this function).
+    active_hid_rpt_map     = new_rpt_map;
+    active_hid_rpt_map_len = new_rpt_map_len;
 
     // Re-apply device name (ble_svc_gap_init resets it)
     ble_svc_gap_device_name_set(CONFIG_TT_DEVICE_NAME);
@@ -450,6 +461,7 @@ static error_t hidDeviceSendKey(struct Device* /*device*/, uint8_t keycode, bool
     struct os_mbuf* om = ble_hs_mbuf_from_flat(report, sizeof(report));
     if (om == nullptr) return ERROR_INVALID_STATE;
     int rc = ble_gatts_notify_custom(bt->hidConnHandle, hid_kb_input_handle, om);
+    if (rc != 0) os_mbuf_free_chain(om);
     return (rc == 0) ? ERROR_NONE : ERROR_INVALID_STATE;
 }
 
@@ -471,9 +483,13 @@ static error_t hidSendReport(uint16_t input_handle, const uint8_t* report, size_
         return ERROR_INVALID_STATE;
     }
     struct os_mbuf* om = ble_hs_mbuf_from_flat(report, len);
-    if (om == nullptr) return ERROR_INVALID_STATE;
+    if (om == nullptr) {
+        LOGGER.warn("hidSendReport: mbuf alloc failed (handle={})", input_handle);
+        return ERROR_INVALID_STATE;
+    }
     int rc = ble_gatts_notify_custom(bt->hidConnHandle, input_handle, om);
     if (rc != 0) {
+        os_mbuf_free_chain(om);
         LOGGER.warn("hidSendReport: notify failed handle={} rc={}", input_handle, rc);
     }
     return (rc == 0) ? ERROR_NONE : ERROR_INVALID_STATE;
@@ -503,23 +519,39 @@ bool hidDeviceIsConnected() {
 // Send a full 8-byte keyboard input report:
 // [0]=modifier [1]=reserved [2..7]=keycodes (up to 6 simultaneous)
 bool hidSendKeyboard(const uint8_t report[8]) {
+    if (current_hid_profile != HidProfile::KbConsumer && current_hid_profile != HidProfile::KbMouse) {
+        LOGGER.warn("hidSendKeyboard: not a keyboard profile (current={})", (int)current_hid_profile);
+        return false;
+    }
     return hidSendReport(hid_kb_input_handle, report, 8) == ERROR_NONE;
 }
 
 // Send a 2-byte consumer/media report: 16-bit HID Consumer usage code (little-endian)
 // e.g. {0xE9, 0x00} = Volume Up, {0xEA, 0x00} = Volume Down, {0xCD, 0x00} = Play/Pause
 bool hidSendConsumer(const uint8_t report[2]) {
+    if (current_hid_profile != HidProfile::KbConsumer && current_hid_profile != HidProfile::KbMouse) {
+        LOGGER.warn("hidSendConsumer: not a keyboard profile (current={})", (int)current_hid_profile);
+        return false;
+    }
     return hidSendReport(hid_consumer_input_handle, report, 2) == ERROR_NONE;
 }
 
 // Send a 4-byte mouse report: [0]=buttons(5bits) [1]=X(rel) [2]=Y(rel) [3]=wheel(rel)
 bool hidSendMouse(const uint8_t report[4]) {
+    if (current_hid_profile != HidProfile::Mouse && current_hid_profile != HidProfile::KbMouse) {
+        LOGGER.warn("hidSendMouse: not a mouse profile (current={})", (int)current_hid_profile);
+        return false;
+    }
     return hidSendReport(hid_mouse_input_handle, report, 4) == ERROR_NONE;
 }
 
 // Send an 8-byte gamepad report:
 // [0..1]=buttons(16bits) [2]=leftX [3]=leftY [4]=rightX [5]=rightY [6]=L2 [7]=R2
 bool hidSendGamepad(const uint8_t report[8]) {
+    if (current_hid_profile != HidProfile::Gamepad) {
+        LOGGER.warn("hidSendGamepad: not a gamepad profile (current={})", (int)current_hid_profile);
+        return false;
+    }
     return hidSendReport(hid_gamepad_input_handle, report, 8) == ERROR_NONE;
 }
 

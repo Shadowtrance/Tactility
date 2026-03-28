@@ -27,9 +27,12 @@ static std::atomic<bool>    hid_host_mouse_active{false}; // set on first moveme
 #define HID_HOST_KEY_QUEUE_SIZE 64
 struct HidHostKeyEvt { uint32_t key; bool pressed; };
 
-// ---- Forward declaration ----
+// ---- Forward declarations ----
 
 static void hidHostSubscribeNext(HidHostCtx& ctx);
+static void hidHostStartRptRefRead(HidHostCtx& ctx);
+static void hidHostReadReportMap(HidHostCtx& ctx);
+static uint16_t getDescEndHandle(const HidHostCtx& ctx, uint16_t valHandle);
 
 // ---- HID Host implementation ----
 
@@ -108,7 +111,10 @@ static void hidHostHandleKeyboardReport(const uint8_t* data, uint16_t len) {
         }
     }
 
-    std::memcpy(hid_host_prev_keys, curr, 6);
+    // Only copy the keycodes that were actually present in the report.
+    // Zero out any remaining slots so stale codes don't persist.
+    std::memcpy(hid_host_prev_keys, curr, nkeys);
+    if (nkeys < 6) std::memset(hid_host_prev_keys + nkeys, 0, 6 - nkeys);
 }
 
 // Mouse read callback for LVGL pointer indev — called from LVGL task.
@@ -202,10 +208,267 @@ static void hidHostHandleMouseReport(const uint8_t* data, uint16_t len) {
 // Called from the esp_timer task — safe for NimBLE GATT calls (same as advRestartCallback).
 void hidEncRetryTimerCb(void* /*arg*/) {
     if (hid_host_ctx) {
-        LOGGER.info("HID host: post-encryption delay complete — starting CCCD subscriptions");
+        if (!hid_host_ctx->typeResolutionDone) {
+            // Type resolution chain stalled (e.g. BLE_HS_EDONE never fired due to HCI error).
+            // Force-complete so CCCD subscriptions always start regardless.
+            LOGGER.warn("HID host: post-encryption delay — type resolution timed out, proceeding anyway");
+            hid_host_ctx->typeResolutionDone = true;
+            hid_host_ctx->subscribeIdx = 0;
+        } else {
+            LOGGER.info("HID host: post-encryption delay complete — starting CCCD subscriptions");
+        }
         hidHostSubscribeNext(*hid_host_ctx);
     }
 }
+
+// ---- Report Map parsing ----
+//
+// Minimal HID Report Descriptor parser: extracts a mapping from Report ID → HidReportType.
+// Handles short items only (long items are skipped). Tracks USAGE_PAGE, USAGE, REPORT_ID,
+// and COLLECTION depth to classify each Application collection as Keyboard / Mouse / Consumer.
+//
+// Format of each short item: prefix byte = bTag(7:4) | bType(3:2) | bSize(1:0)
+//   bType: 0=Main (COLLECTION, END_COLLECTION, INPUT, OUTPUT, FEATURE)
+//          1=Global (USAGE_PAGE, REPORT_ID, ...)
+//          2=Local  (USAGE, USAGE_MIN, USAGE_MAX, ...)
+//   bSize: 0→0 bytes, 1→1 byte, 2→2 bytes, 3→4 bytes
+//
+// Long item prefix: 0xFE — skip entirely.
+static void applyReportMapTypes(HidHostCtx& ctx) {
+    const uint8_t* data = ctx.rptMap.data();
+    size_t len = ctx.rptMap.size();
+
+    uint16_t usagePage = 0;
+    uint16_t usage     = 0;
+    uint8_t  reportId  = 0;
+    int      depth     = 0;
+    HidReportType collType = HidReportType::Unknown;
+
+    // typeMap: one entry per distinct non-zero reportId → type (used when REPORT_ID items present).
+    // collOrder: one entry per Application Collection that has an INPUT, in descriptor order.
+    //   Used when all inputRpts have reportId=0 (no REPORT_ID items in descriptor).
+    struct Entry { uint8_t id; HidReportType type; };
+    std::vector<Entry>         typeMap;
+    std::vector<HidReportType> collOrder;
+    bool collHadInput = false; // prevents recording the same collection twice
+
+    size_t i = 0;
+    while (i < len) {
+        uint8_t prefix = data[i++];
+
+        if (prefix == 0xFE) {          // Long item — skip
+            if (i + 1 >= len) break;
+            uint8_t lsz = data[i++];
+            i++;                       // long tag byte
+            i += lsz;
+            continue;
+        }
+
+        uint8_t bSize   = prefix & 0x03;
+        uint8_t bType   = (prefix >> 2) & 0x03;
+        uint8_t bTag    = (prefix >> 4) & 0x0F;
+        uint8_t dataLen = (bSize == 3) ? 4 : bSize;
+        if (i + dataLen > len) break;
+
+        uint32_t value = 0;
+        for (uint8_t j = 0; j < dataLen; j++) value |= (uint32_t)data[i++] << (8 * j);
+
+        if (bType == 0) {              // Main item
+            if (bTag == 0xA) {         // COLLECTION
+                if (depth == 0 && value == 0x01) { // Application collection at top level
+                    // Classify by the USAGE_PAGE and USAGE set just before this COLLECTION.
+                    // Common mappings per HID Usage Tables 1.4:
+                    //   Generic Desktop (0x01) + Keyboard/Keypad (0x06) → Keyboard
+                    //   Generic Desktop (0x01) + Mouse (0x02)            → Mouse
+                    //   Consumer (0x0C)                                   → Consumer
+                    if      (usagePage == 0x01 && usage == 0x06) collType = HidReportType::Keyboard;
+                    else if (usagePage == 0x01 && usage == 0x02) collType = HidReportType::Mouse;
+                    else if (usagePage == 0x0C)                  collType = HidReportType::Consumer;
+                    else                                         collType = HidReportType::Unknown;
+                    collHadInput = false;
+                }
+                depth++;
+                usage = 0;             // local items reset after Main
+
+            } else if (bTag == 0xC) { // END_COLLECTION
+                if (depth > 0) depth--;
+                if (depth == 0) { collType = HidReportType::Unknown; collHadInput = false; }
+                usage = 0;
+
+            } else if (bTag == 0x8) { // INPUT
+                if (depth > 0 && collType != HidReportType::Unknown) {
+                    // Ordered collection list: one entry per Application Collection with INPUT.
+                    // Used for index-based matching when all reportIds are 0.
+                    if (!collHadInput) {
+                        collOrder.push_back(collType);
+                        collHadInput = true;
+                    }
+                    // reportId map: one entry per distinct non-zero reportId.
+                    // Used for ID-based matching when REPORT_ID items are present.
+                    if (reportId != 0) {
+                        bool found = false;
+                        for (const auto& e : typeMap) { if (e.id == reportId) { found = true; break; } }
+                        if (!found) typeMap.push_back({reportId, collType});
+                    }
+                }
+                usage = 0;
+
+            } else {
+                usage = 0;             // OUTPUT / FEATURE — reset local items
+            }
+
+        } else if (bType == 1) {       // Global item
+            if      (bTag == 0x0) usagePage = (uint16_t)value;
+            else if (bTag == 0x8) reportId  = (uint8_t)value;
+
+        } else if (bType == 2) {       // Local item
+            if (bTag == 0x0) usage = (uint16_t)value;
+        }
+    }
+
+    // Apply the resolved types to the discovered input reports.
+    // Strategy: if any inputRpt has a non-zero reportId (REPORT_ID items present in descriptor),
+    // match by reportId. Otherwise match by position in the Application Collection order —
+    // this handles combo devices with multiple Input Report chars but no REPORT_ID prefix.
+    bool anyNonZeroId = false;
+    for (const auto& rpt : ctx.inputRpts) {
+        if (rpt.reportId != 0) { anyNonZeroId = true; break; }
+    }
+
+    size_t zeroRptIdx = 0; // position counter for zero-reportId inputs (index into collOrder)
+    for (auto& rpt : ctx.inputRpts) {
+        if (anyNonZeroId) {
+            // Match by reportId
+            for (const auto& e : typeMap) {
+                if (e.id == rpt.reportId) { rpt.type = e.type; break; }
+            }
+        } else {
+            // All reportIds are 0 — match by position in Report Map collection order
+            if (zeroRptIdx < collOrder.size()) rpt.type = collOrder[zeroRptIdx];
+            zeroRptIdx++;
+        }
+        LOGGER.info("HID host: report val_handle={} reportId={} type={}",
+                     rpt.valHandle, rpt.reportId, (int)rpt.type);
+    }
+
+    ctx.rptMap.clear(); // free the raw bytes — no longer needed
+}
+
+// ---- Report Reference (0x2908) read chain ----
+//
+// After all descriptor handles have been discovered, we read the value of each Report
+// Reference descriptor to obtain the Report ID for each Input Report characteristic.
+// The descriptor value is 2 bytes: [reportId, reportType] where reportType 1=Input.
+
+static void hidHostStartRptRefRead(HidHostCtx& ctx) {
+    // Advance past any reports that have no Report Reference descriptor
+    while (ctx.rptRefReadIdx < (int)ctx.inputRpts.size() &&
+           ctx.inputRpts[ctx.rptRefReadIdx].rptRefHandle == 0) {
+        ctx.rptRefReadIdx++;
+    }
+
+    if (ctx.rptRefReadIdx >= (int)ctx.inputRpts.size()) {
+        // All Report Reference reads complete — proceed to Report Map read
+        hidHostReadReportMap(ctx);
+        return;
+    }
+
+    uint16_t handle = ctx.inputRpts[ctx.rptRefReadIdx].rptRefHandle;
+    int rc = ble_gattc_read(ctx.connHandle, handle, [](uint16_t conn_handle,
+                             const struct ble_gatt_error* error,
+                             struct ble_gatt_attr* attr, void* /*arg*/) -> int {
+        if (!hid_host_ctx) return 0;
+        auto& ctx = *hid_host_ctx;
+        if (conn_handle != ctx.connHandle) return 0;
+
+        if (error->status == BLE_HS_EDONE) {
+            // Data was already processed in the status==0 callback; nothing to do.
+            return 0;
+        }
+
+        if (error->status == 0 && attr != nullptr) {
+            // Report Reference: [reportId (1 byte), reportType (1 byte)]
+            // reportType: 1=Input, 2=Output, 3=Feature — we only care about Input here
+            if (OS_MBUF_PKTLEN(attr->om) >= 2 &&
+                ctx.rptRefReadIdx < (int)ctx.inputRpts.size()) {
+                uint8_t rpt_ref[2] = {};
+                os_mbuf_copydata(attr->om, 0, 2, rpt_ref);
+                ctx.inputRpts[ctx.rptRefReadIdx].reportId = rpt_ref[0];
+                LOGGER.info("HID host: report[{}] val_handle={} reportId={} reportType={}",
+                             ctx.rptRefReadIdx,
+                             ctx.inputRpts[ctx.rptRefReadIdx].valHandle,
+                             rpt_ref[0], rpt_ref[1]);
+            }
+        }
+        // Advance immediately on data (status==0) or ATT error — do NOT wait for BLE_HS_EDONE.
+        // Under certain HCI error conditions (e.g. BLE_ERR_INV_HCI_CMD_PARMS from
+        // LE_Add_Device_To_Resolving_List), NimBLE may never dispatch EDONE for ATT reads.
+        ctx.rptRefReadIdx++;
+        hidHostStartRptRefRead(ctx);
+        return 0;
+    }, nullptr);
+
+    if (rc != 0) {
+        LOGGER.warn("HID host: rptRef read[{}] failed rc={} — skipping", ctx.rptRefReadIdx, rc);
+        ctx.rptRefReadIdx++;
+        hidHostStartRptRefRead(ctx);
+    }
+}
+
+// ---- Report Map (0x2A4B) read and type resolution ----
+//
+// Reads the Report Map characteristic using ATT Read Blob (read_long) to handle
+// descriptors that exceed one ATT MTU. After the read completes, calls
+// applyReportMapTypes() to populate HidReportType for each input report, then
+// starts CCCD subscription.
+
+static void hidHostReadReportMap(HidHostCtx& ctx) {
+    if (ctx.rptMapHandle == 0) {
+        LOGGER.info("HID host: no Report Map char — skipping type resolution");
+        ctx.typeResolutionDone = true;
+        ctx.subscribeIdx = 0;
+        hidHostSubscribeNext(ctx);
+        return;
+    }
+
+    int rc = ble_gattc_read_long(ctx.connHandle, ctx.rptMapHandle, 0,
+        [](uint16_t conn_handle, const struct ble_gatt_error* error,
+           struct ble_gatt_attr* attr, void* /*arg*/) -> int {
+            if (!hid_host_ctx) return 0;
+            auto& ctx = *hid_host_ctx;
+            if (conn_handle != ctx.connHandle) return 0;
+
+            if (error->status == 0 && attr != nullptr) {
+                // Accumulate this blob into rptMap
+                uint16_t chunk = OS_MBUF_PKTLEN(attr->om);
+                size_t old_sz = ctx.rptMap.size();
+                ctx.rptMap.resize(old_sz + chunk);
+                os_mbuf_copydata(attr->om, 0, chunk, ctx.rptMap.data() + old_sz);
+                return 0; // more blobs or BLE_HS_EDONE coming
+            }
+
+            // BLE_HS_EDONE or error
+            if (!ctx.rptMap.empty()) {
+                LOGGER.info("HID host: report map read ({} bytes)", ctx.rptMap.size());
+                applyReportMapTypes(ctx);
+            } else {
+                LOGGER.warn("HID host: report map read failed or empty — types remain Unknown");
+            }
+            ctx.typeResolutionDone = true;
+            ctx.subscribeIdx = 0;
+            hidHostSubscribeNext(ctx);
+            return 0;
+        }, nullptr);
+
+    if (rc != 0) {
+        LOGGER.warn("HID host: report map read_long failed rc={} — skipping", rc);
+        ctx.typeResolutionDone = true;
+        ctx.subscribeIdx = 0;
+        hidHostSubscribeNext(ctx);
+    }
+}
+
+// ---- CCCD subscription chain ----
 
 static int hidHostCccdWriteCb(uint16_t conn_handle, const struct ble_gatt_error* error,
                                struct ble_gatt_attr* /*attr*/, void* /*arg*/) {
@@ -293,9 +556,16 @@ static void hidHostSubscribeNext(HidHostCtx& ctx) {
             }
             settings::PairedDevice device;
             device.addr        = peer_addr;
-            device.name        = name;
             device.profileId   = BT_PROFILE_HID_HOST;
-            device.autoConnect = true; // reconnect automatically when device is seen during scan
+            device.autoConnect = true; // default for new devices
+            // Preserve user-configured fields (autoConnect) if record already exists
+            const auto addr_hex = settings::addrToHex(peer_addr);
+            settings::PairedDevice existing;
+            if (settings::load(addr_hex, existing)) {
+                device.autoConnect = existing.autoConnect;
+            }
+            // Always update the name (may have been resolved after first save)
+            device.name = name;
             settings::save(device);
             // Publish AFTER save so BtManage sees the file when it calls updatePairedPeers()
             publishEvent(bt_weak, BtEvent::ProfileStateChanged);
@@ -320,52 +590,61 @@ static void hidHostSubscribeNext(HidHostCtx& ctx) {
     }
 }
 
-// Descriptor discovery callback: find CCCD (0x2902) handle for each Input Report char
+// Descriptor discovery callback: find CCCD (0x2902) and Report Reference (0x2908)
+// handles for each Input Report characteristic.
 static int hidHostDscDiscCb(uint16_t conn_handle, const struct ble_gatt_error* error,
-                             uint16_t chr_val_handle, const struct ble_gatt_dsc* dsc, void* arg) {
+                             uint16_t chr_val_handle, const struct ble_gatt_dsc* dsc, void* /*arg*/) {
     if (!hid_host_ctx) return 0;
     auto& ctx = *hid_host_ctx;
     if (conn_handle != ctx.connHandle) return 0;
 
     if (error->status == 0 && dsc != nullptr) {
         uint16_t dsc_uuid = ble_uuid_u16(&dsc->uuid.u);
-        if (dsc_uuid == 0x2902) {
-            // Found CCCD for this char
-            for (auto& rpt : ctx.inputRpts) {
-                if (rpt.valHandle == chr_val_handle) {
-                    rpt.cccdHandle = dsc->handle;
-                    LOGGER.info("HID host: CCCD handle={} for val_handle={}", dsc->handle, chr_val_handle);
-                    break;
-                }
+        for (auto& rpt : ctx.inputRpts) {
+            if (rpt.valHandle != chr_val_handle) continue;
+            if (dsc_uuid == 0x2902) {
+                rpt.cccdHandle = dsc->handle;
+                LOGGER.info("HID host: CCCD handle={} for val_handle={}", dsc->handle, chr_val_handle);
+            } else if (dsc_uuid == 0x2908) {
+                rpt.rptRefHandle = dsc->handle;
+                LOGGER.info("HID host: rptRef handle={} for val_handle={}", dsc->handle, chr_val_handle);
             }
+            break;
         }
     } else if (error->status == BLE_HS_EDONE) {
         // Move to next input report's descriptor discovery
-        auto* idx_ptr = static_cast<int*>(arg);
-        int next_idx = (*idx_ptr) + 1;
+        int next_idx = ctx.dscDiscIdx + 1;
 
         if (next_idx < (int)ctx.inputRpts.size()) {
-            static int dsc_idx;
-            dsc_idx = next_idx;
+            ctx.dscDiscIdx = next_idx;
             auto& next_rpt = ctx.inputRpts[next_idx];
-            // End handle = next char's val handle - 1, or svc end handle
-            uint16_t end = (next_idx + 1 < (int)ctx.inputRpts.size())
-                           ? ctx.inputRpts[next_idx + 1].valHandle - 1
-                           : ctx.hidSvcEnd;
+            // Bound to the next characteristic declaration (not just the next Input Report).
+            uint16_t end = getDescEndHandle(ctx, next_rpt.valHandle);
             int rc = ble_gattc_disc_all_dscs(ctx.connHandle, next_rpt.valHandle, end,
-                                              hidHostDscDiscCb, &dsc_idx);
+                                              hidHostDscDiscCb, nullptr);
             if (rc != 0) {
                 LOGGER.warn("HID host: disc_all_dscs[{}] failed rc={}", next_idx, rc);
-                ctx.subscribeIdx = 0;
-                hidHostSubscribeNext(ctx);
+                ctx.rptRefReadIdx = 0;
+                hidHostStartRptRefRead(ctx);
             }
         } else {
-            // All descriptor discovery done — start subscribing
-            ctx.subscribeIdx = 0;
-            hidHostSubscribeNext(ctx);
+            // All descriptor discovery done — read Report Reference values, then Report Map
+            ctx.rptRefReadIdx = 0;
+            hidHostStartRptRefRead(ctx);
         }
     }
     return 0;
+}
+
+// Returns the upper bound (inclusive) for descriptor discovery for the characteristic
+// at val_handle. Descriptors occupy [val_handle+1, next_chr_def_handle-1]. Uses the
+// sorted allChrDefHandles list (populated during chr discovery) to find the next
+// characteristic boundary. Falls back to hidSvcEnd if no later chr is known.
+static uint16_t getDescEndHandle(const HidHostCtx& ctx, uint16_t valHandle) {
+    for (uint16_t dh : ctx.allChrDefHandles) {
+        if (dh > valHandle) return dh - 1;
+    }
+    return ctx.hidSvcEnd;
 }
 
 // Characteristic discovery callback: collect Input Report chars (UUID 0x2A4D, NOTIFY)
@@ -376,34 +655,48 @@ static int hidHostChrDiscCb(uint16_t conn_handle, const struct ble_gatt_error* e
     if (conn_handle != ctx.connHandle) return 0;
 
     if (error->status == 0 && chr != nullptr) {
+        // Track ALL characteristic definition handles so we can accurately bound descriptor
+        // discovery ranges later. Without this, a char that is last (or only) in the service
+        // would use hidSvcEnd=65535 as end handle, sweeping all subsequent characteristics.
+        ctx.allChrDefHandles.push_back(chr->def_handle);
+
         uint16_t uuid16 = ble_uuid_u16(&chr->uuid.u);
         if (uuid16 == 0x2A4D && (chr->properties & BLE_GATT_CHR_PROP_NOTIFY)) {
+            // Input Report — collect for subscription and type resolution
             HidHostInputRpt rpt = {};
-            rpt.valHandle  = chr->val_handle;
-            rpt.cccdHandle = 0;
-            rpt.reportId   = 0;
+            rpt.valHandle    = chr->val_handle;
+            rpt.cccdHandle   = 0;
+            rpt.rptRefHandle = 0;
+            rpt.reportId     = 0;
+            rpt.type         = HidReportType::Unknown;
             ctx.inputRpts.push_back(rpt);
             LOGGER.info("HID host: Input Report chr val_handle={}", chr->val_handle);
+        } else if (uuid16 == 0x2A4B) {
+            // Report Map — save handle so we can read it after descriptor discovery
+            ctx.rptMapHandle = chr->val_handle;
+            LOGGER.info("HID host: Report Map chr val_handle={}", chr->val_handle);
         }
     } else if (error->status == BLE_HS_EDONE) {
+        // Sort def handles ascending so getDescEndHandle() binary-searches correctly.
+        std::sort(ctx.allChrDefHandles.begin(), ctx.allChrDefHandles.end());
+
         if (ctx.inputRpts.empty()) {
             LOGGER.warn("HID host: no Input Report chars — disconnecting");
             ble_gap_terminate(ctx.connHandle, BLE_ERR_REM_USER_CONN_TERM);
             return 0;
         }
-        // Discover descriptors for first input report
-        static int dsc_idx = 0;
-        dsc_idx = 0;
+        // Discover descriptors (CCCD + Report Reference) for the first input report.
+        // End handle is bounded to the declaration of the next characteristic so we
+        // don't accidentally pick up descriptors that belong to other chars.
+        ctx.dscDiscIdx = 0;
         auto& first = ctx.inputRpts[0];
-        uint16_t end = (ctx.inputRpts.size() > 1)
-                       ? ctx.inputRpts[1].valHandle - 1
-                       : ctx.hidSvcEnd;
+        uint16_t end = getDescEndHandle(ctx, first.valHandle);
         int rc = ble_gattc_disc_all_dscs(ctx.connHandle, first.valHandle, end,
-                                          hidHostDscDiscCb, &dsc_idx);
+                                          hidHostDscDiscCb, nullptr);
         if (rc != 0) {
             LOGGER.warn("HID host: disc_all_dscs[0] failed rc={}", rc);
-            ctx.subscribeIdx = 0;
-            hidHostSubscribeNext(ctx);
+            ctx.rptRefReadIdx = 0;
+            hidHostStartRptRefRead(ctx);
         }
     }
     return 0;
@@ -471,20 +764,23 @@ int hidHostGapCb(struct ble_gap_event* event, void* arg) {
                 lv_indev_t* saved_kb     = hid_host_ctx ? hid_host_ctx->kbIndev     : nullptr;
                 lv_indev_t* saved_mouse  = hid_host_ctx ? hid_host_ctx->mouseIndev  : nullptr;
                 lv_obj_t*   saved_cursor = hid_host_ctx ? hid_host_ctx->mouseCursor : nullptr;
+                QueueHandle_t saved_queue = hid_host_key_queue;
                 hid_host_ctx.reset();
-                if (hid_host_key_queue) {
-                    vQueueDelete(hid_host_key_queue);
-                    hid_host_key_queue = nullptr;
-                }
+                hid_host_key_queue = nullptr; // null immediately; actual delete deferred below
                 std::memset(hid_host_prev_keys, 0, sizeof(hid_host_prev_keys));
                 hid_host_mouse_x.store(0);
                 hid_host_mouse_y.store(0);
                 hid_host_mouse_btn.store(false);
                 hid_host_mouse_active.store(false);
-                // Dispatch only the LVGL object cleanup to the main task
-                getMainDispatcher().dispatch([saved_kb, saved_mouse, saved_cursor] {
+                // Defer both LVGL indev deletion AND key queue deletion to the main task.
+                // hidHostKeyboardReadCb runs on the LVGL task and calls xQueueReceive —
+                // deleting the queue here on the NimBLE task would race with that callback.
+                // Deleting the indev first (inside the LVGL lock) ensures the read callback
+                // is never called again before the queue is deleted.
+                getMainDispatcher().dispatch([saved_kb, saved_mouse, saved_cursor, saved_queue] {
                     if (!tt::lvgl::lock(1000)) {
                         LOGGER.warn("HID host: failed to acquire LVGL lock for indev cleanup");
+                        if (saved_queue) vQueueDelete(saved_queue);
                         return;
                     }
                     if (saved_kb) {
@@ -494,6 +790,8 @@ int hidHostGapCb(struct ble_gap_event* event, void* arg) {
                     if (saved_mouse)  lv_indev_delete(saved_mouse);
                     if (saved_cursor) lv_obj_delete(saved_cursor);
                     tt::lvgl::unlock();
+                    // Delete the queue after the indev is gone — no more callbacks can fire.
+                    if (saved_queue) vQueueDelete(saved_queue);
                 });
                 publishEvent(bt, BtEvent::ProfileStateChanged);
             }
@@ -519,18 +817,40 @@ int hidHostGapCb(struct ble_gap_event* event, void* arg) {
         case BLE_GAP_EVENT_NOTIFY_RX:
             if (event->notify_rx.conn_handle == ctx.connHandle) {
                 uint16_t len = OS_MBUF_PKTLEN(event->notify_rx.om);
-                if (len > 0 && len <= 32) {
-                    uint8_t buf[32] = {};
+                // Max HID report size: 64 bytes is more than sufficient for
+                // keyboard (8), mouse (4-8), consumer (2-4), or combo reports (≤16).
+                if (len > 0 && len <= 64) {
+                    uint8_t buf[64] = {};
                     os_mbuf_copydata(event->notify_rx.om, 0, len, buf);
                     for (const auto& rpt : ctx.inputRpts) {
-                        if (rpt.valHandle == event->notify_rx.attr_handle) {
-                            if (len >= 6) {
-                                hidHostHandleKeyboardReport(buf, len);
-                            } else if (len >= 3) {
-                                hidHostHandleMouseReport(buf, len);
-                            }
-                            break;
+                        if (rpt.valHandle != event->notify_rx.attr_handle) continue;
+
+                        // In BLE HID (HOGP), the Report ID is carried by the Report Reference
+                        // descriptor (0x2908) only — it is NOT prepended to notification data.
+                        // HOGP §4.4: "The Report ID is NOT included in the value of the
+                        // characteristic." Pass the full notification payload as-is.
+                        const uint8_t* payload     = buf;
+                        uint16_t       payload_len = len;
+
+                        switch (rpt.type) {
+                            case HidReportType::Keyboard:
+                                hidHostHandleKeyboardReport(payload, payload_len);
+                                break;
+                            case HidReportType::Mouse:
+                                hidHostHandleMouseReport(payload, payload_len);
+                                break;
+                            case HidReportType::Consumer:
+                                // Consumer/media keys — not yet handled; log for diagnostics
+                                LOGGER.info("HID host: consumer report len={}", payload_len);
+                                break;
+                            case HidReportType::Unknown:
+                                // Report Map not available or parsing failed.
+                                // Fall back to length heuristic as a best-effort.
+                                if      (payload_len >= 6) hidHostHandleKeyboardReport(payload, payload_len);
+                                else if (payload_len >= 3) hidHostHandleMouseReport(payload, payload_len);
+                                break;
                         }
+                        break;
                     }
                 }
             }
@@ -580,7 +900,10 @@ void hidHostConnect(const std::array<uint8_t, 6>& addr) {
     }
 
     uint8_t own_addr_type;
-    ble_hs_id_infer_auto(0, &own_addr_type);
+    if (ble_hs_id_infer_auto(0, &own_addr_type) != 0) {
+        LOGGER.warn("hidHostConnect: failed to infer own address type, using PUBLIC");
+        own_addr_type = BLE_OWN_ADDR_PUBLIC;
+    }
 
     int rc = ble_gap_connect(own_addr_type, &ble_addr, 5000, nullptr, hidHostGapCb, nullptr);
     if (rc != 0) {

@@ -5,6 +5,7 @@
 
 #include <Tactility/app/btmanage/View.h>
 #include <Tactility/app/btmanage/BtManagePrivate.h>
+#include <Tactility/app/btpeersettings/BtPeerSettings.h>
 #include <Tactility/Logger.h>
 #include <Tactility/lvgl/Style.h>
 #include <Tactility/lvgl/Toolbar.h>
@@ -63,31 +64,20 @@ struct PeerListItemData {
 void View::onConnect(lv_event_t* event) {
     auto* data = static_cast<PeerListItemData*>(lv_event_get_user_data(event));
     auto bt = std::static_pointer_cast<BtManage>(getCurrentApp());
-    auto& bindings = bt->getBindings();
     auto& state = bt->getState();
 
-    auto peers = data->isPaired ? state.getPairedPeers() : state.getScanResults();
-    if (data->index < peers.size()) {
-        auto& peer = peers[data->index];
-        if (peer.connected) {
-            bindings.onDisconnectPeer(peer.addr, peer.profileId);
-        } else if (peer.paired) {
-            bindings.onConnectPeer(peer.addr, peer.profileId);
-        } else {
-            bindings.onPairPeer(peer.addr);
+    if (data->isPaired) {
+        // Open the per-device settings screen for paired devices
+        auto peers = state.getPairedPeers();
+        if (data->index < peers.size()) {
+            btpeersettings::start(service::bluetooth::settings::addrToHex(peers[data->index].addr));
         }
-    }
-}
-
-void View::onForget(lv_event_t* event) {
-    auto* data = static_cast<PeerListItemData*>(lv_event_get_user_data(event));
-    auto bt = std::static_pointer_cast<BtManage>(getCurrentApp());
-    auto& bindings = bt->getBindings();
-    auto& state = bt->getState();
-
-    auto peers = state.getPairedPeers();
-    if (data->index < peers.size()) {
-        bindings.onForgetPeer(peers[data->index].addr);
+    } else {
+        // Unrecognised scan result — initiate pairing
+        auto peers = state.getScanResults();
+        if (data->index < peers.size()) {
+            bt->getBindings().onPairPeer(peers[data->index].addr);
+        }
     }
 }
 

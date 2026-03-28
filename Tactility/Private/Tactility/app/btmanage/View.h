@@ -28,7 +28,6 @@ class View final {
 
     void createPeerListItem(const service::bluetooth::PeerRecord& record, bool isPaired, size_t index);
 
-    static void onForget(lv_event_t* event);
     static void onConnect(lv_event_t* event);
 
 public:

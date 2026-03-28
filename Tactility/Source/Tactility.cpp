@@ -107,6 +107,7 @@ namespace app {
     namespace timezone { extern const AppManifest manifest; }
     namespace usbsettings { extern const AppManifest manifest; }
     namespace btmanage { extern const AppManifest manifest; }
+    namespace btpeersettings { extern const AppManifest manifest; }
     namespace wifiapsettings { extern const AppManifest manifest; }
     namespace wificonnect { extern const AppManifest manifest; }
     namespace wifimanage { extern const AppManifest manifest; }
@@ -157,6 +158,7 @@ static void registerInternalApps() {
     addAppManifest(app::timedatesettings::manifest);
     addAppManifest(app::timezone::manifest);
     addAppManifest(app::btmanage::manifest);
+    addAppManifest(app::btpeersettings::manifest);
     addAppManifest(app::wifiapsettings::manifest);
     addAppManifest(app::wificonnect::manifest);
     addAppManifest(app::wifimanage::manifest);

@@ -32,6 +32,7 @@
 
 #include <esp_timer.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <deque>
@@ -77,14 +78,16 @@ public:
     // sppConnHandle is written from the NimBLE host task and read from app tasks
     // (sppWrite, sppIsConnected) — must be atomic.
     std::atomic<uint16_t> sppConnHandle = BLE_HS_CONN_HANDLE_NONE;
-    bool sppActive = false;
+    // sppActive is read/written from both the NimBLE host task and app tasks — must be atomic.
+    std::atomic<bool> sppActive = false;
 
     // MIDI connection handle + active flag.
     // midiConnHandle is written from the NimBLE host task and read from app tasks
     // (midiSend, midiIsConnected, keepalive timer callback) — must be atomic.
     std::atomic<uint16_t> midiConnHandle = BLE_HS_CONN_HANDLE_NONE;
-    bool midiActive = false;
-    bool midiUseIndicate = false; // true when client subscribed for INDICATE (e.g. Windows)
+    // midiActive/midiUseIndicate accessed from NimBLE task AND esp_timer task — must be atomic.
+    std::atomic<bool> midiActive = false;
+    std::atomic<bool> midiUseIndicate = false; // true when client subscribed for INDICATE (e.g. Windows)
 
     // Periodic Active Sensing timer — fires every 2s while MIDI is connected
     // to prevent Windows BLE MIDI's ~8-10s idle-timeout disconnect.
@@ -97,13 +100,14 @@ public:
     esp_timer_handle_t advRestartTimer = nullptr;
 
     // Tracks whether the current connection has established encryption.
-    // Used to send MIDI Active Sensing on the encrypted channel.
-    bool linkEncrypted = false;
+    // Set/cleared in GAP callbacks (NimBLE task); also read there — atomic for safety.
+    std::atomic<bool> linkEncrypted = false;
 
     // HID device connection handle + active flag.
     // hidConnHandle is set from SUBSCRIBE events (NimBLE host task), read from Send functions.
     std::atomic<uint16_t> hidConnHandle = BLE_HS_CONN_HANDLE_NONE;
-    bool hidActive = false;
+    // hidActive is read/written from both the NimBLE host task and app tasks — must be atomic.
+    std::atomic<bool> hidActive = false;
 
     // Reset recovery: count resets while still in OnPending (controller unresponsive)
     std::atomic<int> pendingResetCount = 0;
@@ -120,24 +124,39 @@ extern std::shared_ptr<Bluetooth> bt_singleton;
 // Full definition lives in BluetoothNimBLEHidHost.cpp; other files only need
 // to check hid_host_ctx != nullptr (bool-ness) or access peerAddr / connHandle.
 
+// Report type for each Input Report characteristic, determined by parsing the Report Map.
+enum class HidReportType : uint8_t { Unknown = 0, Keyboard, Mouse, Consumer };
+
 struct HidHostInputRpt {
     uint16_t valHandle;
-    uint16_t cccdHandle; // 0 = not yet discovered
-    uint8_t  reportId;
+    uint16_t cccdHandle;   // 0 = not yet discovered
+    uint16_t rptRefHandle; // 0 = no Report Reference descriptor (0x2908) found
+    uint8_t  reportId;     // from 0x2908 descriptor; 0 = no report ID prefix in data
+    HidReportType type;    // determined by parsing the Report Map (0x2A4B)
 };
 
 struct HidHostCtx {
     std::shared_ptr<Bluetooth> bt;
-    uint16_t connHandle       = BLE_HS_CONN_HANDLE_NONE;
-    uint16_t hidSvcStart      = 0;
-    uint16_t hidSvcEnd        = 0;
+    uint16_t connHandle        = BLE_HS_CONN_HANDLE_NONE;
+    uint16_t hidSvcStart       = 0;
+    uint16_t hidSvcEnd         = 0;
     std::vector<HidHostInputRpt> inputRpts;
-    int subscribeIdx          = 0;
-    bool securityInitiated    = false;
-    bool readyBlockFired      = false; // prevents duplicate execution if timer fires after subscribe
-    lv_indev_t* kbIndev       = nullptr;
-    lv_indev_t* mouseIndev    = nullptr;
-    lv_obj_t*   mouseCursor   = nullptr;
+    // def_handle of every characteristic in the HID service, sorted ascending after chr discovery.
+    // Used to accurately bound descriptor discovery ranges: for a char at val_handle, its
+    // descriptors occupy [val_handle+1, next_def_handle-1]. Without this, single-char services
+    // fall back to hidSvcEnd (often 65535), sweeping all subsequent characteristics.
+    std::vector<uint16_t> allChrDefHandles;
+    int subscribeIdx           = 0;
+    int dscDiscIdx             = 0;  // index into inputRpts for active descriptor discovery chain
+    int rptRefReadIdx          = 0;  // index into inputRpts for Report Reference (0x2908) read chain
+    uint16_t rptMapHandle      = 0;  // val_handle of Report Map (0x2A4B) char; 0 = not found
+    std::vector<uint8_t> rptMap;     // raw Report Map bytes accumulated during read
+    bool securityInitiated     = false;
+    bool typeResolutionDone    = false; // true after rptRef + Report Map reads complete
+    bool readyBlockFired       = false; // prevents duplicate execution if timer fires after subscribe
+    lv_indev_t* kbIndev        = nullptr;
+    lv_indev_t* mouseIndev     = nullptr;
+    lv_obj_t*   mouseCursor    = nullptr;
     std::array<uint8_t, 6> peerAddr = {}; // address of the connected peer
 };
 

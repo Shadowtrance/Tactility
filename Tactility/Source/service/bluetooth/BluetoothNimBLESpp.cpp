@@ -74,6 +74,10 @@ const struct ble_gatt_chr_def nus_chars_with_handle[] = {
     { 0 }
 };
 
+// Forward declaration so sppStartInternal() can call the Device* overload below
+// without resolving to the public bool sppStart() declared in Bluetooth.h.
+static error_t sppStart(struct Device* device);
+
 error_t sppStartInternal() {
     return sppStart(nullptr);
 }
@@ -120,20 +124,21 @@ static error_t sppStop(struct Device* device) {
 static error_t sppWrite(struct Device* device, const uint8_t* data, size_t len, size_t* written) {
     auto bt = bt_singleton;
     if (bt == nullptr || bt->sppConnHandle == BLE_HS_CONN_HANDLE_NONE) {
-        *written = 0;
+        if (written) *written = 0;
         return ERROR_INVALID_STATE;
     }
     struct os_mbuf* om = ble_hs_mbuf_from_flat(data, len);
     if (om == nullptr) {
-        *written = 0;
+        if (written) *written = 0;
         return ERROR_INVALID_STATE;
     }
     int rc = ble_gatts_notify_custom(bt->sppConnHandle, nus_tx_handle, om);
     if (rc != 0) {
-        *written = 0;
+        os_mbuf_free_chain(om);
+        if (written) *written = 0;
         return ERROR_INVALID_STATE;
     }
-    *written = len;
+    if (written) *written = len;
     return ERROR_NONE;
 }
 
@@ -146,14 +151,14 @@ static error_t sppRead(struct Device* device, uint8_t* data, size_t max_len, siz
     auto lock = bt->dataMutex.asScopedLock();
     lock.lock();
     if (bt->sppRxQueue.empty()) {
-        *read_out = 0;
+        if (read_out) *read_out = 0;
         return ERROR_NONE;
     }
     auto& front = bt->sppRxQueue.front();
     size_t copy_len = std::min(front.size(), max_len);
     std::memcpy(data, front.data(), copy_len);
     bt->sppRxQueue.pop_front();
-    *read_out = copy_len;
+    if (read_out) *read_out = copy_len;
     return ERROR_NONE;
 }
 

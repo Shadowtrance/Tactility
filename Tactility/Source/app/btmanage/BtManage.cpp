@@ -89,6 +89,7 @@ void BtManage::onBtEvent(service::bluetooth::BtEvent event) {
         case ScanFinished:
             getState().setScanning(false);
             getState().updateScanResults();
+            getState().updatePairedPeers();
             break;
         case PeerFound:
             getState().updateScanResults();
@@ -102,6 +103,7 @@ void BtManage::onBtEvent(service::bluetooth::BtEvent event) {
             getState().updatePairedPeers();
             break;
         case RadioStateOn:
+            getState().updatePairedPeers();
             if (!service::bluetooth::isScanning()) {
                 service::bluetooth::scanStart();
             }

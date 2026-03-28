@@ -96,10 +96,17 @@ void scheduleAdvRestart(std::shared_ptr<Bluetooth> bt, uint64_t delay_us) {
         args.callback        = advRestartCallback;
         args.dispatch_method = ESP_TIMER_TASK;
         args.name            = "adv_restart";
-        esp_timer_create(&args, &bt->advRestartTimer);
+        int crc = esp_timer_create(&args, &bt->advRestartTimer);
+        if (crc != ESP_OK) {
+            LOGGER.error("scheduleAdvRestart: timer create failed (rc={})", crc);
+            return;
+        }
     }
     esp_timer_stop(bt->advRestartTimer); // cancel any pending restart (ignore EINVAL if not running)
-    esp_timer_start_once(bt->advRestartTimer, delay_us);
+    int src = esp_timer_start_once(bt->advRestartTimer, delay_us);
+    if (src != ESP_OK) {
+        LOGGER.error("scheduleAdvRestart: timer start failed (rc={})", src);
+    }
 }
 
 // ---- GAP connection event handler ----
@@ -215,7 +222,7 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
                     bt->midiConnHandle  = event->subscribe.conn_handle;
                     bt->midiUseIndicate = (event->subscribe.cur_indicate != 0);
                     LOGGER.info("MIDI client subscribed (midi_io_handle={} indicate={})",
-                                midi_io_handle, bt->midiUseIndicate);
+                                midi_io_handle, (bool)bt->midiUseIndicate);
                     // Dispatch profile update off the NimBLE host task (same reason as SPP above).
                     {
                         struct ble_gap_conn_desc sub_desc = {};
@@ -241,6 +248,7 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
                         int as_rc = bt->midiUseIndicate
                             ? ble_gatts_indicate_custom(bt->midiConnHandle, midi_io_handle, as_om)
                             : ble_gatts_notify_custom(bt->midiConnHandle, midi_io_handle, as_om);
+                        if (as_rc != 0) os_mbuf_free_chain(as_om);
                         LOGGER.info("Active Sensing (subscribe) rc={}", as_rc);
                     }
                 } else {
@@ -279,12 +287,16 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
 
         case BLE_GAP_EVENT_CONN_UPDATE: {
             struct ble_gap_conn_desc desc = {};
-            ble_gap_conn_find(event->conn_update.conn_handle, &desc);
-            LOGGER.info("Conn params updated (status={} itvl={} latency={} timeout={})",
-                        event->conn_update.status,
-                        desc.conn_itvl,
-                        desc.conn_latency,
-                        desc.supervision_timeout);
+            if (ble_gap_conn_find(event->conn_update.conn_handle, &desc) == 0) {
+                LOGGER.info("Conn params updated (status={} itvl={} latency={} timeout={})",
+                            event->conn_update.status,
+                            desc.conn_itvl,
+                            desc.conn_latency,
+                            desc.supervision_timeout);
+            } else {
+                LOGGER.info("Conn params updated (status={}, conn not found)",
+                            event->conn_update.status);
+            }
             break;
         }
 
@@ -309,6 +321,7 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
                     std::memcpy(peer_addr.data(), desc.peer_id_addr.val, 6);
                     int profile = bt->midiActive ? BT_PROFILE_MIDI
                                 : bt->sppActive  ? BT_PROFILE_SPP
+                                : bt->hidActive  ? BT_PROFILE_HID_DEVICE
                                                  : BT_PROFILE_HID_HOST;
                     getMainDispatcher().dispatch([bt, peer_addr, profile] {
                         const auto addr_hex = settings::addrToHex(peer_addr);
@@ -337,6 +350,7 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
                     int rc = bt->midiUseIndicate
                         ? ble_gatts_indicate_custom(bt->midiConnHandle, midi_io_handle, om)
                         : ble_gatts_notify_custom(bt->midiConnHandle, midi_io_handle, om);
+                    if (rc != 0) os_mbuf_free_chain(om);
                     LOGGER.info("Active Sensing (post-enc) rc={}", rc);
                 }
             }
@@ -359,7 +373,7 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
             // (e.g. device was reflashed, NVS cleared). Always delete the stale
             // bond entry so the next fresh connection can pair cleanly.
             LOGGER.info("Repeat pairing (conn={} encrypted={})",
-                        event->repeat_pairing.conn_handle, bt->linkEncrypted);
+                        event->repeat_pairing.conn_handle, (bool)bt->linkEncrypted);
             struct ble_gap_conn_desc desc;
             if (ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc) == 0) {
                 ble_store_util_delete_peer(&desc.peer_id_addr);
@@ -875,22 +889,40 @@ std::vector<PeerRecord> getPairedPeers() {
                            hid_host_ctx->peerAddr == device.addr;
         result.push_back(std::move(record));
     }
+    // If the HID host peer is connected but was not returned by loadAll() — which can happen
+    // on the same tick as the file save, before LittleFS makes the new directory entry
+    // visible to readdir — synthesize the record so the Paired section always shows it.
+    if (hidHostIsConnectedImpl() && hid_host_ctx) {
+        bool found = false;
+        for (const auto& r : result) {
+            if (r.addr == hid_host_ctx->peerAddr) { found = true; break; }
+        }
+        if (!found) {
+            PeerRecord record;
+            record.addr      = hid_host_ctx->peerAddr;
+            record.rssi      = 0;
+            record.paired    = true;
+            record.connected = true;
+            record.profileId = BT_PROFILE_HID_HOST;
+            // Attempt to get the device name from the most recent scan results.
+            if (auto bt = bt_singleton) {
+                auto lock = bt->dataMutex.asScopedLock();
+                lock.lock();
+                for (const auto& sr : bt->scanResults) {
+                    if (sr.addr == hid_host_ctx->peerAddr) { record.name = sr.name; break; }
+                }
+            }
+            result.push_back(std::move(record));
+        }
+    }
     return result;
 }
 
 void pair(const std::array<uint8_t, 6>& addr) {
-    LOGGER.info("pair()");
-    auto bt = bt_singleton;
-    if (bt == nullptr) return;
-    ble_addr_t ble_addr;
-    ble_addr.type = BLE_ADDR_PUBLIC;
-    std::memcpy(ble_addr.val, addr.data(), 6);
-    // NimBLE pairing is triggered during connection; initiate security
-    uint16_t conn_handle;
-    if (ble_gap_conn_find_by_addr(&ble_addr, nullptr) == 0) {
-        // If already connected, initiate security
-        // ble_gap_security_initiate(conn_handle);
-    }
+    // Pairing is handled automatically during connection by the NimBLE SM (Security Manager).
+    // ENC_CHANGE fires when encryption is established and persists the paired device.
+    // This function is a no-op; callers should use connect() to initiate a connection.
+    (void)addr;
 }
 
 void unpair(const std::array<uint8_t, 6>& addr) {
@@ -913,9 +945,9 @@ void connect(const std::array<uint8_t, 6>& addr, int profileId) {
     } else if (profileId == BT_PROFILE_HID_DEVICE) {
         hidDeviceStart();
     } else if (profileId == BT_PROFILE_SPP) {
-        startAdvertising(&NUS_SVC_UUID);
+        sppStartInternal();
     } else if (profileId == BT_PROFILE_MIDI) {
-        startAdvertising(&MIDI_SVC_UUID);
+        midiStartInternal();
     }
 }
 
@@ -991,7 +1023,10 @@ public:
         enc_args.callback        = hidEncRetryTimerCb;
         enc_args.dispatch_method = ESP_TIMER_TASK;
         enc_args.name            = "hid_enc_retry";
-        esp_timer_create(&enc_args, &hid_enc_retry_timer);
+        int enc_rc = esp_timer_create(&enc_args, &hid_enc_retry_timer);
+        if (enc_rc != ESP_OK) {
+            LOGGER.error("onStart: hid_enc_retry timer create failed (rc={})", enc_rc);
+        }
 
         if (settings::shouldEnableOnBoot()) {
             LOGGER.info("Auto-enabling Bluetooth on boot");
