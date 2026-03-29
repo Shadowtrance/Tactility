@@ -39,10 +39,10 @@ static int midiChrAccess(uint16_t conn_handle, uint16_t attr_handle,
             std::vector<uint8_t> packet(len);
             os_mbuf_copydata(ctxt->om, 0, len, packet.data());
             {
-                auto lock = bt->dataMutex.asScopedLock();
+                auto lock = bt->getDataMutex().asScopedLock();
                 lock.lock();
-                bt->midiRxQueue.push_back(std::move(packet));
-                while (bt->midiRxQueue.size() > 16) bt->midiRxQueue.pop_front();
+                bt->getMidiRxQueue().push_back(std::move(packet));
+                while (bt->getMidiRxQueue().size() > 16) bt->getMidiRxQueue().pop_front();
             }
             publishEvent(bt, BtEvent::MidiDataReceived);
         }
@@ -71,10 +71,10 @@ error_t midiStartInternal() {
 void midiInitGattHandles() {
     // midi_io_handle is populated by NimBLE when ble_gatts_add_svcs is called
     // (the val_handle pointer in midi_chars[] is written by NimBLE).
-    // Sync back to bt->midiIoHandle for any code that reads that field.
+    // Sync back to bt->getMidiIoHandle() for any code that reads that field.
     auto bt = bt_singleton;
     if (bt != nullptr) {
-        bt->midiIoHandle = midi_io_handle;
+        bt->setMidiIoHandle(midi_io_handle);
     }
 }
 
@@ -82,13 +82,13 @@ void midiInitGattHandles() {
 
 static void midiKeepaliveCallback(void* /*arg*/) {
     auto bt = bt_singleton;
-    if (bt == nullptr || bt->midiConnHandle == BLE_HS_CONN_HANDLE_NONE) return;
+    if (bt == nullptr || bt->getMidiConnHandle() == BLE_HS_CONN_HANDLE_NONE) return;
     static const uint8_t as_pkt[3] = { 0x80, 0x80, 0xFE };
     struct os_mbuf* om = ble_hs_mbuf_from_flat(as_pkt, 3);
     if (om == nullptr) return;
-    int rc = bt->midiUseIndicate
-        ? ble_gatts_indicate_custom(bt->midiConnHandle, midi_io_handle, om)
-        : ble_gatts_notify_custom(bt->midiConnHandle, midi_io_handle, om);
+    int rc = bt->getMidiUseIndicate()
+        ? ble_gatts_indicate_custom(bt->getMidiConnHandle(), midi_io_handle, om)
+        : ble_gatts_notify_custom(bt->getMidiConnHandle(), midi_io_handle, om);
     if (rc != 0) os_mbuf_free_chain(om);
 }
 
@@ -96,21 +96,21 @@ static void midiKeepaliveCallback(void* /*arg*/) {
 static error_t midiStart(struct Device* device) {
     auto bt = bt_singleton;
     if (bt == nullptr) return ERROR_INVALID_STATE;
-    bt->midiActive = true;
+    bt->setMidiActive(true);
     // Create a 2-second periodic Active Sensing timer to prevent Windows BLE
     // MIDI driver from declaring the connection idle and disconnecting.
-    if (bt->midiKeepaliveTimer == nullptr) {
+    if (bt->getMidiKeepaliveTimer() == nullptr) {
         esp_timer_create_args_t args = {};
         args.callback = midiKeepaliveCallback;
         args.dispatch_method = ESP_TIMER_TASK;
         args.name = "midi_as";
-        int crc = esp_timer_create(&args, &bt->midiKeepaliveTimer);
+        int crc = esp_timer_create(&args, &bt->getMidiKeepaliveTimer());
         if (crc != ESP_OK) {
             LOGGER.error("midiStart: keepalive timer create failed (rc={})", crc);
             return ERROR_INVALID_STATE;
         }
     }
-    int src = esp_timer_start_periodic(bt->midiKeepaliveTimer, 2'000'000); // 2 seconds
+    int src = esp_timer_start_periodic(bt->getMidiKeepaliveTimer(), 2'000'000); // 2 seconds
     if (src != ESP_OK) {
         LOGGER.error("midiStart: keepalive timer start failed (rc={})", src);
     }
@@ -121,16 +121,16 @@ static error_t midiStart(struct Device* device) {
 static error_t midiStop(struct Device* device) {
     auto bt = bt_singleton;
     if (bt == nullptr) return ERROR_NONE;
-    bt->midiActive = false;
-    if (bt->midiKeepaliveTimer != nullptr) {
-        esp_timer_stop(bt->midiKeepaliveTimer);
+    bt->setMidiActive(false);
+    if (bt->getMidiKeepaliveTimer() != nullptr) {
+        esp_timer_stop(bt->getMidiKeepaliveTimer());
     }
-    if (bt->midiConnHandle != BLE_HS_CONN_HANDLE_NONE) {
-        ble_gap_terminate(bt->midiConnHandle, BLE_ERR_REM_USER_CONN_TERM);
-        bt->midiConnHandle = BLE_HS_CONN_HANDLE_NONE;
+    if (bt->getMidiConnHandle() != BLE_HS_CONN_HANDLE_NONE) {
+        ble_gap_terminate(bt->getMidiConnHandle(), BLE_ERR_REM_USER_CONN_TERM);
+        bt->setMidiConnHandle(BLE_HS_CONN_HANDLE_NONE);
     }
     // Do NOT restart advertising — see sppStop for rationale.
-    if (!bt->sppActive && !bt->hidActive) {
+    if (!bt->getSppActive() && !bt->getHidActive()) {
         ble_gap_adv_stop();
     }
     return ERROR_NONE;
@@ -138,7 +138,7 @@ static error_t midiStop(struct Device* device) {
 
 static error_t midiSend(struct Device* device, const uint8_t* msg, size_t len) {
     auto bt = bt_singleton;
-    if (bt == nullptr || bt->midiConnHandle == BLE_HS_CONN_HANDLE_NONE) {
+    if (bt == nullptr || bt->getMidiConnHandle() == BLE_HS_CONN_HANDLE_NONE) {
         return ERROR_INVALID_STATE;
     }
     // BLE MIDI wraps each message with a 2-byte header (timestamp)
@@ -153,10 +153,10 @@ static error_t midiSend(struct Device* device, const uint8_t* msg, size_t len) {
         LOGGER.error("midiSend: mbuf append failed");
         return ERROR_INVALID_STATE;
     }
-    LOGGER.info("midiSend {} bytes (indicate={})", len, (bool)bt->midiUseIndicate);
-    int rc = bt->midiUseIndicate
-        ? ble_gatts_indicate_custom(bt->midiConnHandle, midi_io_handle, om)
-        : ble_gatts_notify_custom(bt->midiConnHandle, midi_io_handle, om);
+    LOGGER.info("midiSend {} bytes (indicate={})", len, (bool)bt->getMidiUseIndicate());
+    int rc = bt->getMidiUseIndicate()
+        ? ble_gatts_indicate_custom(bt->getMidiConnHandle(), midi_io_handle, om)
+        : ble_gatts_notify_custom(bt->getMidiConnHandle(), midi_io_handle, om);
     if (rc != 0) {
         os_mbuf_free_chain(om);
         LOGGER.error("midiSend failed rc={}", rc);
@@ -166,7 +166,7 @@ static error_t midiSend(struct Device* device, const uint8_t* msg, size_t len) {
 
 static bool midiIsConnected(struct Device* device) {
     auto bt = bt_singleton;
-    return bt != nullptr && bt->midiConnHandle != BLE_HS_CONN_HANDLE_NONE;
+    return bt != nullptr && bt->getMidiConnHandle() != BLE_HS_CONN_HANDLE_NONE;
 }
 
 const BtMidiApi nimble_midi_api = {
@@ -195,13 +195,13 @@ bool midiIsConnected() { return midiIsConnected(nullptr); }
 size_t midiRead(uint8_t* data, size_t max_len) {
     auto bt = bt_singleton;
     if (bt == nullptr || data == nullptr || max_len == 0) return 0;
-    auto lock = bt->dataMutex.asScopedLock();
+    auto lock = bt->getDataMutex().asScopedLock();
     lock.lock();
-    if (bt->midiRxQueue.empty()) return 0;
-    auto& front = bt->midiRxQueue.front();
+    if (bt->getMidiRxQueue().empty()) return 0;
+    auto& front = bt->getMidiRxQueue().front();
     size_t copy_len = std::min(front.size(), max_len);
     std::memcpy(data, front.data(), copy_len);
-    bt->midiRxQueue.pop_front();
+    bt->getMidiRxQueue().pop_front();
     return copy_len;
 }
 

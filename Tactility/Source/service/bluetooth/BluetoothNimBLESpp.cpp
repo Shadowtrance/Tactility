@@ -45,12 +45,12 @@ static int nusChrAccess(uint16_t conn_handle, uint16_t attr_handle,
             std::vector<uint8_t> packet(len);
             os_mbuf_copydata(ctxt->om, 0, len, packet.data());
             {
-                auto lock = bt->dataMutex.asScopedLock();
+                auto lock = bt->getDataMutex().asScopedLock();
                 lock.lock();
-                bt->sppRxQueue.push_back(std::move(packet));
+                bt->getSppRxQueue().push_back(std::move(packet));
                 // Cap at 16 packets to bound memory use on a slow consumer
-                while (bt->sppRxQueue.size() > 16) {
-                    bt->sppRxQueue.pop_front();
+                while (bt->getSppRxQueue().size() > 16) {
+                    bt->getSppRxQueue().pop_front();
                 }
             }
             publishEvent(bt, BtEvent::SppDataReceived);
@@ -85,10 +85,10 @@ error_t sppStartInternal() {
 void sppInitGattHandles() {
     // nus_tx_handle is populated by NimBLE when ble_gatts_add_svcs is called
     // (the val_handle pointer in nus_chars_with_handle[] is written by NimBLE).
-    // Sync back to bt->nusTxHandle for any code that reads that field.
+    // Sync back to bt->getNusTxHandle() for any code that reads that field.
     auto bt = bt_singleton;
     if (bt != nullptr) {
-        bt->nusTxHandle = nus_tx_handle;
+        bt->setNusTxHandle(nus_tx_handle);
     }
 }
 
@@ -98,7 +98,7 @@ void sppInitGattHandles() {
 static error_t sppStart(struct Device* device) {
     auto bt = bt_singleton;
     if (bt == nullptr) return ERROR_INVALID_STATE;
-    bt->sppActive = true;
+    bt->setSppActive(true);
     startAdvertising(&NUS_SVC_UUID);
     return ERROR_NONE;
 }
@@ -106,16 +106,16 @@ static error_t sppStart(struct Device* device) {
 static error_t sppStop(struct Device* device) {
     auto bt = bt_singleton;
     if (bt == nullptr) return ERROR_NONE;
-    bt->sppActive = false;
-    if (bt->sppConnHandle != BLE_HS_CONN_HANDLE_NONE) {
-        ble_gap_terminate(bt->sppConnHandle, BLE_ERR_REM_USER_CONN_TERM);
-        bt->sppConnHandle = BLE_HS_CONN_HANDLE_NONE;
+    bt->setSppActive(false);
+    if (bt->getSppConnHandle() != BLE_HS_CONN_HANDLE_NONE) {
+        ble_gap_terminate(bt->getSppConnHandle(), BLE_ERR_REM_USER_CONN_TERM);
+        bt->setSppConnHandle(BLE_HS_CONN_HANDLE_NONE);
     }
     // Do NOT restart advertising after a user-initiated stop.
     // Restarting name-only advertising causes bonded Windows hosts to auto-reconnect
     // in a tight loop (connect → discover → disconnect → repeat).
     // Advertising will resume when the user starts a new profile server.
-    if (!bt->midiActive && !bt->hidActive) {
+    if (!bt->getMidiActive() && !bt->getHidActive()) {
         ble_gap_adv_stop();
     }
     return ERROR_NONE;
@@ -123,7 +123,7 @@ static error_t sppStop(struct Device* device) {
 
 static error_t sppWrite(struct Device* device, const uint8_t* data, size_t len, size_t* written) {
     auto bt = bt_singleton;
-    if (bt == nullptr || bt->sppConnHandle == BLE_HS_CONN_HANDLE_NONE) {
+    if (bt == nullptr || bt->getSppConnHandle() == BLE_HS_CONN_HANDLE_NONE) {
         if (written) *written = 0;
         return ERROR_INVALID_STATE;
     }
@@ -132,7 +132,7 @@ static error_t sppWrite(struct Device* device, const uint8_t* data, size_t len, 
         if (written) *written = 0;
         return ERROR_INVALID_STATE;
     }
-    int rc = ble_gatts_notify_custom(bt->sppConnHandle, nus_tx_handle, om);
+    int rc = ble_gatts_notify_custom(bt->getSppConnHandle(), nus_tx_handle, om);
     if (rc != 0) {
         os_mbuf_free_chain(om);
         if (written) *written = 0;
@@ -148,23 +148,23 @@ static error_t sppRead(struct Device* device, uint8_t* data, size_t max_len, siz
         if (read_out) *read_out = 0;
         return ERROR_NONE;
     }
-    auto lock = bt->dataMutex.asScopedLock();
+    auto lock = bt->getDataMutex().asScopedLock();
     lock.lock();
-    if (bt->sppRxQueue.empty()) {
+    if (bt->getSppRxQueue().empty()) {
         if (read_out) *read_out = 0;
         return ERROR_NONE;
     }
-    auto& front = bt->sppRxQueue.front();
+    auto& front = bt->getSppRxQueue().front();
     size_t copy_len = std::min(front.size(), max_len);
     std::memcpy(data, front.data(), copy_len);
-    bt->sppRxQueue.pop_front();
+    bt->getSppRxQueue().pop_front();
     if (read_out) *read_out = copy_len;
     return ERROR_NONE;
 }
 
 static bool sppIsConnected(struct Device* device) {
     auto bt = bt_singleton;
-    return bt != nullptr && bt->sppConnHandle != BLE_HS_CONN_HANDLE_NONE;
+    return bt != nullptr && bt->getSppConnHandle() != BLE_HS_CONN_HANDLE_NONE;
 }
 
 const BtSerialApi nimble_serial_api = {

@@ -50,6 +50,68 @@ namespace tt::service::bluetooth {
 
 class Bluetooth {
 public:
+    // ---- Radio state ----
+    RadioState getRadioState() const { return radioState.load(); }
+    void setRadioState(RadioState s) { radioState.store(s); }
+
+    // ---- Scan state ----
+    bool isScanning() const { return scanActive.load(); }
+    void setScanning(bool s) { scanActive.store(s); }
+
+    // ---- Mutexes ----
+    RecursiveMutex& getRadioMutex() { return radioMutex; }
+    RecursiveMutex& getDataMutex() { return dataMutex; }
+
+    // ---- PubSub ----
+    std::shared_ptr<PubSub<BtEvent>>& getPubsubRef() { return pubsub; }
+
+    // ---- Scan results ----
+    std::vector<PeerRecord>& getScanResults() { return scanResults; }
+    std::vector<ble_addr_t>& getScanAddresses() { return scanAddresses; }
+
+    // ---- RX queues ----
+    std::deque<std::vector<uint8_t>>& getSppRxQueue() { return sppRxQueue; }
+    std::deque<std::vector<uint8_t>>& getMidiRxQueue() { return midiRxQueue; }
+
+    // ---- GATT handles ----
+    uint16_t getNusTxHandle() const { return nusTxHandle; }
+    void setNusTxHandle(uint16_t h) { nusTxHandle = h; }
+    uint16_t getMidiIoHandle() const { return midiIoHandle; }
+    void setMidiIoHandle(uint16_t h) { midiIoHandle = h; }
+
+    // ---- SPP ----
+    uint16_t getSppConnHandle() const { return sppConnHandle.load(); }
+    void setSppConnHandle(uint16_t h) { sppConnHandle.store(h); }
+    bool getSppActive() const { return sppActive.load(); }
+    void setSppActive(bool v) { sppActive.store(v); }
+
+    // ---- MIDI ----
+    uint16_t getMidiConnHandle() const { return midiConnHandle.load(); }
+    void setMidiConnHandle(uint16_t h) { midiConnHandle.store(h); }
+    bool getMidiActive() const { return midiActive.load(); }
+    void setMidiActive(bool v) { midiActive.store(v); }
+    bool getMidiUseIndicate() const { return midiUseIndicate.load(); }
+    void setMidiUseIndicate(bool v) { midiUseIndicate.store(v); }
+    esp_timer_handle_t& getMidiKeepaliveTimer() { return midiKeepaliveTimer; }
+
+    // ---- Advertising restart timer ----
+    esp_timer_handle_t& getAdvRestartTimer() { return advRestartTimer; }
+
+    // ---- Link encryption ----
+    bool isLinkEncrypted() const { return linkEncrypted.load(); }
+    void setLinkEncrypted(bool v) { linkEncrypted.store(v); }
+
+    // ---- HID device ----
+    uint16_t getHidConnHandle() const { return hidConnHandle.load(); }
+    void setHidConnHandle(uint16_t h) { hidConnHandle.store(h); }
+    bool getHidActive() const { return hidActive.load(); }
+    void setHidActive(bool v) { hidActive.store(v); }
+
+    // ---- Reset recovery ----
+    void resetPendingResets() { pendingResetCount.store(0); }
+    int incrementAndGetPendingResets() { return pendingResetCount.fetch_add(1) + 1; }
+
+private:
     RecursiveMutex radioMutex;
     RecursiveMutex dataMutex;
     std::atomic<RadioState> radioState = RadioState::Off;
@@ -111,11 +173,6 @@ public:
 
     // Reset recovery: count resets while still in OnPending (controller unresponsive)
     std::atomic<int> pendingResetCount = 0;
-
-    RadioState getRadioState() const { return radioState.load(); }
-    void setRadioState(RadioState s) { radioState.store(s); }
-    bool isScanning() const { return scanActive.load(); }
-    void setScanning(bool s) { scanActive.store(s); }
 };
 
 extern std::shared_ptr<Bluetooth> bt_singleton;

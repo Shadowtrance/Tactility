@@ -16,7 +16,6 @@
 #include "tt_lvgl_toolbar.h"
 #include "tt_preferences.h"
 #include "tt_time.h"
-#include "tt_bluetooth.h"
 #include "tt_wifi.h"
 
 #include "symbols/cplusplus.h"
@@ -359,39 +358,6 @@ const esp_elfsym main_symbols[] {
     ESP_ELFSYM_EXPORT(tt_wifi_disconnect),
     ESP_ELFSYM_EXPORT(tt_wifi_is_connnection_secure),
     ESP_ELFSYM_EXPORT(tt_wifi_get_rssi),
-    // tt_bluetooth.h
-    ESP_ELFSYM_EXPORT(tt_bt_get_radio_state),
-    ESP_ELFSYM_EXPORT(tt_bt_radio_state_to_string),
-    ESP_ELFSYM_EXPORT(tt_bt_set_enabled),
-    ESP_ELFSYM_EXPORT(tt_bt_scan_start),
-    ESP_ELFSYM_EXPORT(tt_bt_scan_stop),
-    ESP_ELFSYM_EXPORT(tt_bt_is_scanning),
-    ESP_ELFSYM_EXPORT(tt_bt_get_scan_results),
-    ESP_ELFSYM_EXPORT(tt_bt_connect),
-    ESP_ELFSYM_EXPORT(tt_bt_disconnect),
-    ESP_ELFSYM_EXPORT(tt_bt_pair),
-    ESP_ELFSYM_EXPORT(tt_bt_unpair),
-    ESP_ELFSYM_EXPORT(tt_bt_is_profile_supported),
-    ESP_ELFSYM_EXPORT(tt_bt_spp_start),
-    ESP_ELFSYM_EXPORT(tt_bt_spp_stop),
-    ESP_ELFSYM_EXPORT(tt_bt_spp_read),
-    ESP_ELFSYM_EXPORT(tt_bt_spp_write),
-    ESP_ELFSYM_EXPORT(tt_bt_spp_is_connected),
-    ESP_ELFSYM_EXPORT(tt_bt_midi_start),
-    ESP_ELFSYM_EXPORT(tt_bt_midi_stop),
-    ESP_ELFSYM_EXPORT(tt_bt_midi_send),
-    ESP_ELFSYM_EXPORT(tt_bt_midi_read),
-    ESP_ELFSYM_EXPORT(tt_bt_midi_is_connected),
-    ESP_ELFSYM_EXPORT(tt_bt_hid_device_start),
-    ESP_ELFSYM_EXPORT(tt_bt_hid_device_stop),
-    ESP_ELFSYM_EXPORT(tt_bt_hid_device_is_connected),
-    ESP_ELFSYM_EXPORT(tt_bt_hid_send_keyboard),
-    ESP_ELFSYM_EXPORT(tt_bt_hid_send_consumer),
-    ESP_ELFSYM_EXPORT(tt_bt_hid_send_mouse),
-    ESP_ELFSYM_EXPORT(tt_bt_hid_send_gamepad),
-    ESP_ELFSYM_EXPORT(tt_bt_hid_host_connect),
-    ESP_ELFSYM_EXPORT(tt_bt_hid_host_disconnect),
-    ESP_ELFSYM_EXPORT(tt_bt_hid_host_is_connected),
     // tt::lvgl
     ESP_ELFSYM_EXPORT(tt_lvgl_spinner_create),
 

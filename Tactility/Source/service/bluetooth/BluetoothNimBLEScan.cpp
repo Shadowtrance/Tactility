@@ -36,24 +36,24 @@ int gapDiscEventHandler(struct ble_gap_event* event, void* arg) {
             }
 
             {
-                auto lock = bt->dataMutex.asScopedLock();
+                auto lock = bt->getDataMutex().asScopedLock();
                 lock.lock();
                 // Deduplicate by address; smart-merge fields so we don't
                 // clobber a name obtained from ADV_IND with an empty SCAN_RSP.
                 bool found = false;
-                for (size_t i = 0; i < bt->scanResults.size(); ++i) {
-                    if (bt->scanResults[i].addr == record.addr) {
+                for (size_t i = 0; i < bt->getScanResults().size(); ++i) {
+                    if (bt->getScanResults()[i].addr == record.addr) {
                         if (!record.name.empty()) {
-                            bt->scanResults[i].name = record.name;
+                            bt->getScanResults()[i].name = record.name;
                         }
-                        bt->scanResults[i].rssi = record.rssi;
+                        bt->getScanResults()[i].rssi = record.rssi;
                         found = true;
                         break;
                     }
                 }
                 if (!found) {
-                    bt->scanResults.push_back(record);
-                    bt->scanAddresses.push_back(disc.addr); // save full addr type for name resolution
+                    bt->getScanResults().push_back(record);
+                    bt->getScanAddresses().push_back(disc.addr); // save full addr type for name resolution
                 }
             }
 
@@ -108,11 +108,11 @@ static int nameReadCallback(uint16_t conn_handle, const struct ble_gatt_error* e
             char name_buf[BT_NAME_MAX + 1] = {};
             os_mbuf_copydata(attr->om, 0, len, name_buf);
             {
-                auto lock = bt->dataMutex.asScopedLock();
+                auto lock = bt->getDataMutex().asScopedLock();
                 lock.lock();
-                if (idx < bt->scanResults.size() && bt->scanResults[idx].name.empty()) {
-                    bt->scanResults[idx].name = std::string(name_buf, len);
-                    LOGGER.info("Name resolved (idx={}): {}", idx, bt->scanResults[idx].name);
+                if (idx < bt->getScanResults().size() && bt->getScanResults()[idx].name.empty()) {
+                    bt->getScanResults()[idx].name = std::string(name_buf, len);
+                    LOGGER.info("Name resolved (idx={}): {}", idx, bt->getScanResults()[idx].name);
                 }
             }
             publishEvent(bt, BtEvent::PeerFound);
@@ -170,9 +170,9 @@ void dispatchAutoConnectHidHost(std::shared_ptr<Bluetooth> bt) {
         // Collect current scan result addresses (under lock)
         std::vector<std::array<uint8_t, 6>> addrs;
         {
-            auto lock = bt->dataMutex.asScopedLock();
+            auto lock = bt->getDataMutex().asScopedLock();
             lock.lock();
-            for (const auto& r : bt->scanResults) addrs.push_back(r.addr);
+            for (const auto& r : bt->getScanResults()) addrs.push_back(r.addr);
         }
         // Connect to first saved HID host peer seen in the scan
         for (const auto& addr : addrs) {
@@ -191,7 +191,7 @@ void dispatchAutoConnectHidHost(std::shared_ptr<Bluetooth> bt) {
 void resolveNextUnnamedPeer(std::shared_ptr<Bluetooth> bt, size_t start_idx) {
     // Skip resolution if a profile server or HID host connection attempt is active —
     // initiating another central connection at the same time would fail with BLE_HS_EALREADY.
-    if (bt->midiActive || bt->sppActive || bt->hidActive || hid_host_ctx) {
+    if (bt->getMidiActive() || bt->getSppActive() || bt->getHidActive() || hid_host_ctx) {
         LOGGER.info("Name resolution: skipping (server or HID host connection active)");
         bt->setScanning(false);
         publishEvent(bt, BtEvent::ScanFinished);
@@ -204,11 +204,11 @@ void resolveNextUnnamedPeer(std::shared_ptr<Bluetooth> bt, size_t start_idx) {
         ble_addr_t addr  = {};
         bool       found = false;
         {
-            auto lock = bt->dataMutex.asScopedLock();
+            auto lock = bt->getDataMutex().asScopedLock();
             lock.lock();
-            while (i < bt->scanResults.size()) {
-                if (bt->scanResults[i].name.empty()) {
-                    addr  = bt->scanAddresses[i];
+            while (i < bt->getScanResults().size()) {
+                if (bt->getScanResults()[i].name.empty()) {
+                    addr  = bt->getScanAddresses()[i];
                     found = true;
                     break;
                 }

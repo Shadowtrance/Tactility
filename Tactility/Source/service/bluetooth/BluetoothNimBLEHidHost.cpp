@@ -548,9 +548,9 @@ static void hidHostSubscribeNext(HidHostCtx& ctx) {
             // Find device name from scan results
             std::string name;
             if (auto bt = bt_weak) {
-                auto lock = bt->dataMutex.asScopedLock();
+                auto lock = bt->getDataMutex().asScopedLock();
                 lock.lock();
-                for (const auto& r : bt->scanResults) {
+                for (const auto& r : bt->getScanResults()) {
                     if (r.addr == peer_addr) { name = r.name; break; }
                 }
             }
@@ -890,8 +890,8 @@ void hidHostConnect(const std::array<uint8_t, 6>& addr) {
     ble_addr.type = BLE_ADDR_PUBLIC;
     std::memcpy(ble_addr.val, addr.data(), 6);
     {
-        auto lock = bt->dataMutex.asScopedLock();
-        for (const auto& sa : bt->scanAddresses) {
+        auto lock = bt->getDataMutex().asScopedLock();
+        for (const auto& sa : bt->getScanAddresses()) {
             if (std::memcmp(sa.val, addr.data(), 6) == 0) {
                 ble_addr.type = sa.type;
                 break;

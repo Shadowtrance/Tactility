@@ -74,11 +74,11 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg);
 static void advRestartCallback(void* /*arg*/) {
     auto bt = bt_singleton;
     if (bt == nullptr || bt->getRadioState() != RadioState::On) return;
-    if (bt->midiActive && bt->midiConnHandle == BLE_HS_CONN_HANDLE_NONE) {
+    if (bt->getMidiActive() && bt->getMidiConnHandle() == BLE_HS_CONN_HANDLE_NONE) {
         startAdvertising(&MIDI_SVC_UUID);
-    } else if (bt->sppActive && bt->sppConnHandle == BLE_HS_CONN_HANDLE_NONE) {
+    } else if (bt->getSppActive() && bt->getSppConnHandle() == BLE_HS_CONN_HANDLE_NONE) {
         startAdvertising(&NUS_SVC_UUID);
-    } else if (bt->hidActive && bt->hidConnHandle == BLE_HS_CONN_HANDLE_NONE) {
+    } else if (bt->getHidActive() && bt->getHidConnHandle() == BLE_HS_CONN_HANDLE_NONE) {
         startAdvertisingHid(hid_appearance);
     }
 }
@@ -91,19 +91,19 @@ void scheduleAdvRestart(std::shared_ptr<Bluetooth> bt, uint64_t delay_us) {
         advRestartCallback(nullptr);
         return;
     }
-    if (bt->advRestartTimer == nullptr) {
+    if (bt->getAdvRestartTimer() == nullptr) {
         esp_timer_create_args_t args = {};
         args.callback        = advRestartCallback;
         args.dispatch_method = ESP_TIMER_TASK;
         args.name            = "adv_restart";
-        int crc = esp_timer_create(&args, &bt->advRestartTimer);
+        int crc = esp_timer_create(&args, &bt->getAdvRestartTimer());
         if (crc != ESP_OK) {
             LOGGER.error("scheduleAdvRestart: timer create failed (rc={})", crc);
             return;
         }
     }
-    esp_timer_stop(bt->advRestartTimer); // cancel any pending restart (ignore EINVAL if not running)
-    int src = esp_timer_start_once(bt->advRestartTimer, delay_us);
+    esp_timer_stop(bt->getAdvRestartTimer()); // cancel any pending restart (ignore EINVAL if not running)
+    int src = esp_timer_start_once(bt->getAdvRestartTimer(), delay_us);
     if (src != ESP_OK) {
         LOGGER.error("scheduleAdvRestart: timer start failed (rc={})", src);
     }
@@ -143,24 +143,24 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
         case BLE_GAP_EVENT_DISCONNECT: {
             LOGGER.info("Disconnected (reason={})", event->disconnect.reason);
             uint16_t hdl = event->disconnect.conn.conn_handle;
-            bool wasSpp  = (bt->sppConnHandle  == hdl);
-            bool wasMidi = (bt->midiConnHandle == hdl);
-            bool wasHid  = (bt->hidConnHandle  == hdl);
-            if (wasSpp)  bt->sppConnHandle  = BLE_HS_CONN_HANDLE_NONE;
-            if (wasMidi) { bt->midiConnHandle = BLE_HS_CONN_HANDLE_NONE; bt->midiUseIndicate = false; }
-            if (wasHid)  bt->hidConnHandle  = BLE_HS_CONN_HANDLE_NONE;
-            bt->linkEncrypted = false;
+            bool wasSpp  = (bt->getSppConnHandle()  == hdl);
+            bool wasMidi = (bt->getMidiConnHandle() == hdl);
+            bool wasHid  = (bt->getHidConnHandle()  == hdl);
+            if (wasSpp)  bt->setSppConnHandle(BLE_HS_CONN_HANDLE_NONE);
+            if (wasMidi) { bt->setMidiConnHandle(BLE_HS_CONN_HANDLE_NONE); bt->setMidiUseIndicate(false); }
+            if (wasHid)  bt->setHidConnHandle(BLE_HS_CONN_HANDLE_NONE);
+            bt->setLinkEncrypted(false);
             // Restart advertising whenever a service is active and has no live
             // subscription. This covers two cases:
             //   1. A normal data connection ended (wasSpp/wasMidi/wasHid true, handle cleared).
             //   2. A "discovery-only" connection ended without a subscription (e.g. Windows's
             //      first-connect GATT discovery phase). Without re-advertising here, the
             //      second-phase reconnect from the Windows BLE MIDI/HID driver would fail.
-            if (bt->midiActive && bt->midiConnHandle == BLE_HS_CONN_HANDLE_NONE) {
+            if (bt->getMidiActive() && bt->getMidiConnHandle() == BLE_HS_CONN_HANDLE_NONE) {
                 startAdvertising(&MIDI_SVC_UUID);
-            } else if (bt->sppActive && bt->sppConnHandle == BLE_HS_CONN_HANDLE_NONE) {
+            } else if (bt->getSppActive() && bt->getSppConnHandle() == BLE_HS_CONN_HANDLE_NONE) {
                 startAdvertising(&NUS_SVC_UUID);
-            } else if (bt->hidActive && bt->hidConnHandle == BLE_HS_CONN_HANDLE_NONE) {
+            } else if (bt->getHidActive() && bt->getHidConnHandle() == BLE_HS_CONN_HANDLE_NONE) {
                 startAdvertisingHid(hid_appearance);
             }
             break;
@@ -188,13 +188,13 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
                 LOGGER.info("Service Changed subscription (attr={}) — ignoring, Windows discovers on its own",
                             event->subscribe.attr_handle);
             } else if (event->subscribe.attr_handle == nus_tx_handle) {
-                if (!bt->sppActive) {
+                if (!bt->getSppActive()) {
                     // Ignore cross-profile subscription: Windows subscribes to ALL CCCDs on
                     // connect regardless of which profile server is actually running.
                     LOGGER.info("SPP CCCD subscribed but sppActive=false — ignoring");
                     break;
                 }
-                bt->sppConnHandle = event->subscribe.conn_handle;
+                bt->setSppConnHandle(event->subscribe.conn_handle);
                 LOGGER.info("SPP client subscribed (nus_tx_handle={})", nus_tx_handle);
                 // Dispatch profile update off the NimBLE host task — file I/O on the
                 // nimble_host stack causes stack overflows (stringstream + PropertiesFile).
@@ -214,15 +214,15 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
                     }
                 }
             } else if (event->subscribe.attr_handle == midi_io_handle) {
-                if ((event->subscribe.cur_notify || event->subscribe.cur_indicate) && !bt->midiActive) {
+                if ((event->subscribe.cur_notify || event->subscribe.cur_indicate) && !bt->getMidiActive()) {
                     LOGGER.info("MIDI CCCD subscribed but midiActive=false — ignoring");
                     break;
                 }
                 if (event->subscribe.cur_notify || event->subscribe.cur_indicate) {
-                    bt->midiConnHandle  = event->subscribe.conn_handle;
-                    bt->midiUseIndicate = (event->subscribe.cur_indicate != 0);
+                    bt->setMidiConnHandle(event->subscribe.conn_handle);
+                    bt->setMidiUseIndicate(event->subscribe.cur_indicate != 0);
                     LOGGER.info("MIDI client subscribed (midi_io_handle={} indicate={})",
-                                midi_io_handle, (bool)bt->midiUseIndicate);
+                                midi_io_handle, (bool)bt->getMidiUseIndicate());
                     // Dispatch profile update off the NimBLE host task (same reason as SPP above).
                     {
                         struct ble_gap_conn_desc sub_desc = {};
@@ -245,16 +245,16 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
                     static const uint8_t active_sensing_pkt[3] = { 0x80, 0x80, 0xFE };
                     struct os_mbuf* as_om = ble_hs_mbuf_from_flat(active_sensing_pkt, 3);
                     if (as_om != nullptr) {
-                        int as_rc = bt->midiUseIndicate
-                            ? ble_gatts_indicate_custom(bt->midiConnHandle, midi_io_handle, as_om)
-                            : ble_gatts_notify_custom(bt->midiConnHandle, midi_io_handle, as_om);
+                        int as_rc = bt->getMidiUseIndicate()
+                            ? ble_gatts_indicate_custom(bt->getMidiConnHandle(), midi_io_handle, as_om)
+                            : ble_gatts_notify_custom(bt->getMidiConnHandle(), midi_io_handle, as_om);
                         if (as_rc != 0) os_mbuf_free_chain(as_om);
                         LOGGER.info("Active Sensing (subscribe) rc={}", as_rc);
                     }
                 } else {
                     // Unsubscribe — clear the connection handle
-                    bt->midiConnHandle  = BLE_HS_CONN_HANDLE_NONE;
-                    bt->midiUseIndicate = false;
+                    bt->setMidiConnHandle(BLE_HS_CONN_HANDLE_NONE);
+                    bt->setMidiUseIndicate(false);
                     LOGGER.info("MIDI client unsubscribed");
                 }
             } else if (event->subscribe.cur_notify &&
@@ -267,15 +267,15 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
                     (event->subscribe.attr_handle == hid_consumer_input_handle)  ? "consumer" :
                     (event->subscribe.attr_handle == hid_mouse_input_handle)     ? "mouse"    :
                     (event->subscribe.attr_handle == hid_gamepad_input_handle)   ? "gamepad"  : "unknown";
-                if (!bt->hidActive) {
+                if (!bt->getHidActive()) {
                     LOGGER.info("HID CCCD subscribed ({}) but hidActive=false — ignoring", report_name);
                     break;
                 }
                 LOGGER.info("HID CCCD subscribed: {} (attr={} conn={})",
                             report_name, event->subscribe.attr_handle,
                             event->subscribe.conn_handle);
-                if (bt->hidConnHandle == BLE_HS_CONN_HANDLE_NONE) {
-                    bt->hidConnHandle = event->subscribe.conn_handle;
+                if (bt->getHidConnHandle() == BLE_HS_CONN_HANDLE_NONE) {
+                    bt->setHidConnHandle(event->subscribe.conn_handle);
                 }
             }
             break;
@@ -309,7 +309,7 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
             LOGGER.info("Encryption changed (conn={} status={})",
                         event->enc_change.conn_handle, event->enc_change.status);
             if (event->enc_change.status == 0) {
-                bt->linkEncrypted = true;
+                bt->setLinkEncrypted(true);
                 // Persist the peer in our own storage on first successful bond.
                 // NimBLE stores the LTK in NVS via ble_store_config_init(); we store
                 // a separate .device.properties file so getPairedPeers() can enumerate.
@@ -319,9 +319,9 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
                 if (ble_gap_conn_find(event->enc_change.conn_handle, &desc) == 0) {
                     std::array<uint8_t, 6> peer_addr;
                     std::memcpy(peer_addr.data(), desc.peer_id_addr.val, 6);
-                    int profile = bt->midiActive ? BT_PROFILE_MIDI
-                                : bt->sppActive  ? BT_PROFILE_SPP
-                                : bt->hidActive  ? BT_PROFILE_HID_DEVICE
+                    int profile = bt->getMidiActive() ? BT_PROFILE_MIDI
+                                : bt->getSppActive()  ? BT_PROFILE_SPP
+                                : bt->getHidActive()  ? BT_PROFILE_HID_DEVICE
                                                  : BT_PROFILE_HID_HOST;
                     getMainDispatcher().dispatch([bt, peer_addr, profile] {
                         const auto addr_hex = settings::addrToHex(peer_addr);
@@ -343,13 +343,13 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
             // Windows BLE MIDI ignores pre-encryption indications; sending here
             // resets its idle timer so it doesn't disconnect after ~5 seconds.
             if (event->enc_change.status == 0 &&
-                bt->midiConnHandle == event->enc_change.conn_handle) {
+                bt->getMidiConnHandle() == event->enc_change.conn_handle) {
                 static const uint8_t as_pkt[3] = { 0x80, 0x80, 0xFE };
                 struct os_mbuf* om = ble_hs_mbuf_from_flat(as_pkt, 3);
                 if (om != nullptr) {
-                    int rc = bt->midiUseIndicate
-                        ? ble_gatts_indicate_custom(bt->midiConnHandle, midi_io_handle, om)
-                        : ble_gatts_notify_custom(bt->midiConnHandle, midi_io_handle, om);
+                    int rc = bt->getMidiUseIndicate()
+                        ? ble_gatts_indicate_custom(bt->getMidiConnHandle(), midi_io_handle, om)
+                        : ble_gatts_notify_custom(bt->getMidiConnHandle(), midi_io_handle, om);
                     if (rc != 0) os_mbuf_free_chain(om);
                     LOGGER.info("Active Sensing (post-enc) rc={}", rc);
                 }
@@ -373,11 +373,11 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
             // (e.g. device was reflashed, NVS cleared). Always delete the stale
             // bond entry so the next fresh connection can pair cleanly.
             LOGGER.info("Repeat pairing (conn={} encrypted={})",
-                        event->repeat_pairing.conn_handle, (bool)bt->linkEncrypted);
+                        event->repeat_pairing.conn_handle, (bool)bt->isLinkEncrypted());
             struct ble_gap_conn_desc desc;
             if (ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc) == 0) {
                 ble_store_util_delete_peer(&desc.peer_id_addr);
-                if (!bt->linkEncrypted) {
+                if (!bt->isLinkEncrypted()) {
                     // Also remove our .device.properties record — it will be recreated
                     // by the ENC_CHANGE handler after the fresh pairing completes.
                     std::array<uint8_t, 6> peer_addr;
@@ -392,7 +392,7 @@ static int gapEventHandler(struct ble_gap_event* event, void* arg) {
             // already encrypted, so the timer always expires → BLE_HS_ETIMEOUT
             // (status=13) → forced disconnect ~30 s after MIDI subscription.
             // IGNORE lets the current encrypted session continue uninterrupted.
-            if (bt->linkEncrypted) {
+            if (bt->isLinkEncrypted()) {
                 LOGGER.info("Repeat pairing: link already encrypted — ignoring, session continues");
                 return BLE_GAP_REPEAT_PAIRING_IGNORE;
             }
@@ -415,7 +415,7 @@ static void onSync() {
     auto bt = bt_singleton;
     if (bt == nullptr) return;
 
-    bt->pendingResetCount.store(0);
+    bt->resetPendingResets();
 
     // Set random address
     uint8_t own_addr_type;
@@ -461,7 +461,7 @@ static void onReset(int reason) {
     if (bt == nullptr) return;
 
     if (bt->getRadioState() == RadioState::OnPending) {
-        int count = bt->pendingResetCount.fetch_add(1) + 1;
+        int count = bt->incrementAndGetPendingResets();
         if (count == 3) {
             LOGGER.error("BT controller unresponsive after 3 resets — giving up");
             // Dispatch stop from main task; can't call nimble_port_stop() from within the host task
@@ -731,28 +731,28 @@ static void dispatchDisable(std::shared_ptr<Bluetooth> bt) {
     nimble_port_stop();
     nimble_port_deinit();
 
-    bt->sppConnHandle  = BLE_HS_CONN_HANDLE_NONE;
-    bt->sppActive      = false;
-    bt->midiConnHandle = BLE_HS_CONN_HANDLE_NONE;
-    bt->midiActive     = false;
-    bt->hidConnHandle  = BLE_HS_CONN_HANDLE_NONE;
-    bt->hidActive      = false;
-    bt->linkEncrypted  = false;
+    bt->setSppConnHandle(BLE_HS_CONN_HANDLE_NONE);
+    bt->setSppActive(false);
+    bt->setMidiConnHandle(BLE_HS_CONN_HANDLE_NONE);
+    bt->setMidiActive(false);
+    bt->setHidConnHandle(BLE_HS_CONN_HANDLE_NONE);
+    bt->setHidActive(false);
+    bt->setLinkEncrypted(false);
     current_hid_profile    = HidProfile::None;
     active_hid_rpt_map     = nullptr;
     active_hid_rpt_map_len = 0;
-    bt->pendingResetCount.store(0);
+    bt->resetPendingResets();
 
     // Stop and release esp_timers so the Bluetooth singleton can be destroyed cleanly.
-    if (bt->midiKeepaliveTimer != nullptr) {
-        esp_timer_stop(bt->midiKeepaliveTimer);
-        esp_timer_delete(bt->midiKeepaliveTimer);
-        bt->midiKeepaliveTimer = nullptr;
+    if (bt->getMidiKeepaliveTimer() != nullptr) {
+        esp_timer_stop(bt->getMidiKeepaliveTimer());
+        esp_timer_delete(bt->getMidiKeepaliveTimer());
+        bt->getMidiKeepaliveTimer() = nullptr;
     }
-    if (bt->advRestartTimer != nullptr) {
-        esp_timer_stop(bt->advRestartTimer);
-        esp_timer_delete(bt->advRestartTimer);
-        bt->advRestartTimer = nullptr;
+    if (bt->getAdvRestartTimer() != nullptr) {
+        esp_timer_stop(bt->getAdvRestartTimer());
+        esp_timer_delete(bt->getAdvRestartTimer());
+        bt->getAdvRestartTimer() = nullptr;
     }
 
     bt->setRadioState(RadioState::Off);
@@ -773,10 +773,10 @@ static void dispatchScanStart(std::shared_ptr<Bluetooth> bt) {
     }
 
     {
-        auto lock = bt->dataMutex.asScopedLock();
+        auto lock = bt->getDataMutex().asScopedLock();
         lock.lock();
-        bt->scanResults.clear();
-        bt->scanAddresses.clear();
+        bt->getScanResults().clear();
+        bt->getScanAddresses().clear();
     }
 
     struct ble_gap_disc_params disc_params = {};
@@ -809,7 +809,7 @@ static void dispatchScanStop(std::shared_ptr<Bluetooth> bt) {
 // ---- Event publishing ----
 
 void publishEvent(std::shared_ptr<Bluetooth> bt, BtEvent event) {
-    bt->pubsub->publish(event);
+    bt->getPubsubRef()->publish(event);
 }
 
 // ---- Public service API ----
@@ -817,7 +817,7 @@ void publishEvent(std::shared_ptr<Bluetooth> bt, BtEvent event) {
 std::shared_ptr<PubSub<BtEvent>> getPubsub() {
     auto bt = bt_singleton;
     check(bt != nullptr, "Bluetooth service not running");
-    return bt->pubsub;
+    return bt->getPubsubRef();
 }
 
 RadioState getRadioState() {
@@ -857,9 +857,9 @@ bool isScanning() {
 std::vector<PeerRecord> getScanResults() {
     auto bt = bt_singleton;
     if (bt == nullptr) return {};
-    auto lock = bt->dataMutex.asScopedLock();
+    auto lock = bt->getDataMutex().asScopedLock();
     lock.lock();
-    auto results = bt->scanResults;
+    auto results = bt->getScanResults();
     // Mark the HID host connected peer (if any) in the scan list
     if (hidHostIsConnectedImpl() && hid_host_ctx) {
         for (auto& r : results) {
@@ -906,9 +906,9 @@ std::vector<PeerRecord> getPairedPeers() {
             record.profileId = BT_PROFILE_HID_HOST;
             // Attempt to get the device name from the most recent scan results.
             if (auto bt = bt_singleton) {
-                auto lock = bt->dataMutex.asScopedLock();
+                auto lock = bt->getDataMutex().asScopedLock();
                 lock.lock();
-                for (const auto& sr : bt->scanResults) {
+                for (const auto& sr : bt->getScanResults()) {
                     if (sr.addr == hid_host_ctx->peerAddr) { record.name = sr.name; break; }
                 }
             }
@@ -960,12 +960,12 @@ void disconnect(const std::array<uint8_t, 6>& addr, int profileId) {
         hidHostDisconnect();
     } else if (profileId == BT_PROFILE_HID_DEVICE) {
         hidDeviceStop();
-    } else if (profileId == BT_PROFILE_SPP && bt->sppConnHandle != BLE_HS_CONN_HANDLE_NONE) {
-        ble_gap_terminate(bt->sppConnHandle, BLE_ERR_REM_USER_CONN_TERM);
-        bt->sppConnHandle = BLE_HS_CONN_HANDLE_NONE;
-    } else if (profileId == BT_PROFILE_MIDI && bt->midiConnHandle != BLE_HS_CONN_HANDLE_NONE) {
-        ble_gap_terminate(bt->midiConnHandle, BLE_ERR_REM_USER_CONN_TERM);
-        bt->midiConnHandle = BLE_HS_CONN_HANDLE_NONE;
+    } else if (profileId == BT_PROFILE_SPP && bt->getSppConnHandle() != BLE_HS_CONN_HANDLE_NONE) {
+        ble_gap_terminate(bt->getSppConnHandle(), BLE_ERR_REM_USER_CONN_TERM);
+        bt->setSppConnHandle(BLE_HS_CONN_HANDLE_NONE);
+    } else if (profileId == BT_PROFILE_MIDI && bt->getMidiConnHandle() != BLE_HS_CONN_HANDLE_NONE) {
+        ble_gap_terminate(bt->getMidiConnHandle(), BLE_ERR_REM_USER_CONN_TERM);
+        bt->setMidiConnHandle(BLE_HS_CONN_HANDLE_NONE);
     }
 }
 
@@ -982,8 +982,9 @@ bool isProfileSupported(int profileId) {
 }
 
 // ---- BluetoothApi instance ----
+// extern forces external linkage (const at namespace scope is internal by default in C++)
 
-const BluetoothApi nimble_bluetooth_api = {
+extern const BluetoothApi nimble_bluetooth_api = {
     // Core radio functions not used directly (service talks to NimBLE directly)
     // These are here for HAL device driver use
     .get_radio_state = nullptr,
@@ -1001,12 +1002,6 @@ const BluetoothApi nimble_bluetooth_api = {
     .hid = &nimble_hid_api,
     .serial = &nimble_serial_api,
     .midi = &nimble_midi_api,
-};
-
-// ---- BLUETOOTH_TYPE device type ----
-
-const struct DeviceType BLUETOOTH_TYPE = {
-    .name = "bluetooth",
 };
 
 // ---- Service ----
@@ -1051,9 +1046,9 @@ public:
             dispatchDisable(bt);
         }
 
-        auto lock_data = bt->dataMutex.asScopedLock();
+        auto lock_data = bt->getDataMutex().asScopedLock();
         lock_data.lock();
-        auto lock_radio = bt->radioMutex.asScopedLock();
+        auto lock_radio = bt->getRadioMutex().asScopedLock();
         lock_radio.lock();
 
         bt_singleton = nullptr;
@@ -1066,5 +1061,11 @@ extern const ServiceManifest manifest = {
 };
 
 } // namespace tt::service::bluetooth
+
+// BLUETOOTH_TYPE is declared with C linkage in <tactility/drivers/bluetooth.h>.
+// Define it outside any namespace so the linker symbol matches the extern "C" declaration.
+const struct DeviceType BLUETOOTH_TYPE = {
+    .name = "bluetooth",
+};
 
 #endif // CONFIG_BT_NIMBLE_ENABLED

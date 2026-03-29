@@ -347,9 +347,9 @@ void switchGattProfile(HidProfile profile) {
     ble_gap_adv_stop();
 
     // Terminate any active HID connection
-    if (bt && bt->hidConnHandle != BLE_HS_CONN_HANDLE_NONE) {
-        ble_gap_terminate(bt->hidConnHandle, BLE_ERR_REM_USER_CONN_TERM);
-        bt->hidConnHandle = BLE_HS_CONN_HANDLE_NONE;
+    if (bt && bt->getHidConnHandle() != BLE_HS_CONN_HANDLE_NONE) {
+        ble_gap_terminate(bt->getHidConnHandle(), BLE_ERR_REM_USER_CONN_TERM);
+        bt->setHidConnHandle(BLE_HS_CONN_HANDLE_NONE);
     }
 
     // Reset all GATT services and re-register
@@ -426,7 +426,7 @@ void hidDeviceInitGattHandles() {
 static error_t hidDeviceStart(struct Device* /*device*/) {
     auto bt = bt_singleton;
     if (bt == nullptr) return ERROR_INVALID_STATE;
-    bt->hidActive = true;
+    bt->setHidActive(true);
     // switchGattProfile was called by the public hidDeviceStart(uint16_t) before us
     startAdvertisingHid(hid_appearance);
     return ERROR_NONE;
@@ -435,10 +435,10 @@ static error_t hidDeviceStart(struct Device* /*device*/) {
 static error_t hidDeviceStop(struct Device* /*device*/) {
     auto bt = bt_singleton;
     if (bt == nullptr) return ERROR_NONE;
-    bt->hidActive = false;
-    if (bt->hidConnHandle != BLE_HS_CONN_HANDLE_NONE) {
-        ble_gap_terminate(bt->hidConnHandle, BLE_ERR_REM_USER_CONN_TERM);
-        bt->hidConnHandle = BLE_HS_CONN_HANDLE_NONE;
+    bt->setHidActive(false);
+    if (bt->getHidConnHandle() != BLE_HS_CONN_HANDLE_NONE) {
+        ble_gap_terminate(bt->getHidConnHandle(), BLE_ERR_REM_USER_CONN_TERM);
+        bt->setHidConnHandle(BLE_HS_CONN_HANDLE_NONE);
     }
     // Switch back to base (NUS+MIDI only) GATT table so the HID service
     // disappears from GATT and bonded hosts don't try to reconnect as HID.
@@ -453,14 +453,14 @@ static error_t hidDeviceStop(struct Device* /*device*/) {
 // Modifier byte is not handled here — use hidSendKeyboard for full control.
 static error_t hidDeviceSendKey(struct Device* /*device*/, uint8_t keycode, bool pressed) {
     auto bt = bt_singleton;
-    if (bt == nullptr || bt->hidConnHandle == BLE_HS_CONN_HANDLE_NONE) {
+    if (bt == nullptr || bt->getHidConnHandle() == BLE_HS_CONN_HANDLE_NONE) {
         return ERROR_INVALID_STATE;
     }
     uint8_t report[8] = {};
     if (pressed) report[2] = keycode;
     struct os_mbuf* om = ble_hs_mbuf_from_flat(report, sizeof(report));
     if (om == nullptr) return ERROR_INVALID_STATE;
-    int rc = ble_gatts_notify_custom(bt->hidConnHandle, hid_kb_input_handle, om);
+    int rc = ble_gatts_notify_custom(bt->getHidConnHandle(), hid_kb_input_handle, om);
     if (rc != 0) os_mbuf_free_chain(om);
     return (rc == 0) ? ERROR_NONE : ERROR_INVALID_STATE;
 }
@@ -479,7 +479,7 @@ const BtHidApi nimble_hid_api = {
 
 static error_t hidSendReport(uint16_t input_handle, const uint8_t* report, size_t len) {
     auto bt = bt_singleton;
-    if (bt == nullptr || !bt->hidActive || bt->hidConnHandle == BLE_HS_CONN_HANDLE_NONE) {
+    if (bt == nullptr || !bt->getHidActive() || bt->getHidConnHandle() == BLE_HS_CONN_HANDLE_NONE) {
         return ERROR_INVALID_STATE;
     }
     struct os_mbuf* om = ble_hs_mbuf_from_flat(report, len);
@@ -487,7 +487,7 @@ static error_t hidSendReport(uint16_t input_handle, const uint8_t* report, size_
         LOGGER.warn("hidSendReport: mbuf alloc failed (handle={})", input_handle);
         return ERROR_INVALID_STATE;
     }
-    int rc = ble_gatts_notify_custom(bt->hidConnHandle, input_handle, om);
+    int rc = ble_gatts_notify_custom(bt->getHidConnHandle(), input_handle, om);
     if (rc != 0) {
         os_mbuf_free_chain(om);
         LOGGER.warn("hidSendReport: notify failed handle={} rc={}", input_handle, rc);
@@ -513,7 +513,7 @@ bool hidDeviceStart(uint16_t appearance) {
 void hidDeviceStop()  { hidDeviceStop(nullptr); }
 bool hidDeviceIsConnected() {
     auto bt = bt_singleton;
-    return bt != nullptr && bt->hidConnHandle != BLE_HS_CONN_HANDLE_NONE;
+    return bt != nullptr && bt->getHidConnHandle() != BLE_HS_CONN_HANDLE_NONE;
 }
 
 // Send a full 8-byte keyboard input report:
