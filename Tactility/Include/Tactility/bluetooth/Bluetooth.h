@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace tt::service::bluetooth {
+namespace tt::bluetooth {
 
 enum class BtEvent {
     /** Radio was turned on */
@@ -165,7 +165,6 @@ bool hidSendKeyboard(const uint8_t report[8]);
 
 /**
  * @brief Send a 2-byte consumer/media key report (16-bit HID Consumer usage, little-endian).
- * Examples: {0xE9,0x00}=Volume Up, {0xEA,0x00}=Volume Down, {0xCD,0x00}=Play/Pause.
  * @return true if sent, false if not connected or send failed
  */
 bool hidSendConsumer(const uint8_t report[2]);
@@ -179,8 +178,6 @@ bool hidSendMouse(const uint8_t report[4]);
 
 /**
  * @brief Send an 8-byte gamepad input report.
- * report[0..1]=16 button bits, report[2..3]=left stick X/Y, report[4..5]=right stick X/Y,
- * report[6]=L2 trigger, report[7]=R2 trigger. All axes are signed (-127..127).
  * @return true if sent, false if not connected or send failed
  */
 bool hidSendGamepad(const uint8_t report[8]);
@@ -202,8 +199,6 @@ bool sppWrite(const uint8_t* data, size_t len);
 /**
  * @brief Read data received over the active SPP connection.
  * Non-blocking: returns 0 immediately if no data is available.
- * Data is queued per-packet; one call returns one NUS RX packet (up to max_len bytes).
- * Subscribe to SppDataReceived via getPubsub() to be notified when data arrives.
  * @param[out] data    buffer to fill
  * @param[in]  max_len maximum bytes to read
  * @return number of bytes written into data (0 if queue empty)
@@ -233,13 +228,17 @@ bool midiIsConnected();
 /**
  * @brief Read raw MIDI bytes received from the connected central.
  * Non-blocking: returns 0 immediately if no data is available.
- * Data is queued per-packet; one call returns one BLE MIDI packet (up to max_len bytes).
- * The caller is responsible for stripping the 2-byte BLE MIDI header if desired.
- * Subscribe to MidiDataReceived via getPubsub() to be notified when data arrives.
  * @param[out] data    buffer to fill
  * @param[in]  max_len maximum bytes to read
  * @return number of bytes written into data (0 if queue empty)
  */
 size_t midiRead(uint8_t* data, size_t max_len);
 
-} // namespace tt::service::bluetooth
+/**
+ * @brief Initialize the Bluetooth bridge layer and optionally enable the radio.
+ * Called once from Tactility startup (after kernel drivers are ready).
+ * Reads settings and enables the radio if configured to auto-start.
+ */
+void systemStart();
+
+} // namespace tt::bluetooth

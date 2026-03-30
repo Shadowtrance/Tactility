@@ -7,20 +7,20 @@
 
 #include <Tactility/PubSub.h>
 #include <Tactility/Mutex.h>
-#include <Tactility/service/bluetooth/Bluetooth.h>
+#include <Tactility/bluetooth/Bluetooth.h>
 
 namespace tt::app::btmanage {
 
 class BtManage final : public App {
 
-    PubSub<service::bluetooth::BtEvent>::SubscriptionHandle btSubscription = nullptr;
+    PubSub<bluetooth::BtEvent>::SubscriptionHandle btSubscription = nullptr;
     Mutex mutex;
     Bindings bindings = { };
     State state;
     View view = View(&bindings, &state);
     bool isViewEnabled = false;
 
-    void onBtEvent(service::bluetooth::BtEvent event);
+    void onBtEvent(bluetooth::BtEvent event);
 
 public:
 

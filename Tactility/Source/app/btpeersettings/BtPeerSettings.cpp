@@ -9,8 +9,8 @@
 #include <Tactility/lvgl/LvglSync.h>
 #include <Tactility/lvgl/Style.h>
 #include <Tactility/lvgl/Toolbar.h>
-#include <Tactility/service/bluetooth/Bluetooth.h>
-#include <Tactility/service/bluetooth/BluetoothPairedDevice.h>
+#include <Tactility/bluetooth/Bluetooth.h>
+#include <Tactility/bluetooth/BluetoothPairedDevice.h>
 #include <tactility/check.h>
 #include <tactility/drivers/bluetooth.h>
 
@@ -36,10 +36,10 @@ class BtPeerSettings : public App {
     std::string addrHex;
     std::array<uint8_t, 6> addr = {};
     int profileId = BT_PROFILE_HID_HOST;
-    PubSub<service::bluetooth::BtEvent>::SubscriptionHandle btSubscription = nullptr;
+    PubSub<bluetooth::BtEvent>::SubscriptionHandle btSubscription = nullptr;
 
     bool isCurrentlyConnected() const {
-        for (const auto& p : service::bluetooth::getPairedPeers()) {
+        for (const auto& p : bluetooth::getPairedPeers()) {
             if (p.addr == addr) return p.connected;
         }
         return false;
@@ -48,9 +48,9 @@ class BtPeerSettings : public App {
     static void onPressConnect(lv_event_t* event) {
         auto* self = static_cast<BtPeerSettings*>(lv_event_get_user_data(event));
         if (self->profileId == BT_PROFILE_HID_HOST) {
-            service::bluetooth::hidHostConnect(self->addr);
+            bluetooth::hidHostConnect(self->addr);
         } else {
-            service::bluetooth::connect(self->addr, self->profileId);
+            bluetooth::connect(self->addr, self->profileId);
         }
         lv_obj_add_state(lv_event_get_target_obj(event), LV_STATE_DISABLED);
     }
@@ -58,9 +58,9 @@ class BtPeerSettings : public App {
     static void onPressDisconnect(lv_event_t* event) {
         auto* self = static_cast<BtPeerSettings*>(lv_event_get_user_data(event));
         if (self->profileId == BT_PROFILE_HID_HOST) {
-            service::bluetooth::hidHostDisconnect();
+            bluetooth::hidHostDisconnect();
         } else {
-            service::bluetooth::disconnect(self->addr, self->profileId);
+            bluetooth::disconnect(self->addr, self->profileId);
         }
         lv_obj_add_state(lv_event_get_target_obj(event), LV_STATE_DISABLED);
     }
@@ -73,10 +73,10 @@ class BtPeerSettings : public App {
     static void onToggleAutoConnect(lv_event_t* event) {
         auto* self = static_cast<BtPeerSettings*>(lv_event_get_user_data(event));
         bool is_on = lv_obj_has_state(lv_event_get_target_obj(event), LV_STATE_CHECKED);
-        service::bluetooth::settings::PairedDevice device;
-        if (service::bluetooth::settings::load(self->addrHex, device)) {
+        bluetooth::settings::PairedDevice device;
+        if (bluetooth::settings::load(self->addrHex, device)) {
             device.autoConnect = is_on;
-            if (!service::bluetooth::settings::save(device)) {
+            if (!bluetooth::settings::save(device)) {
                 LOGGER.error("Failed to save auto-connect setting");
             }
         }
@@ -114,21 +114,21 @@ public:
 
         // Load addr and profileId from stored settings — avoids manual hex parsing
         // (std::stoul throws on invalid input and exceptions are disabled).
-        service::bluetooth::settings::PairedDevice device;
-        if (service::bluetooth::settings::load(addrHex, device)) {
+        bluetooth::settings::PairedDevice device;
+        if (bluetooth::settings::load(addrHex, device)) {
             addr      = device.addr;
             profileId = device.profileId;
         }
     }
 
     void onShow(AppContext& app, lv_obj_t* parent) override {
-        btSubscription = service::bluetooth::getPubsub()->subscribe([this](auto /*event*/) {
+        btSubscription = bluetooth::getPubsub()->subscribe([this](auto /*event*/) {
             requestViewUpdate();
         });
 
         // Load stored settings (name, autoConnect)
-        service::bluetooth::settings::PairedDevice device;
-        bool deviceLoaded = service::bluetooth::settings::load(addrHex, device);
+        bluetooth::settings::PairedDevice device;
+        bool deviceLoaded = bluetooth::settings::load(addrHex, device);
         std::string title = (deviceLoaded && !device.name.empty()) ? device.name : addrHex;
 
         lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
@@ -190,7 +190,7 @@ public:
     }
 
     void onHide(AppContext& app) override {
-        service::bluetooth::getPubsub()->unsubscribe(btSubscription);
+        bluetooth::getPubsub()->unsubscribe(btSubscription);
         btSubscription = nullptr;
         viewEnabled = false;
     }
@@ -202,13 +202,13 @@ public:
         // Disconnect first if connected
         if (isCurrentlyConnected()) {
             if (profileId == BT_PROFILE_HID_HOST) {
-                service::bluetooth::hidHostDisconnect();
+                bluetooth::hidHostDisconnect();
             } else {
-                service::bluetooth::disconnect(addr, profileId);
+                bluetooth::disconnect(addr, profileId);
             }
         }
 
-        service::bluetooth::unpair(addr);
+        bluetooth::unpair(addr);
         stop();
     }
 };

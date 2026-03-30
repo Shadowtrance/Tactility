@@ -38,6 +38,8 @@
 #include <Tactility/InitEsp.h>
 #endif
 
+#include <Tactility/bluetooth/Bluetooth.h>
+
 namespace tt {
 
 static auto LOGGER = Logger("Tactility");
@@ -48,7 +50,6 @@ static Dispatcher mainDispatcher;
 // region Default services
 namespace service {
     // Primary
-    namespace bluetooth { extern const ServiceManifest manifest; }
     namespace gps { extern const ServiceManifest manifest; }
     namespace wifi { extern const ServiceManifest manifest; }
 #ifdef ESP_PLATFORM
@@ -266,7 +267,6 @@ static void registerAndStartSecondaryServices() {
 
 static void registerAndStartPrimaryServices() {
     LOGGER.info("Registering and starting primary system services");
-    addService(service::bluetooth::manifest);
     addService(service::gps::manifest);
     addService(service::wifi::manifest);
 #ifdef ESP_PLATFORM
@@ -339,6 +339,7 @@ void run(const Configuration& config, Module* dtsModules[], DtsDevice dtsDevices
     settings::initTimeZone();
     hal::init(*config.hardware);
     network::ntp::init();
+    bluetooth::systemStart();
 
     registerAndStartPrimaryServices();
 

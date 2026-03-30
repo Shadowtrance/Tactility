@@ -26,7 +26,7 @@ class View final {
     void updateScanning();
     void updatePeerList();
 
-    void createPeerListItem(const service::bluetooth::PeerRecord& record, bool isPaired, size_t index);
+    void createPeerListItem(const bluetooth::PeerRecord& record, bool isPaired, size_t index);
 
     static void onConnect(lv_event_t* event);
 

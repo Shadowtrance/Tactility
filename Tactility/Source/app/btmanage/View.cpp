@@ -9,9 +9,9 @@
 #include <Tactility/Logger.h>
 #include <Tactility/lvgl/Style.h>
 #include <Tactility/lvgl/Toolbar.h>
-#include <Tactility/service/bluetooth/Bluetooth.h>
-#include <Tactility/service/bluetooth/BluetoothSettings.h>
-#include <Tactility/service/bluetooth/BluetoothPairedDevice.h>
+#include <Tactility/bluetooth/Bluetooth.h>
+#include <Tactility/bluetooth/BluetoothSettings.h>
+#include <Tactility/bluetooth/BluetoothPairedDevice.h>
 #include <Tactility/Tactility.h>
 
 namespace tt::app::btmanage {
@@ -29,7 +29,7 @@ static void onEnableOnBootSwitchChanged(lv_event_t* event) {
     auto* enable_switch = static_cast<lv_obj_t*>(lv_event_get_target(event));
     bool is_on = lv_obj_has_state(enable_switch, LV_STATE_CHECKED);
     getMainDispatcher().dispatch([is_on] {
-        service::bluetooth::settings::setEnableOnBoot(is_on);
+        bluetooth::settings::setEnableOnBoot(is_on);
     });
 }
 
@@ -43,13 +43,13 @@ static void onEnableOnBootParentClicked(lv_event_t* event) {
     }
     // add/remove_state does not fire LV_EVENT_VALUE_CHANGED, so persist here directly.
     getMainDispatcher().dispatch([new_state] {
-        service::bluetooth::settings::setEnableOnBoot(new_state);
+        bluetooth::settings::setEnableOnBoot(new_state);
     });
 }
 
 static void onScanButtonClicked(lv_event_t* event) {
     auto bt = std::static_pointer_cast<BtManage>(getCurrentApp());
-    bool scanning = service::bluetooth::isScanning();
+    bool scanning = bluetooth::isScanning();
     bt->getBindings().onScanToggled(!scanning);
 }
 
@@ -70,7 +70,7 @@ void View::onConnect(lv_event_t* event) {
         // Open the per-device settings screen for paired devices
         auto peers = state.getPairedPeers();
         if (data->index < peers.size()) {
-            btpeersettings::start(service::bluetooth::settings::addrToHex(peers[data->index].addr));
+            btpeersettings::start(bluetooth::settings::addrToHex(peers[data->index].addr));
         }
     } else {
         // Unrecognised scan result — initiate pairing
@@ -90,7 +90,7 @@ static uint8_t mapRssiToPercentage(int8_t rssi) {
     return static_cast<uint8_t>((float)(90 - abs_rssi) / 60.f * 100.f);
 }
 
-void View::createPeerListItem(const service::bluetooth::PeerRecord& record, bool isPaired, size_t index) {
+void View::createPeerListItem(const bluetooth::PeerRecord& record, bool isPaired, size_t index) {
     const auto percentage = mapRssiToPercentage(record.rssi);
     const auto label = record.name.empty()
         ? std::format("Unknown ({:02x}{:02x}{:02x}{:02x}{:02x}{:02x}) {}%",
@@ -114,7 +114,7 @@ void View::createPeerListItem(const service::bluetooth::PeerRecord& record, bool
 void View::updateBtToggle() {
     lv_obj_clear_state(enable_switch, LV_STATE_ANY);
     switch (state->getRadioState()) {
-        using enum service::bluetooth::RadioState;
+        using enum bluetooth::RadioState;
         case On:
             lv_obj_add_state(enable_switch, LV_STATE_CHECKED);
             break;
@@ -136,7 +136,7 @@ void View::updateBtToggle() {
 void View::updateEnableOnBootToggle() {
     if (enable_on_boot_switch != nullptr) {
         lv_obj_clear_state(enable_on_boot_switch, LV_STATE_ANY);
-        if (service::bluetooth::settings::shouldEnableOnBoot()) {
+        if (bluetooth::settings::shouldEnableOnBoot()) {
             lv_obj_add_state(enable_on_boot_switch, LV_STATE_CHECKED);
         } else {
             lv_obj_remove_state(enable_on_boot_switch, LV_STATE_CHECKED);
@@ -145,7 +145,7 @@ void View::updateEnableOnBootToggle() {
 }
 
 void View::updateScanning() {
-    if (state->getRadioState() == service::bluetooth::RadioState::On && state->isScanning()) {
+    if (state->getRadioState() == bluetooth::RadioState::On && state->isScanning()) {
         lv_obj_remove_flag(scanning_spinner, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(scanning_spinner, LV_OBJ_FLAG_HIDDEN);
@@ -178,7 +178,7 @@ void View::updatePeerList() {
 
     updateEnableOnBootToggle();
 
-    using enum service::bluetooth::RadioState;
+    using enum bluetooth::RadioState;
     if (state->getRadioState() == On) {
         // Paired peers section
         auto paired = state->getPairedPeers();

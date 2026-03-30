@@ -1,0 +1,29 @@
+#pragma once
+
+#include <Tactility/bluetooth/Bluetooth.h>
+
+#include <tactility/drivers/bluetooth.h>
+
+struct Device;
+
+namespace tt::bluetooth {
+
+/** Find the first BLE device in the kernel device registry. Returns nullptr if unavailable. */
+struct Device* getDevice();
+
+/** Publish a C++ BtEvent to the shared PubSub (safe from any thread). */
+void publishEventCpp(BtEvent event);
+
+/** Cache a BLE address and its type from a scan result (used by HID host for addr_type lookup). */
+void cacheScanAddr(const uint8_t addr[6], uint8_t addr_type);
+
+/**
+ * Look up the ble_addr_t (including address type) for a peer address in the last scan.
+ * Returns false and fills type=0 (PUBLIC) if not found.
+ */
+bool getCachedScanAddrType(const uint8_t addr[6], uint8_t* addr_type_out);
+
+/** Called from BluetoothHidHost.cpp to trigger auto-connect check after scan finishes. */
+void dispatchAutoConnectHidHost();
+
+} // namespace tt::bluetooth

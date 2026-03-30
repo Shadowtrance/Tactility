@@ -34,6 +34,8 @@ enum BtRadioState {
 
 struct BtPeerRecord {
     BtAddr addr;
+    /** BLE address type (BLE_ADDR_PUBLIC=0, BLE_ADDR_RANDOM=1, etc.) */
+    uint8_t addr_type;
     char name[BT_NAME_MAX + 1];
     int8_t rssi;
     bool paired;
@@ -79,12 +81,18 @@ enum BtEventType {
     BT_EVENT_CONNECT_STATE_CHANGED,
     /** A profile's state changed */
     BT_EVENT_PROFILE_STATE_CHANGED,
+    /** Data was received on the BLE SPP (NUS) RX characteristic */
+    BT_EVENT_SPP_DATA_RECEIVED,
+    /** Data was received on the BLE MIDI I/O characteristic */
+    BT_EVENT_MIDI_DATA_RECEIVED,
 };
 
 enum BtPairResult {
     BT_PAIR_RESULT_SUCCESS,
     BT_PAIR_RESULT_FAILED,
     BT_PAIR_RESULT_REJECTED,
+    /** Stale bond detected and removed; fresh pairing will follow */
+    BT_PAIR_RESULT_BOND_LOST,
 };
 
 struct BtPairRequestData {
@@ -96,6 +104,8 @@ struct BtPairRequestData {
 struct BtPairResultData {
     BtAddr addr;
     enum BtPairResult result;
+    /** Profile active when pairing completed (BtProfileId value) */
+    int profile;
 };
 
 struct BtProfileStateData {
@@ -347,6 +357,15 @@ struct BluetoothApi {
      */
     error_t (*remove_event_callback)(struct Device* device, BtEventCallback callback);
 
+    /**
+     * Notify the driver that a HID host connection is in progress or complete.
+     * Called by the Tactility HID host module to prevent name resolution from
+     * initiating a simultaneous central connection (BLE_HS_EALREADY).
+     * @param[in] device the bluetooth device
+     * @param[in] active true when HID host is connecting/connected, false when idle
+     */
+    void (*set_hid_host_active)(struct Device* device, bool active);
+
     /** HID host/device profile API */
     const struct BtHidApi* hid;
 
@@ -358,6 +377,39 @@ struct BluetoothApi {
 };
 
 extern const struct DeviceType BLUETOOTH_TYPE;
+
+// ---- Public C API ----
+// These are the only functions external code should call.
+// The BluetoothApi struct above is the internal driver interface only.
+
+error_t bluetooth_get_radio_state(struct Device* device, enum BtRadioState* state);
+error_t bluetooth_set_radio_enabled(struct Device* device, bool enabled);
+error_t bluetooth_scan_start(struct Device* device);
+error_t bluetooth_scan_stop(struct Device* device);
+bool    bluetooth_is_scanning(struct Device* device);
+error_t bluetooth_pair(struct Device* device, const BtAddr addr);
+error_t bluetooth_unpair(struct Device* device, const BtAddr addr);
+error_t bluetooth_connect(struct Device* device, const BtAddr addr, enum BtProfileId profile);
+error_t bluetooth_disconnect(struct Device* device, const BtAddr addr, enum BtProfileId profile);
+error_t bluetooth_add_event_callback(struct Device* device, void* context, BtEventCallback callback);
+error_t bluetooth_remove_event_callback(struct Device* device, BtEventCallback callback);
+void    bluetooth_set_hid_host_active(struct Device* device, bool active);
+
+error_t bluetooth_hid_host_connect(struct Device* device, const BtAddr addr);
+error_t bluetooth_hid_host_disconnect(struct Device* device, const BtAddr addr);
+error_t bluetooth_hid_device_start(struct Device* device);
+error_t bluetooth_hid_device_stop(struct Device* device);
+
+error_t bluetooth_serial_start(struct Device* device);
+error_t bluetooth_serial_stop(struct Device* device);
+error_t bluetooth_serial_write(struct Device* device, const uint8_t* data, size_t len, size_t* written);
+error_t bluetooth_serial_read(struct Device* device, uint8_t* data, size_t max_len, size_t* read_out);
+bool    bluetooth_serial_is_connected(struct Device* device);
+
+error_t bluetooth_midi_start(struct Device* device);
+error_t bluetooth_midi_stop(struct Device* device);
+error_t bluetooth_midi_send(struct Device* device, const uint8_t* msg, size_t len);
+bool    bluetooth_midi_is_connected(struct Device* device);
 
 #ifdef __cplusplus
 }

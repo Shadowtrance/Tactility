@@ -11,7 +11,7 @@
 #include <Tactility/service/ServiceContext.h>
 #include <Tactility/service/ServicePaths.h>
 #include <Tactility/service/ServiceRegistration.h>
-#include <Tactility/service/bluetooth/Bluetooth.h>
+#include <Tactility/bluetooth/Bluetooth.h>
 #include <Tactility/service/gps/GpsService.h>
 #include <Tactility/service/wifi/Wifi.h>
 #include <tactility/check.h>
@@ -58,9 +58,9 @@ static const char* getWifiStatusIcon(wifi::RadioState state) {
     }
 }
 
-static const char* getBluetoothStatusIcon(bluetooth::RadioState state, bool scanning, bool connected) {
+static const char* getBluetoothStatusIcon(tt::bluetooth::RadioState state, bool scanning, bool connected) {
     switch (state) {
-        using enum bluetooth::RadioState;
+        using enum tt::bluetooth::RadioState;
         case Off:
         case OffPending:
             return nullptr; // hidden when off
@@ -155,9 +155,9 @@ class StatusbarService final : public Service {
     }
 
     void updateBluetoothIcon() {
-        auto radio_state = bluetooth::getRadioState();
-        bool scanning = bluetooth::isScanning();
-        bool connected = bluetooth::sppIsConnected() || bluetooth::midiIsConnected();
+        auto radio_state = tt::bluetooth::getRadioState();
+        bool scanning = tt::bluetooth::isScanning();
+        bool connected = tt::bluetooth::sppIsConnected() || tt::bluetooth::midiIsConnected();
         const char* desired_icon = getBluetoothStatusIcon(radio_state, scanning, connected);
         if (bt_last_icon != desired_icon) {
             if (desired_icon != nullptr) {

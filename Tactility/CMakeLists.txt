@@ -39,7 +39,9 @@ if (DEFINED ENV{ESP_IDF_VERSION})
         list(APPEND REQUIRES_LIST esp_tinyusb)
     endif ()
 
-    list(APPEND REQUIRES_LIST bt)
+    if (CONFIG_BT_NIMBLE_ENABLED)
+        list(APPEND REQUIRES_LIST bt)
+    endif ()
 
 else ()
 

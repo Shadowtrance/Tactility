@@ -16,33 +16,33 @@ static const auto LOGGER = Logger("BtManage");
 extern const AppManifest manifest;
 
 static void onBtToggled(bool enabled) {
-    service::bluetooth::setEnabled(enabled);
+    bluetooth::setEnabled(enabled);
 }
 
 static void onScanToggled(bool enabled) {
     if (enabled) {
-        service::bluetooth::scanStart();
+        bluetooth::scanStart();
     } else {
-        service::bluetooth::scanStop();
+        bluetooth::scanStop();
     }
 }
 
 static void onConnectPeer(const std::array<uint8_t, 6>& addr, int profileId) {
-    service::bluetooth::connect(addr, profileId);
+    bluetooth::connect(addr, profileId);
 }
 
 static void onDisconnectPeer(const std::array<uint8_t, 6>& addr, int profileId) {
-    service::bluetooth::disconnect(addr, profileId);
+    bluetooth::disconnect(addr, profileId);
 }
 
 static void onPairPeer(const std::array<uint8_t, 6>& addr) {
     // Clicking an unrecognised scan result initiates a HID host connection.
     // Bond exchange happens automatically during the first connection.
-    service::bluetooth::hidHostConnect(addr);
+    bluetooth::hidHostConnect(addr);
 }
 
 static void onForgetPeer(const std::array<uint8_t, 6>& addr) {
-    service::bluetooth::unpair(addr);
+    bluetooth::unpair(addr);
 }
 
 BtManage::BtManage() {
@@ -77,12 +77,12 @@ void BtManage::requestViewUpdate() {
     unlock();
 }
 
-void BtManage::onBtEvent(service::bluetooth::BtEvent event) {
-    auto radio_state = service::bluetooth::getRadioState();
-    LOGGER.info("Update with state {}", service::bluetooth::radioStateToString(radio_state));
+void BtManage::onBtEvent(bluetooth::BtEvent event) {
+    auto radio_state = bluetooth::getRadioState();
+    LOGGER.info("Update with state {}", bluetooth::radioStateToString(radio_state));
     getState().setRadioState(radio_state);
     switch (event) {
-        using enum service::bluetooth::BtEvent;
+        using enum bluetooth::BtEvent;
         case ScanStarted:
             getState().setScanning(true);
             break;
@@ -104,8 +104,8 @@ void BtManage::onBtEvent(service::bluetooth::BtEvent event) {
             break;
         case RadioStateOn:
             getState().updatePairedPeers();
-            if (!service::bluetooth::isScanning()) {
-                service::bluetooth::scanStart();
+            if (!bluetooth::isScanning()) {
+                bluetooth::scanStart();
             }
             break;
         default:
@@ -118,8 +118,8 @@ void BtManage::onBtEvent(service::bluetooth::BtEvent event) {
 void BtManage::onShow(AppContext& app, lv_obj_t* parent) {
     // Initialise state and view before subscribing to avoid incoming events
     // racing with state initialisation.
-    state.setRadioState(service::bluetooth::getRadioState());
-    state.setScanning(service::bluetooth::isScanning());
+    state.setRadioState(bluetooth::getRadioState());
+    state.setScanning(bluetooth::isScanning());
     state.updateScanResults();
     state.updatePairedPeers();
 
@@ -129,24 +129,24 @@ void BtManage::onShow(AppContext& app, lv_obj_t* parent) {
     view.update();
     unlock();
 
-    btSubscription = service::bluetooth::getPubsub()->subscribe([this](auto event) {
+    btSubscription = bluetooth::getPubsub()->subscribe([this](auto event) {
         onBtEvent(event);
     });
 
-    auto radio_state = service::bluetooth::getRadioState();
-    bool can_scan = radio_state == service::bluetooth::RadioState::On;
+    auto radio_state = bluetooth::getRadioState();
+    bool can_scan = radio_state == bluetooth::RadioState::On;
     LOGGER.info("Radio: {}, Scanning: {}, Can scan: {}",
-        service::bluetooth::radioStateToString(radio_state),
-        service::bluetooth::isScanning(),
+        bluetooth::radioStateToString(radio_state),
+        bluetooth::isScanning(),
         can_scan);
-    if (can_scan && !service::bluetooth::isScanning()) {
-        service::bluetooth::scanStart();
+    if (can_scan && !bluetooth::isScanning()) {
+        bluetooth::scanStart();
     }
 }
 
 void BtManage::onHide(AppContext& app) {
     lock();
-    service::bluetooth::getPubsub()->unsubscribe(btSubscription);
+    bluetooth::getPubsub()->unsubscribe(btSubscription);
     btSubscription = nullptr;
     isViewEnabled = false;
     unlock();
