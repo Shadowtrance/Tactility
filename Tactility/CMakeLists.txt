@@ -39,9 +39,6 @@ if (DEFINED ENV{ESP_IDF_VERSION})
         list(APPEND REQUIRES_LIST esp_tinyusb)
     endif ()
 
-    if (CONFIG_BT_NIMBLE_ENABLED)
-        list(APPEND REQUIRES_LIST bt)
-    endif ()
 
 else ()
 
@@ -60,6 +57,10 @@ tactility_add_module(Tactility
     PRIV_INCLUDE_DIRS Private/
     REQUIRES ${REQUIRES_LIST}
 )
+
+if (DEFINED ENV{ESP_IDF_VERSION})
+    idf_component_optional_requires(PRIVATE bt)
+endif ()
 
 if (DEFINED ENV{ESP_IDF_VERSION})
     if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")

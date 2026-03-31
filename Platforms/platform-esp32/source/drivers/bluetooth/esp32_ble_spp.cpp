@@ -9,8 +9,6 @@
 #include <host/ble_gap.h>
 #include <host/ble_gatt.h>
 #include <host/ble_hs_mbuf.h>
-#include <nimble/os_mbuf.h>
-
 #include <algorithm>
 #include <cstring>
 

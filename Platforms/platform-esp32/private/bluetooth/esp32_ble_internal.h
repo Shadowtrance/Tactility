@@ -8,9 +8,14 @@
 
 #include <tactility/drivers/bluetooth.h>
 #include <tactility/error.h>
+// Must be included before any NimBLE header: log_common.h (pulled in by ble_hs.h)
+// defines LOG_LEVEL_* as macros with the same names as tactility/log.h's LogLevel enum.
+// Including tactility/log.h first ensures the enum is compiled before the macros shadow it.
+#include <tactility/log.h>
 
 #include <host/ble_gap.h>
 #include <host/ble_gatt.h>
+#include <host/ble_hs.h>
 #include <host/ble_uuid.h>
 
 #include <esp_timer.h>

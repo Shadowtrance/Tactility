@@ -64,6 +64,10 @@ void bluetooth_set_hid_host_active(struct Device* device, bool active) {
     BT_API(device)->set_hid_host_active(device, active);
 }
 
+void bluetooth_fire_event(struct Device* device, struct BtEvent event) {
+    BT_API(device)->fire_event(device, event);
+}
+
 // ---- HID sub-API ----
 
 error_t bluetooth_hid_host_connect(struct Device* device, const BtAddr addr) {

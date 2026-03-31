@@ -15,11 +15,9 @@
 #include <Tactility/lvgl/LvglSync.h>
 
 #include <host/ble_gap.h>
-#include <host/ble_gattc.h>
+#include <host/ble_gatt.h>
 #include <host/ble_hs.h>
 #include <host/ble_uuid.h>
-#include <nimble/os_mbuf.h>
-
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -219,8 +217,10 @@ static void hidHostHandleMouseReport(const uint8_t* data, uint16_t len) {
 
     int32_t nx = hid_host_mouse_x.load() + dx;
     int32_t ny = hid_host_mouse_y.load() + dy;
-    if (nx < 0) nx = 0; if (nx >= w) nx = w - 1;
-    if (ny < 0) ny = 0; if (ny >= h) ny = h - 1;
+    if (nx < 0) nx = 0;
+    if (nx >= w) nx = w - 1;
+    if (ny < 0) ny = 0;
+    if (ny >= h) ny = h - 1;
 
     hid_host_mouse_x.store(nx);
     hid_host_mouse_y.store(ny);
@@ -502,7 +502,13 @@ static void hidHostSubscribeNext(HidHostCtx& ctx) {
             }
             device.name = name;
             settings::save(device);
-            publishEventCpp(BtEvent::ProfileStateChanged);
+            if (struct Device* dev = getDevice()) {
+                struct BtEvent e = {};
+                e.type = BT_EVENT_PROFILE_STATE_CHANGED;
+                e.profile_state.state = BT_PROFILE_STATE_CONNECTED;
+                e.profile_state.profile = BT_PROFILE_HID_HOST;
+                bluetooth_fire_event(dev, e);
+            }
         });
         return;
     }
@@ -656,8 +662,14 @@ static int hidHostGapCb(struct ble_gap_event* event, void* /*arg*/) {
             } else {
                 LOGGER.warn("Connect failed status={}", event->connect.status);
                 hid_host_ctx.reset();
-                if (struct Device* dev = getDevice()) bluetooth_set_hid_host_active(dev, false);
-                publishEventCpp(BtEvent::ProfileStateChanged);
+                if (struct Device* dev = getDevice()) {
+                    bluetooth_set_hid_host_active(dev, false);
+                    struct BtEvent e = {};
+                    e.type = BT_EVENT_PROFILE_STATE_CHANGED;
+                    e.profile_state.state = BT_PROFILE_STATE_IDLE;
+                    e.profile_state.profile = BT_PROFILE_HID_HOST;
+                    bluetooth_fire_event(dev, e);
+                }
             }
             break;
 
@@ -675,7 +687,14 @@ static int hidHostGapCb(struct ble_gap_event* event, void* /*arg*/) {
             hid_host_mouse_btn.store(false);
             hid_host_mouse_active.store(false);
 
-            if (struct Device* dev = getDevice()) bluetooth_set_hid_host_active(dev, false);
+            if (struct Device* dev = getDevice()) {
+                bluetooth_set_hid_host_active(dev, false);
+                struct BtEvent e = {};
+                e.type = BT_EVENT_PROFILE_STATE_CHANGED;
+                e.profile_state.state = BT_PROFILE_STATE_IDLE;
+                e.profile_state.profile = BT_PROFILE_HID_HOST;
+                bluetooth_fire_event(dev, e);
+            }
 
             getMainDispatcher().dispatch([saved_kb, saved_mouse, saved_cursor, saved_queue] {
                 if (!tt::lvgl::lock(1000)) {
@@ -692,7 +711,6 @@ static int hidHostGapCb(struct ble_gap_event* event, void* /*arg*/) {
                 tt::lvgl::unlock();
                 if (saved_queue) vQueueDelete(saved_queue);
             });
-            publishEventCpp(BtEvent::ProfileStateChanged);
             break;
         }
 
@@ -797,7 +815,15 @@ void hidHostConnect(const std::array<uint8_t, 6>& addr) {
     if (rc != 0) {
         LOGGER.warn("ble_gap_connect failed rc={}", rc);
         hid_host_ctx.reset();
-        if (api) api->set_hid_host_active(getDevice(), false);
+        if (struct Device* dev = getDevice()) {
+            bluetooth_set_hid_host_active(dev, false);
+            // Fire IDLE so bt_event_bridge can start a new scan and retry.
+            struct BtEvent e = {};
+            e.type = BT_EVENT_PROFILE_STATE_CHANGED;
+            e.profile_state.state   = BT_PROFILE_STATE_IDLE;
+            e.profile_state.profile = BT_PROFILE_HID_HOST;
+            bluetooth_fire_event(dev, e);
+        }
     } else {
         LOGGER.info("Connecting...");
     }
@@ -813,6 +839,12 @@ bool hidHostIsConnected() {
            hid_host_ctx->connHandle != BLE_HS_CONN_HANDLE_NONE &&
            !hid_host_ctx->inputRpts.empty() &&
            hid_host_ctx->subscribeIdx >= (int)hid_host_ctx->inputRpts.size();
+}
+
+bool hidHostGetConnectedPeer(std::array<uint8_t, 6>& addr_out) {
+    if (!hidHostIsConnected()) return false;
+    addr_out = hid_host_ctx->peerAddr;
+    return true;
 }
 
 } // namespace tt::bluetooth

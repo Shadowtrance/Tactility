@@ -366,6 +366,13 @@ struct BluetoothApi {
      */
     void (*set_hid_host_active)(struct Device* device, bool active);
 
+    /**
+     * Fire an event through all registered event callbacks.
+     * Used by the Tactility HID host module to inject profile-state events that
+     * originate outside the platform driver (e.g. HID host connect/disconnect).
+     */
+    void (*fire_event)(struct Device* device, struct BtEvent event);
+
     /** HID host/device profile API */
     const struct BtHidApi* hid;
 
@@ -394,6 +401,7 @@ error_t bluetooth_disconnect(struct Device* device, const BtAddr addr, enum BtPr
 error_t bluetooth_add_event_callback(struct Device* device, void* context, BtEventCallback callback);
 error_t bluetooth_remove_event_callback(struct Device* device, BtEventCallback callback);
 void    bluetooth_set_hid_host_active(struct Device* device, bool active);
+void    bluetooth_fire_event(struct Device* device, struct BtEvent event);
 
 error_t bluetooth_hid_host_connect(struct Device* device, const BtAddr addr);
 error_t bluetooth_hid_host_disconnect(struct Device* device, const BtAddr addr);

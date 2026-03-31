@@ -36,8 +36,6 @@ class BtPeerSettings : public App {
     std::string addrHex;
     std::array<uint8_t, 6> addr = {};
     int profileId = BT_PROFILE_HID_HOST;
-    PubSub<bluetooth::BtEvent>::SubscriptionHandle btSubscription = nullptr;
-
     bool isCurrentlyConnected() const {
         for (const auto& p : bluetooth::getPairedPeers()) {
             if (p.addr == addr) return p.connected;
@@ -121,10 +119,14 @@ public:
         }
     }
 
+    static void onKernelBtEvent(struct Device* /*device*/, void* context, struct BtEvent /*event*/) {
+        static_cast<BtPeerSettings*>(context)->requestViewUpdate();
+    }
+
     void onShow(AppContext& app, lv_obj_t* parent) override {
-        btSubscription = bluetooth::getPubsub()->subscribe([this](auto /*event*/) {
-            requestViewUpdate();
-        });
+        if (struct Device* dev = bluetooth::getDevice()) {
+            bluetooth_add_event_callback(dev, this, onKernelBtEvent);
+        }
 
         // Load stored settings (name, autoConnect)
         bluetooth::settings::PairedDevice device;
@@ -190,8 +192,9 @@ public:
     }
 
     void onHide(AppContext& app) override {
-        bluetooth::getPubsub()->unsubscribe(btSubscription);
-        btSubscription = nullptr;
+        if (struct Device* dev = bluetooth::getDevice()) {
+            bluetooth_remove_event_callback(dev, onKernelBtEvent);
+        }
         viewEnabled = false;
     }
 

@@ -806,6 +806,11 @@ static void api_set_hid_host_active(struct Device* device, bool active) {
     if (ctx) ctx->hid_host_active.store(active);
 }
 
+static void api_fire_event(struct Device* device, struct BtEvent event) {
+    BleCtx* ctx = (BleCtx*)device_get_driver_data(device);
+    if (ctx) ble_publish_event(ctx, event);
+}
+
 // ---- BluetoothApi struct ----
 
 const BluetoothApi nimble_bluetooth_api = {
@@ -822,6 +827,7 @@ const BluetoothApi nimble_bluetooth_api = {
     .add_event_callback     = api_add_event_callback,
     .remove_event_callback  = api_remove_event_callback,
     .set_hid_host_active    = api_set_hid_host_active,
+    .fire_event             = api_fire_event,
     .hid                    = &nimble_hid_api,
     .serial                 = &nimble_serial_api,
     .midi                   = &nimble_midi_api,

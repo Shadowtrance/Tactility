@@ -21,7 +21,6 @@ extern Driver esp32_spi_driver;
 extern Driver esp32_uart_driver;
 #if defined(CONFIG_BT_NIMBLE_ENABLED)
 extern Driver esp32_bluetooth_driver;
-static struct Device esp32_ble_device = { .name = "ble0", .config = nullptr, .parent = nullptr, .internal = nullptr };
 #endif
 
 static error_t start() {
@@ -37,7 +36,6 @@ static error_t start() {
     check(driver_construct_add(&esp32_uart_driver) == ERROR_NONE);
 #if defined(CONFIG_BT_NIMBLE_ENABLED)
     check(driver_construct_add(&esp32_bluetooth_driver) == ERROR_NONE);
-    check(device_construct_add_start(&esp32_ble_device, "esp32,ble-nimble") == ERROR_NONE);
 #endif
     return ERROR_NONE;
 }
@@ -46,9 +44,6 @@ static error_t stop() {
     /* We crash when destruct fails, because if a single driver fails to destruct,
      * there is no guarantee that the previously destroyed drivers can be recovered */
 #if defined(CONFIG_BT_NIMBLE_ENABLED)
-    device_stop(&esp32_ble_device);
-    device_remove(&esp32_ble_device);
-    device_destruct(&esp32_ble_device);
     check(driver_remove_destruct(&esp32_bluetooth_driver) == ERROR_NONE);
 #endif
     check(driver_remove_destruct(&esp32_gpio_driver) == ERROR_NONE);

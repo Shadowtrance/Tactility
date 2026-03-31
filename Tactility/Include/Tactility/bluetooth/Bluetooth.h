@@ -1,42 +1,12 @@
 #pragma once
 
-#include <Tactility/PubSub.h>
-
 #include <array>
-#include <memory>
 #include <string>
 #include <vector>
 
-namespace tt::bluetooth {
+struct Device;
 
-enum class BtEvent {
-    /** Radio was turned on */
-    RadioStateOn,
-    /** Radio is turning on */
-    RadioStateOnPending,
-    /** Radio was turned off */
-    RadioStateOff,
-    /** Radio is turning off */
-    RadioStateOffPending,
-    /** Scan started */
-    ScanStarted,
-    /** Scan finished */
-    ScanFinished,
-    /** A new peer was discovered during scan */
-    PeerFound,
-    /** Pairing requires user action (confirm passkey or enter pin) */
-    PairRequest,
-    /** Pairing succeeded */
-    PairSuccess,
-    /** Pairing failed */
-    PairFailed,
-    /** A profile connection state changed */
-    ProfileStateChanged,
-    /** Data was received on the SPP (NUS) RX characteristic */
-    SppDataReceived,
-    /** Data was received on the BLE MIDI I/O characteristic */
-    MidiDataReceived,
-};
+namespace tt::bluetooth {
 
 enum class RadioState {
     Off,
@@ -55,35 +25,14 @@ struct PeerRecord {
     int profileId = 0;
 };
 
-/**
- * @brief Get the bluetooth PubSub that broadcasts BtEvent values.
- * @return the PubSub instance
- */
-std::shared_ptr<PubSub<BtEvent>> getPubsub();
+/** Find the first ready BLE device in the kernel device registry. Returns nullptr if unavailable. */
+struct Device* getDevice();
 
 /** @return the current radio state */
 RadioState getRadioState();
 
 /** For logging purposes */
 const char* radioStateToString(RadioState state);
-
-/**
- * @brief Enable or disable the Bluetooth radio.
- * @param[in] enabled true to enable, false to disable
- */
-void setEnabled(bool enabled);
-
-/**
- * @brief Start scanning for nearby BLE devices.
- * Returns immediately; results are delivered via pubsub.
- */
-void scanStart();
-
-/** @brief Stop an active scan. */
-void scanStop();
-
-/** @return true when a scan is in progress */
-bool isScanning();
 
 /** @return the peers found during the last scan */
 std::vector<PeerRecord> getScanResults();
@@ -93,8 +42,7 @@ std::vector<PeerRecord> getPairedPeers();
 
 /**
  * @brief Initiate pairing with a peer.
- * Returns immediately; result is delivered via pubsub PairSuccess/PairFailed.
- * @param[in] addr the peer address
+ * Returns immediately; result is delivered via kernel event callback (BT_EVENT_PAIR_RESULT).
  */
 void pair(const std::array<uint8_t, 6>& addr);
 
@@ -153,35 +101,6 @@ bool hidDeviceStart(uint16_t appearance = 0x03C1);
 /** @brief Stop the HID device server and close any active connection. */
 void hidDeviceStop();
 
-/** @return true when a remote HID host is connected */
-bool hidDeviceIsConnected();
-
-/**
- * @brief Send a full 8-byte keyboard input report.
- * report[0]=modifier bits, report[1]=reserved, report[2..7]=USB HID keycodes.
- * @return true if sent, false if not connected or send failed
- */
-bool hidSendKeyboard(const uint8_t report[8]);
-
-/**
- * @brief Send a 2-byte consumer/media key report (16-bit HID Consumer usage, little-endian).
- * @return true if sent, false if not connected or send failed
- */
-bool hidSendConsumer(const uint8_t report[2]);
-
-/**
- * @brief Send a 4-byte mouse input report.
- * report[0]=button bits (5), report[1]=X delta, report[2]=Y delta, report[3]=wheel delta.
- * @return true if sent, false if not connected or send failed
- */
-bool hidSendMouse(const uint8_t report[4]);
-
-/**
- * @brief Send an 8-byte gamepad input report.
- * @return true if sent, false if not connected or send failed
- */
-bool hidSendGamepad(const uint8_t report[8]);
-
 // ---- BLE SPP (Nordic UART Service) ----
 
 /** @brief Start advertising as a NUS (Nordic UART Service) server. @return true on success */
@@ -190,24 +109,6 @@ bool sppStart();
 /** @brief Stop the SPP server and close any active connection. */
 void sppStop();
 
-/**
- * @brief Send data over the active SPP connection.
- * @return true if data was sent, false if not connected or send failed
- */
-bool sppWrite(const uint8_t* data, size_t len);
-
-/**
- * @brief Read data received over the active SPP connection.
- * Non-blocking: returns 0 immediately if no data is available.
- * @param[out] data    buffer to fill
- * @param[in]  max_len maximum bytes to read
- * @return number of bytes written into data (0 if queue empty)
- */
-size_t sppRead(uint8_t* data, size_t max_len);
-
-/** @return true when a remote device is connected to the SPP service */
-bool sppIsConnected();
-
 // ---- BLE MIDI ----
 
 /** @brief Start advertising as a BLE MIDI device. @return true on success */
@@ -215,24 +116,6 @@ bool midiStart();
 
 /** @brief Stop the MIDI server and close any active connection. */
 void midiStop();
-
-/**
- * @brief Send raw MIDI bytes. The BLE MIDI framing header is added automatically.
- * @return true if sent, false if not connected or send failed
- */
-bool midiSend(const uint8_t* msg, size_t len);
-
-/** @return true when a remote device is connected to the MIDI service */
-bool midiIsConnected();
-
-/**
- * @brief Read raw MIDI bytes received from the connected central.
- * Non-blocking: returns 0 immediately if no data is available.
- * @param[out] data    buffer to fill
- * @param[in]  max_len maximum bytes to read
- * @return number of bytes written into data (0 if queue empty)
- */
-size_t midiRead(uint8_t* data, size_t max_len);
 
 /**
  * @brief Initialize the Bluetooth bridge layer and optionally enable the radio.

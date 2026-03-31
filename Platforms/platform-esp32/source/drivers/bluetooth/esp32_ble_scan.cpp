@@ -7,10 +7,7 @@
 #include <bluetooth/esp32_ble_internal.h>
 
 #include <host/ble_gap.h>
-#include <host/ble_gattc.h>
-#include <host/ble_hs.h>
 #include <host/ble_hs_mbuf.h>
-#include <nimble/os_mbuf.h>
 
 #include <algorithm>
 #include <cstring>

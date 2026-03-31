@@ -8,12 +8,6 @@ struct Device;
 
 namespace tt::bluetooth {
 
-/** Find the first BLE device in the kernel device registry. Returns nullptr if unavailable. */
-struct Device* getDevice();
-
-/** Publish a C++ BtEvent to the shared PubSub (safe from any thread). */
-void publishEventCpp(BtEvent event);
-
 /** Cache a BLE address and its type from a scan result (used by HID host for addr_type lookup). */
 void cacheScanAddr(const uint8_t addr[6], uint8_t addr_type);
 
@@ -25,5 +19,11 @@ bool getCachedScanAddrType(const uint8_t addr[6], uint8_t* addr_type_out);
 
 /** Called from BluetoothHidHost.cpp to trigger auto-connect check after scan finishes. */
 void dispatchAutoConnectHidHost();
+
+/**
+ * Returns the BLE address of the currently fully-connected HID host peer (i.e.
+ * all CCCDs subscribed and ready). Returns false if no HID host peer is connected.
+ */
+bool hidHostGetConnectedPeer(std::array<uint8_t, 6>& addr_out);
 
 } // namespace tt::bluetooth
