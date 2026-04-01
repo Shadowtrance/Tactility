@@ -317,6 +317,16 @@ def write_bluetooth_variables(output_file, device_properties: ConfigParser):
         if idf_target == "esp32p4":
             output_file.write(f"CONFIG_BT_NIMBLE_TRANSPORT_UART=n\n")
             output_file.write(f"CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y\n")
+        # Move NimBLE host buffers to SPIRAM when available, regardless of target.
+        # The default (INTERNAL) mode causes heap fragmentation after a disable+deinit
+        # cycle, preventing a subsequent nimble_port_init() from allocating its buffers
+        # ("hci inits failed" / rc=-1). EXTERNAL mode uses SPIRAM, which is much larger
+        # and does not suffer from the same fragmentation — enabling reliable re-init.
+        # Also frees significant internal RAM on memory-constrained targets (e.g. S3).
+        # Dependency: CONFIG_SPIRAM_USE_CAPS_ALLOC || CONFIG_SPIRAM_USE_MALLOC (set by write_spiram_variables).
+        has_spiram = get_boolean_property_or_false(device_properties, "hardware", "spiRam")
+        if has_spiram:
+            output_file.write("CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y\n")
         # Increase NimBLE host task stack from the 4096-byte default.
         # GAP/GATT event processing + C++ frames push the default over the limit,
         # causing stack-protection faults on events like BLE_GAP_EVENT_SUBSCRIBE.
