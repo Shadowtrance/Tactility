@@ -17,7 +17,8 @@ extern const AppManifest manifest;
 
 static void onBtToggled(bool enabled) {
     struct Device* dev = bluetooth::findFirstDevice();
-    if (dev) bluetooth_set_radio_enabled(dev, enabled);
+    if (!dev) return;
+    bluetooth_set_radio_enabled(dev, enabled);
 }
 
 static void onScanToggled(bool enabled) {
@@ -84,7 +85,6 @@ void BtManage::onBtEvent(const struct BtEvent& event) {
     auto radio_state = bluetooth::getRadioState();
     LOGGER.info("Update with state {}", bluetooth::radioStateToString(radio_state));
     getState().setRadioState(radio_state);
-    struct Device* dev = bluetooth::findFirstDevice();
     switch (event.type) {
         case BT_EVENT_SCAN_STARTED:
             getState().setScanning(true);
@@ -107,6 +107,7 @@ void BtManage::onBtEvent(const struct BtEvent& event) {
         case BT_EVENT_RADIO_STATE_CHANGED:
             if (event.radio_state == BT_RADIO_STATE_ON) {
                 getState().updatePairedPeers();
+                struct Device* dev = bluetooth::findFirstDevice();
                 if (dev && !bluetooth_is_scanning(dev)) {
                     bluetooth_scan_start(dev);
                 }
@@ -139,8 +140,9 @@ void BtManage::onShow(AppContext& app, lv_obj_t* parent) {
     view.update();
     unlock();
 
-    if (dev) {
-        bluetooth_add_event_callback(dev, this, onKernelBtEvent);
+    btDevice = dev;
+    if (btDevice) {
+        bluetooth_add_event_callback(btDevice, this, onKernelBtEvent);
     }
 
     auto radio_state = bluetooth::getRadioState();
@@ -156,8 +158,9 @@ void BtManage::onShow(AppContext& app, lv_obj_t* parent) {
 
 void BtManage::onHide(AppContext& app) {
     lock();
-    if (struct Device* dev = bluetooth::findFirstDevice()) {
-        bluetooth_remove_event_callback(dev, onKernelBtEvent);
+    if (btDevice) {
+        bluetooth_remove_event_callback(btDevice, onKernelBtEvent);
+        btDevice = nullptr;
     }
     isViewEnabled = false;
     unlock();

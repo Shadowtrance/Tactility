@@ -384,7 +384,7 @@ void ble_hid_device_init_gatt_handles() {
 
 // ---- HID Device sub-API implementations ----
 
-static error_t hid_device_start(struct Device* device, enum BtHidDeviceMode mode) {
+static error_t hid_device_start(struct Device* /*device*/, enum BtHidDeviceMode mode) {
     BleCtx* ctx = g_ctx;
     if (ctx == nullptr) return ERROR_INVALID_STATE;
 
@@ -416,7 +416,7 @@ static error_t hid_device_start(struct Device* device, enum BtHidDeviceMode mode
     return ERROR_NONE;
 }
 
-static error_t hid_device_stop(struct Device* device) {
+static error_t hid_device_stop(struct Device* /*device*/) {
     BleCtx* ctx = g_ctx;
     if (ctx == nullptr) return ERROR_NONE;
     ctx->hid_active.store(false);
@@ -437,7 +437,7 @@ static error_t hid_device_stop(struct Device* device) {
     return ERROR_NONE;
 }
 
-static error_t hid_device_send_key(struct Device* device, uint8_t keycode, bool pressed) {
+static error_t hid_device_send_key(struct Device* /*device*/, uint8_t keycode, bool pressed) {
     BleCtx* ctx = g_ctx;
     if (ctx == nullptr || ctx->hid_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
         return ERROR_INVALID_STATE;
@@ -462,7 +462,7 @@ static error_t hid_notify(uint16_t conn_handle, uint16_t attr_handle,
     return (rc == 0) ? ERROR_NONE : ERROR_INVALID_STATE;
 }
 
-static error_t hid_device_send_keyboard(struct Device* device, const uint8_t* report, size_t len) {
+static error_t hid_device_send_keyboard(struct Device* /*device*/, const uint8_t* report, size_t len) {
     BleCtx* ctx = g_ctx;
     if (ctx == nullptr) return ERROR_INVALID_STATE;
     uint8_t buf[8] = {};
@@ -470,7 +470,7 @@ static error_t hid_device_send_keyboard(struct Device* device, const uint8_t* re
     return hid_notify(ctx->hid_conn_handle.load(), hid_kb_input_handle, buf, sizeof(buf));
 }
 
-static error_t hid_device_send_consumer(struct Device* device, const uint8_t* report, size_t len) {
+static error_t hid_device_send_consumer(struct Device* /*device*/, const uint8_t* report, size_t len) {
     BleCtx* ctx = g_ctx;
     if (ctx == nullptr) return ERROR_INVALID_STATE;
     uint8_t buf[2] = {};
@@ -478,7 +478,7 @@ static error_t hid_device_send_consumer(struct Device* device, const uint8_t* re
     return hid_notify(ctx->hid_conn_handle.load(), hid_consumer_input_handle, buf, sizeof(buf));
 }
 
-static error_t hid_device_send_mouse(struct Device* device, const uint8_t* report, size_t len) {
+static error_t hid_device_send_mouse(struct Device* /*device*/, const uint8_t* report, size_t len) {
     BleCtx* ctx = g_ctx;
     if (ctx == nullptr) return ERROR_INVALID_STATE;
     uint8_t buf[4] = {};
@@ -486,7 +486,7 @@ static error_t hid_device_send_mouse(struct Device* device, const uint8_t* repor
     return hid_notify(ctx->hid_conn_handle.load(), hid_mouse_input_handle, buf, sizeof(buf));
 }
 
-static error_t hid_device_send_gamepad(struct Device* device, const uint8_t* report, size_t len) {
+static error_t hid_device_send_gamepad(struct Device* /*device*/, const uint8_t* report, size_t len) {
     BleCtx* ctx = g_ctx;
     if (ctx == nullptr) return ERROR_INVALID_STATE;
     uint8_t buf[8] = {};
@@ -494,7 +494,7 @@ static error_t hid_device_send_gamepad(struct Device* device, const uint8_t* rep
     return hid_notify(ctx->hid_conn_handle.load(), hid_gamepad_input_handle, buf, sizeof(buf));
 }
 
-static bool hid_device_is_connected(struct Device* device) {
+static bool hid_device_is_connected(struct Device* /*device*/) {
     BleCtx* ctx = g_ctx;
     return ctx != nullptr && ctx->hid_conn_handle.load() != BLE_HS_CONN_HANDLE_NONE;
 }

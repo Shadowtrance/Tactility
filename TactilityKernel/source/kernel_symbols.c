@@ -1,10 +1,10 @@
-#include <tactility/drivers/bluetooth.h>
 #include <tactility/concurrent/dispatcher.h>
 #include <tactility/concurrent/event_group.h>
 #include <tactility/concurrent/thread.h>
 #include <tactility/concurrent/timer.h>
 #include <tactility/device.h>
 #include <tactility/driver.h>
+#include <tactility/drivers/bluetooth.h>
 #include <tactility/drivers/gpio_controller.h>
 #include <tactility/drivers/i2c_controller.h>
 #include <tactility/drivers/i2s_controller.h>

@@ -17,6 +17,7 @@ class BtManage final : public App {
     State state;
     View view = View(&bindings, &state);
     bool isViewEnabled = false;
+    struct Device* btDevice = nullptr;
 
 public:
 
