@@ -105,7 +105,10 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
     switch (event->type) {
         case BLE_GAP_EVENT_CONNECT:
             if (event->connect.status == 0) {
-                LOG_I(TAG, "Connected (handle=%u)", event->connect.conn_handle);
+                LOG_I(TAG, "Connected (handle=%u hid_active=%d hid_conn=%u)",
+                         event->connect.conn_handle,
+                         (int)ctx->hid_active.load(),
+                         (unsigned)ctx->hid_conn_handle.load());
                 // Do NOT call ble_gap_security_initiate() here.
                 // Windows BLE MIDI initiates encryption itself; calling here creates a race
                 // with REPEAT_PAIRING+RETRY → two concurrent SM procedures → disconnect.
@@ -128,6 +131,12 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
             if (was_midi) { ctx->midi_conn_handle.store(BLE_HS_CONN_HANDLE_NONE); ctx->midi_use_indicate.store(false); }
             if (was_hid)  ctx->hid_conn_handle.store(BLE_HS_CONN_HANDLE_NONE);
             ctx->link_encrypted.store(false);
+            // If HID was stopped while connected, switch profile to None now that the
+            // connection is gone. ble_gatts_mutable() is true here (no active connection,
+            // advertising stopped by hid_device_stop), so switch_profile is safe.
+            if (was_hid && !ctx->hid_active.load() && current_hid_profile != BleHidProfile::None) {
+                ble_hid_device_switch_profile(ctx, BleHidProfile::None);
+            }
             // Restart advertising whenever a service is active without a live connection.
             // Covers both normal disconnect and Windows discovery-only connections.
             if (ctx->midi_active.load() && ctx->midi_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
@@ -255,6 +264,17 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
                      event->enc_change.conn_handle, event->enc_change.status);
             if (event->enc_change.status == 0) {
                 ctx->link_encrypted.store(true);
+                // For HID device: set hid_conn_handle at encryption time so Phase 2 bonded
+                // reconnects are tracked even when BLE_GAP_EVENT_SUBSCRIBE doesn't fire.
+                // Windows only writes HID CCCDs in Phase 2; NimBLE may restore them from NVS
+                // silently (no SUBSCRIBE event). Without this, hid_conn_handle stays NONE
+                // and hid_device_is_connected() returns false for the entire Phase 2 session.
+                if (ctx->hid_active.load() &&
+                    ctx->hid_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
+                    ctx->hid_conn_handle.store(event->enc_change.conn_handle);
+                    LOG_I(TAG, "HID conn handle set on ENC_CHANGE (conn=%u)",
+                             event->enc_change.conn_handle);
+                }
                 // Fire PAIR_RESULT so Tactility bridge can persist the paired device
                 // off the NimBLE host task (file I/O → stack overflow on nimble_host).
                 struct ble_gap_conn_desc desc = {};
@@ -744,7 +764,7 @@ static error_t api_connect(struct Device* device, const BtAddr addr, enum BtProf
     BleCtx* ctx = (BleCtx*)device_get_driver_data(device);
     if (!ctx) return ERROR_INVALID_STATE;
     if (profile == BT_PROFILE_HID_DEVICE) {
-        return nimble_hid_api.device_start(device);
+        return nimble_hid_api.device_start(device, BT_HID_DEVICE_MODE_KEYBOARD);
     } else if (profile == BT_PROFILE_SPP) {
         return ble_spp_start_internal(ctx);
     } else if (profile == BT_PROFILE_MIDI) {

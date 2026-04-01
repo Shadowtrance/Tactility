@@ -6,6 +6,20 @@
 
 extern "C" {
 
+// ---- Device lookup ----
+
+struct Device* bluetooth_get_device() {
+    struct Device* found = nullptr;
+    device_for_each_of_type(&BLUETOOTH_TYPE, &found, [](struct Device* dev, void* ctx) -> bool {
+        if (device_is_ready(dev)) {
+            *static_cast<struct Device**>(ctx) = dev;
+            return false;
+        }
+        return true;
+    });
+    return found;
+}
+
 // ---- Core radio / scan ----
 
 error_t bluetooth_get_radio_state(struct Device* device, enum BtRadioState* state) {
@@ -71,19 +85,45 @@ void bluetooth_fire_event(struct Device* device, struct BtEvent event) {
 // ---- HID sub-API ----
 
 error_t bluetooth_hid_host_connect(struct Device* device, const BtAddr addr) {
+    if (BT_API(device)->hid->host_connect == nullptr) return ERROR_NOT_SUPPORTED;
     return BT_API(device)->hid->host_connect(device, addr);
 }
 
 error_t bluetooth_hid_host_disconnect(struct Device* device, const BtAddr addr) {
+    if (BT_API(device)->hid->host_disconnect == nullptr) return ERROR_NOT_SUPPORTED;
     return BT_API(device)->hid->host_disconnect(device, addr);
 }
 
-error_t bluetooth_hid_device_start(struct Device* device) {
-    return BT_API(device)->hid->device_start(device);
+error_t bluetooth_hid_device_start(struct Device* device, enum BtHidDeviceMode mode) {
+    return BT_API(device)->hid->device_start(device, mode);
 }
 
 error_t bluetooth_hid_device_stop(struct Device* device) {
     return BT_API(device)->hid->device_stop(device);
+}
+
+error_t bluetooth_hid_device_send_key(struct Device* device, uint8_t keycode, bool pressed) {
+    return BT_API(device)->hid->device_send_key(device, keycode, pressed);
+}
+
+error_t bluetooth_hid_device_send_keyboard(struct Device* device, const uint8_t* report, size_t len) {
+    return BT_API(device)->hid->device_send_keyboard(device, report, len);
+}
+
+error_t bluetooth_hid_device_send_consumer(struct Device* device, const uint8_t* report, size_t len) {
+    return BT_API(device)->hid->device_send_consumer(device, report, len);
+}
+
+error_t bluetooth_hid_device_send_mouse(struct Device* device, const uint8_t* report, size_t len) {
+    return BT_API(device)->hid->device_send_mouse(device, report, len);
+}
+
+error_t bluetooth_hid_device_send_gamepad(struct Device* device, const uint8_t* report, size_t len) {
+    return BT_API(device)->hid->device_send_gamepad(device, report, len);
+}
+
+bool bluetooth_hid_device_is_connected(struct Device* device) {
+    return BT_API(device)->hid->device_is_connected(device);
 }
 
 // ---- Serial sub-API ----

@@ -8,7 +8,7 @@
 
 namespace tt::bluetooth {
 
-struct Device* getDevice()                    { return nullptr; }
+struct Device* findFirstDevice()                    { return nullptr; }
 
 const char* radioStateToString(RadioState state) {
     switch (state) {

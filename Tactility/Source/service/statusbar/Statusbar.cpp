@@ -157,7 +157,7 @@ class StatusbarService final : public Service {
 
     void updateBluetoothIcon() {
         auto radio_state = tt::bluetooth::getRadioState();
-        struct Device* btdev = tt::bluetooth::getDevice();
+        struct Device* btdev = tt::bluetooth::findFirstDevice();
         bool scanning = btdev ? bluetooth_is_scanning(btdev) : false;
         bool connected = btdev && (bluetooth_serial_is_connected(btdev) || bluetooth_midi_is_connected(btdev));
         const char* desired_icon = getBluetoothStatusIcon(radio_state, scanning, connected);

@@ -18,7 +18,7 @@ void cacheScanAddr(const uint8_t addr[6], uint8_t addr_type);
 bool getCachedScanAddrType(const uint8_t addr[6], uint8_t* addr_type_out);
 
 /** Called from BluetoothHidHost.cpp to trigger auto-connect check after scan finishes. */
-void dispatchAutoConnectHidHost();
+void autoConnectHidHost();
 
 /**
  * Returns the BLE address of the currently fully-connected HID host peer (i.e.

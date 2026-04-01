@@ -338,6 +338,16 @@ void ble_hid_device_switch_profile(BleCtx* ctx, BleHidProfile profile) {
         return;
     }
 
+    // ble_gatts_add_svcs() only adds definitions to a pending list.
+    // ble_gatts_start() converts them into live ATT entries.
+    // Without this call, all GATT reads return ATT errors and Windows
+    // cannot install the HID driver → Phase 2 reconnect never occurs.
+    rc = ble_gatts_start();
+    if (rc != 0) {
+        LOG_E(TAG, "switchGattProfile: gatts_start failed rc=%d", rc);
+        return;
+    }
+
     active_hid_rpt_map     = new_rpt_map;
     active_hid_rpt_map_len = new_rpt_map_len;
 
@@ -374,11 +384,34 @@ void ble_hid_device_init_gatt_handles() {
 
 // ---- HID Device sub-API implementations ----
 
-static error_t hid_device_start(struct Device* device) {
+static error_t hid_device_start(struct Device* device, enum BtHidDeviceMode mode) {
     BleCtx* ctx = g_ctx;
     if (ctx == nullptr) return ERROR_INVALID_STATE;
+
+    BleHidProfile profile;
+    uint16_t appearance;
+    switch (mode) {
+        case BT_HID_DEVICE_MODE_MOUSE:
+            profile    = BleHidProfile::Mouse;
+            appearance = 0x03C2;
+            break;
+        case BT_HID_DEVICE_MODE_KEYBOARD_MOUSE:
+            profile    = BleHidProfile::KbMouse;
+            appearance = 0x03C0;
+            break;
+        case BT_HID_DEVICE_MODE_GAMEPAD:
+            profile    = BleHidProfile::Gamepad;
+            appearance = 0x03C4;
+            break;
+        default: // BT_HID_DEVICE_MODE_KEYBOARD
+            profile    = BleHidProfile::KbConsumer;
+            appearance = 0x03C1;
+            break;
+    }
+
+    hid_appearance = appearance;
+    ble_hid_device_switch_profile(ctx, profile);
     ctx->hid_active.store(true);
-    // ble_hid_device_switch_profile was called by the public API before us
     ble_start_advertising_hid(hid_appearance);
     return ERROR_NONE;
 }
@@ -387,12 +420,19 @@ static error_t hid_device_stop(struct Device* device) {
     BleCtx* ctx = g_ctx;
     if (ctx == nullptr) return ERROR_NONE;
     ctx->hid_active.store(false);
-    if (ctx->hid_conn_handle.load() != BLE_HS_CONN_HANDLE_NONE) {
-        ble_gap_terminate(ctx->hid_conn_handle.load(), BLE_ERR_REM_USER_CONN_TERM);
-        ctx->hid_conn_handle.store(BLE_HS_CONN_HANDLE_NONE);
-    }
-    if (current_hid_profile != BleHidProfile::None) {
-        ble_hid_device_switch_profile(ctx, BleHidProfile::None);
+    ble_gap_adv_stop();
+    uint16_t conn = ctx->hid_conn_handle.load();
+    if (conn != BLE_HS_CONN_HANDLE_NONE) {
+        // Connected: terminate and let the DISCONNECT handler switch profile to None.
+        // ble_gatts_mutable() returns false while a connection is live, so calling
+        // switch_profile here would assert inside ble_svc_gap_init().
+        ble_gap_terminate(conn, BLE_ERR_REM_USER_CONN_TERM);
+        // Do NOT clear hid_conn_handle — DISCONNECT handler uses it for was_hid detection.
+    } else {
+        // Not connected: GATT is mutable, switch profile immediately.
+        if (current_hid_profile != BleHidProfile::None) {
+            ble_hid_device_switch_profile(ctx, BleHidProfile::None);
+        }
     }
     return ERROR_NONE;
 }
@@ -411,12 +451,65 @@ static error_t hid_device_send_key(struct Device* device, uint8_t keycode, bool 
     return (rc == 0) ? ERROR_NONE : ERROR_INVALID_STATE;
 }
 
+static error_t hid_notify(uint16_t conn_handle, uint16_t attr_handle,
+                           const uint8_t* data, size_t len) {
+    if (conn_handle == BLE_HS_CONN_HANDLE_NONE) return ERROR_INVALID_STATE;
+    if (attr_handle == 0) return ERROR_INVALID_STATE; // handle not registered for current profile
+    struct os_mbuf* om = ble_hs_mbuf_from_flat(data, len);
+    if (om == nullptr) return ERROR_INVALID_STATE;
+    int rc = ble_gatts_notify_custom(conn_handle, attr_handle, om);
+    if (rc != 0) os_mbuf_free_chain(om);
+    return (rc == 0) ? ERROR_NONE : ERROR_INVALID_STATE;
+}
+
+static error_t hid_device_send_keyboard(struct Device* device, const uint8_t* report, size_t len) {
+    BleCtx* ctx = g_ctx;
+    if (ctx == nullptr) return ERROR_INVALID_STATE;
+    uint8_t buf[8] = {};
+    memcpy(buf, report, len < sizeof(buf) ? len : sizeof(buf));
+    return hid_notify(ctx->hid_conn_handle.load(), hid_kb_input_handle, buf, sizeof(buf));
+}
+
+static error_t hid_device_send_consumer(struct Device* device, const uint8_t* report, size_t len) {
+    BleCtx* ctx = g_ctx;
+    if (ctx == nullptr) return ERROR_INVALID_STATE;
+    uint8_t buf[2] = {};
+    memcpy(buf, report, len < sizeof(buf) ? len : sizeof(buf));
+    return hid_notify(ctx->hid_conn_handle.load(), hid_consumer_input_handle, buf, sizeof(buf));
+}
+
+static error_t hid_device_send_mouse(struct Device* device, const uint8_t* report, size_t len) {
+    BleCtx* ctx = g_ctx;
+    if (ctx == nullptr) return ERROR_INVALID_STATE;
+    uint8_t buf[4] = {};
+    memcpy(buf, report, len < sizeof(buf) ? len : sizeof(buf));
+    return hid_notify(ctx->hid_conn_handle.load(), hid_mouse_input_handle, buf, sizeof(buf));
+}
+
+static error_t hid_device_send_gamepad(struct Device* device, const uint8_t* report, size_t len) {
+    BleCtx* ctx = g_ctx;
+    if (ctx == nullptr) return ERROR_INVALID_STATE;
+    uint8_t buf[8] = {};
+    memcpy(buf, report, len < sizeof(buf) ? len : sizeof(buf));
+    return hid_notify(ctx->hid_conn_handle.load(), hid_gamepad_input_handle, buf, sizeof(buf));
+}
+
+static bool hid_device_is_connected(struct Device* device) {
+    BleCtx* ctx = g_ctx;
+    return ctx != nullptr && ctx->hid_conn_handle.load() != BLE_HS_CONN_HANDLE_NONE;
+}
+
 const BtHidApi nimble_hid_api = {
-    .host_connect    = nullptr, // HID host managed in Tactility layer
-    .host_disconnect = nullptr,
-    .device_start    = hid_device_start,
-    .device_stop     = hid_device_stop,
-    .device_send_key = hid_device_send_key,
+    .host_connect         = nullptr, // HID host managed in Tactility layer
+    .host_disconnect      = nullptr,
+    .device_start         = hid_device_start,
+    .device_stop          = hid_device_stop,
+    .device_send_key      = hid_device_send_key,
+    .device_send_keyboard = hid_device_send_keyboard,
+    .device_send_consumer = hid_device_send_consumer,
+    .device_send_mouse    = hid_device_send_mouse,
+    .device_send_gamepad  = hid_device_send_gamepad,
+    .device_is_connected  = hid_device_is_connected,
 };
 
 #pragma GCC diagnostic pop

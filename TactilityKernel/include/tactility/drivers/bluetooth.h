@@ -127,6 +127,23 @@ struct BtEvent {
 
 typedef void (*BtEventCallback)(struct Device* device, void* context, struct BtEvent event);
 
+// ---- HID device mode ----
+
+/**
+ * Selects the HID report descriptor and appearance used when this device
+ * operates as a BLE HID peripheral.
+ */
+enum BtHidDeviceMode {
+    /** Keyboard (report ID 1, 8 bytes) + Consumer (report ID 2, 2 bytes). */
+    BT_HID_DEVICE_MODE_KEYBOARD,
+    /** Mouse only (report ID 1, 4 bytes). */
+    BT_HID_DEVICE_MODE_MOUSE,
+    /** Keyboard + Consumer + Mouse (report IDs 1, 2, 3). */
+    BT_HID_DEVICE_MODE_KEYBOARD_MOUSE,
+    /** Gamepad (report ID 1, 8 bytes: 2-byte buttons + 6-byte axes). */
+    BT_HID_DEVICE_MODE_GAMEPAD,
+};
+
 // ---- HID sub-API ----
 
 /**
@@ -152,27 +169,76 @@ struct BtHidApi {
     error_t (*host_disconnect)(struct Device* device, const BtAddr addr);
 
     /**
-     * Start advertising as a BLE HID device.
+     * Start advertising as a BLE HID device with the given mode.
+     * Sets up the appropriate GATT report descriptor and starts advertising.
      * @param[in] device the bluetooth device
+     * @param[in] mode   the HID device mode (keyboard, mouse, gamepad, etc.)
      * @return ERROR_NONE on success
      */
-    error_t (*device_start)(struct Device* device);
+    error_t (*device_start)(struct Device* device, enum BtHidDeviceMode mode);
 
     /**
-     * Stop advertising as a BLE HID device.
+     * Stop advertising as a BLE HID device and close any active connection.
      * @param[in] device the bluetooth device
      * @return ERROR_NONE on success
      */
     error_t (*device_stop)(struct Device* device);
 
     /**
-     * Send a key event when operating as a HID device.
-     * @param[in] device the bluetooth device
+     * Send a single key event when operating as a HID keyboard device.
+     * Convenience wrapper around device_send_keyboard for single-key presses.
+     * @param[in] device  the bluetooth device
      * @param[in] keycode the HID keycode
      * @param[in] pressed true for key down, false for key up
      * @return ERROR_NONE on success
      */
     error_t (*device_send_key)(struct Device* device, uint8_t keycode, bool pressed);
+
+    /**
+     * Send a full keyboard HID report (8 bytes: modifier, reserved, keycodes[6]).
+     * Valid when mode is BT_HID_DEVICE_MODE_KEYBOARD or BT_HID_DEVICE_MODE_KEYBOARD_MOUSE.
+     * @param[in] device the bluetooth device
+     * @param[in] report pointer to the 8-byte keyboard report
+     * @param[in] len    number of bytes (up to 8)
+     * @return ERROR_NONE on success
+     */
+    error_t (*device_send_keyboard)(struct Device* device, const uint8_t* report, size_t len);
+
+    /**
+     * Send a consumer control HID report (2 bytes: 16-bit usage code, little-endian).
+     * Valid when mode is BT_HID_DEVICE_MODE_KEYBOARD or BT_HID_DEVICE_MODE_KEYBOARD_MOUSE.
+     * @param[in] device the bluetooth device
+     * @param[in] report pointer to the 2-byte consumer report
+     * @param[in] len    number of bytes (up to 2)
+     * @return ERROR_NONE on success
+     */
+    error_t (*device_send_consumer)(struct Device* device, const uint8_t* report, size_t len);
+
+    /**
+     * Send a mouse HID report (4 bytes: buttons, X, Y, wheel).
+     * Valid when mode is BT_HID_DEVICE_MODE_MOUSE or BT_HID_DEVICE_MODE_KEYBOARD_MOUSE.
+     * @param[in] device the bluetooth device
+     * @param[in] report pointer to the 4-byte mouse report
+     * @param[in] len    number of bytes (up to 4)
+     * @return ERROR_NONE on success
+     */
+    error_t (*device_send_mouse)(struct Device* device, const uint8_t* report, size_t len);
+
+    /**
+     * Send a gamepad HID report (8 bytes: buttons[2] + axes[6]).
+     * Valid when mode is BT_HID_DEVICE_MODE_GAMEPAD.
+     * @param[in] device the bluetooth device
+     * @param[in] report pointer to the 8-byte gamepad report
+     * @param[in] len    number of bytes (up to 8)
+     * @return ERROR_NONE on success
+     */
+    error_t (*device_send_gamepad)(struct Device* device, const uint8_t* report, size_t len);
+
+    /**
+     * @param[in] device the bluetooth device
+     * @return true when a remote host is connected to this HID device
+     */
+    bool (*device_is_connected)(struct Device* device);
 };
 
 // ---- Serial sub-API (BLE SPP) ----
@@ -389,6 +455,14 @@ extern const struct DeviceType BLUETOOTH_TYPE;
 // These are the only functions external code should call.
 // The BluetoothApi struct above is the internal driver interface only.
 
+/**
+ * Find the first ready Bluetooth device.
+ * Use this instead of referencing BLUETOOTH_TYPE directly from external apps,
+ * since data symbols may not be exported by the ELF loader.
+ * @return the first ready Device of BLUETOOTH_TYPE, or NULL if none found.
+ */
+struct Device* bluetooth_get_device(void);
+
 error_t bluetooth_get_radio_state(struct Device* device, enum BtRadioState* state);
 error_t bluetooth_set_radio_enabled(struct Device* device, bool enabled);
 error_t bluetooth_scan_start(struct Device* device);
@@ -405,8 +479,14 @@ void    bluetooth_fire_event(struct Device* device, struct BtEvent event);
 
 error_t bluetooth_hid_host_connect(struct Device* device, const BtAddr addr);
 error_t bluetooth_hid_host_disconnect(struct Device* device, const BtAddr addr);
-error_t bluetooth_hid_device_start(struct Device* device);
+error_t bluetooth_hid_device_start(struct Device* device, enum BtHidDeviceMode mode);
 error_t bluetooth_hid_device_stop(struct Device* device);
+error_t bluetooth_hid_device_send_key(struct Device* device, uint8_t keycode, bool pressed);
+error_t bluetooth_hid_device_send_keyboard(struct Device* device, const uint8_t* report, size_t len);
+error_t bluetooth_hid_device_send_consumer(struct Device* device, const uint8_t* report, size_t len);
+error_t bluetooth_hid_device_send_mouse(struct Device* device, const uint8_t* report, size_t len);
+error_t bluetooth_hid_device_send_gamepad(struct Device* device, const uint8_t* report, size_t len);
+bool    bluetooth_hid_device_is_connected(struct Device* device);
 
 error_t bluetooth_serial_start(struct Device* device);
 error_t bluetooth_serial_stop(struct Device* device);

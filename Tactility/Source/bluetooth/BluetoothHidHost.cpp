@@ -502,7 +502,7 @@ static void hidHostSubscribeNext(HidHostCtx& ctx) {
             }
             device.name = name;
             settings::save(device);
-            if (struct Device* dev = getDevice()) {
+            if (struct Device* dev = findFirstDevice()) {
                 struct BtEvent e = {};
                 e.type = BT_EVENT_PROFILE_STATE_CHANGED;
                 e.profile_state.state = BT_PROFILE_STATE_CONNECTED;
@@ -662,7 +662,7 @@ static int hidHostGapCb(struct ble_gap_event* event, void* /*arg*/) {
             } else {
                 LOGGER.warn("Connect failed status={}", event->connect.status);
                 hid_host_ctx.reset();
-                if (struct Device* dev = getDevice()) {
+                if (struct Device* dev = findFirstDevice()) {
                     bluetooth_set_hid_host_active(dev, false);
                     struct BtEvent e = {};
                     e.type = BT_EVENT_PROFILE_STATE_CHANGED;
@@ -687,7 +687,7 @@ static int hidHostGapCb(struct ble_gap_event* event, void* /*arg*/) {
             hid_host_mouse_btn.store(false);
             hid_host_mouse_active.store(false);
 
-            if (struct Device* dev = getDevice()) {
+            if (struct Device* dev = findFirstDevice()) {
                 bluetooth_set_hid_host_active(dev, false);
                 struct BtEvent e = {};
                 e.type = BT_EVENT_PROFILE_STATE_CHANGED;
@@ -795,7 +795,7 @@ void hidHostConnect(const std::array<uint8_t, 6>& addr) {
     }
 
     // Notify driver that a HID host central connection is starting.
-    if (struct Device* dev = getDevice()) bluetooth_set_hid_host_active(dev, true);
+    if (struct Device* dev = findFirstDevice()) bluetooth_set_hid_host_active(dev, true);
 
     // Look up the addr_type from the cached scan results.
     ble_addr_t ble_addr = {};
@@ -815,7 +815,7 @@ void hidHostConnect(const std::array<uint8_t, 6>& addr) {
     if (rc != 0) {
         LOGGER.warn("ble_gap_connect failed rc={}", rc);
         hid_host_ctx.reset();
-        if (struct Device* dev = getDevice()) {
+        if (struct Device* dev = findFirstDevice()) {
             bluetooth_set_hid_host_active(dev, false);
             // Fire IDLE so bt_event_bridge can start a new scan and retry.
             struct BtEvent e = {};

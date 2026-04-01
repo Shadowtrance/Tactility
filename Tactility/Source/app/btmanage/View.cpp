@@ -49,7 +49,7 @@ static void onEnableOnBootParentClicked(lv_event_t* event) {
 
 static void onScanButtonClicked(lv_event_t* event) {
     auto bt = std::static_pointer_cast<BtManage>(getCurrentApp());
-    struct Device* dev = bluetooth::getDevice();
+    struct Device* dev = bluetooth::findFirstDevice();
     bool scanning = dev ? bluetooth_is_scanning(dev) : false;
     bt->getBindings().onScanToggled(!scanning);
 }

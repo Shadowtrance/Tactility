@@ -26,7 +26,7 @@ struct PeerRecord {
 };
 
 /** Find the first ready BLE device in the kernel device registry. Returns nullptr if unavailable. */
-struct Device* getDevice();
+struct Device* findFirstDevice();
 
 /** @return the current radio state */
 RadioState getRadioState();

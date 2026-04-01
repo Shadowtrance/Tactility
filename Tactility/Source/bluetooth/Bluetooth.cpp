@@ -37,7 +37,7 @@ static std::vector<CachedAddr> scan_addr_cache; // parallel to scan_results_cach
 
 // ---- Device accessor ----
 
-struct Device* getDevice() {
+struct Device* findFirstDevice() {
     struct Device* found = nullptr;
     device_for_each_of_type(&BLUETOOTH_TYPE, &found, [](struct Device* dev, void* ctx) -> bool {
         if (device_is_ready(dev)) {
@@ -104,7 +104,7 @@ static void cachePeerRecord(const BtPeerRecord& krecord) {
 
 // ---- Auto-connect HID host after scan ----
 
-void dispatchAutoConnectHidHost() {
+void autoConnectHidHost() {
     if (hidHostIsConnected()) return; // already connected
 
     // Collect addresses seen in the most recent scan.
@@ -142,7 +142,7 @@ void dispatchAutoConnectHidHost() {
         }
     }
     if (has_auto) {
-        if (struct Device* dev = getDevice()) {
+        if (struct Device* dev = findFirstDevice()) {
             if (!bluetooth_is_scanning(dev)) {
                 LOGGER.info("Auto-connect HID host: device not in scan, retrying scan");
                 bluetooth_scan_start(dev);
@@ -172,7 +172,7 @@ static void bt_event_bridge(struct Device* /*device*/, void* /*context*/, struct
                         }
                         if (has_hid_auto) {
                             LOGGER.info("HID host auto-connect peer found — starting scan");
-                            if (struct Device* dev = getDevice()) {
+                            if (struct Device* dev = findFirstDevice()) {
                                 bluetooth_scan_start(dev);
                             }
                         } else if (settings::shouldSppAutoStart()) {
@@ -199,7 +199,7 @@ static void bt_event_bridge(struct Device* /*device*/, void* /*context*/, struct
             break;
 
         case BT_EVENT_SCAN_FINISHED:
-            getMainDispatcher().dispatch([] { dispatchAutoConnectHidHost(); });
+            getMainDispatcher().dispatch([] { autoConnectHidHost(); });
             break;
 
         case BT_EVENT_PEER_FOUND:
@@ -255,7 +255,7 @@ static void bt_event_bridge(struct Device* /*device*/, void* /*context*/, struct
             } else if (event.profile_state.state == BT_PROFILE_STATE_IDLE &&
                        event.profile_state.profile == BT_PROFILE_HID_HOST) {
                 // HID host disconnected — check if any peer has autoConnect and re-scan
-                // so that dispatchAutoConnectHidHost() fires when the scan finishes.
+                // so that autoConnectHidHost() fires when the scan finishes.
                 getMainDispatcher().dispatch([] {
                     auto peers = settings::loadAll();
                     bool has_auto = false;
@@ -266,7 +266,7 @@ static void bt_event_bridge(struct Device* /*device*/, void* /*context*/, struct
                         }
                     }
                     if (has_auto) {
-                        if (struct Device* dev = getDevice()) {
+                        if (struct Device* dev = findFirstDevice()) {
                             if (!bluetooth_is_scanning(dev)) {
                                 bluetooth_scan_start(dev);
                             }
@@ -284,7 +284,7 @@ static void bt_event_bridge(struct Device* /*device*/, void* /*context*/, struct
 // ---- systemStart ----
 
 void systemStart() {
-    struct Device* dev = getDevice();
+    struct Device* dev = findFirstDevice();
     if (dev == nullptr) {
         LOGGER.warn("systemStart: no BLE device found");
         return;
@@ -311,7 +311,7 @@ const char* radioStateToString(RadioState state) {
 }
 
 RadioState getRadioState() {
-    struct Device* dev = getDevice();
+    struct Device* dev = findFirstDevice();
     if (dev == nullptr) return RadioState::Off;
     BtRadioState state = BT_RADIO_STATE_OFF;
     bluetooth_get_radio_state(dev, &state);
@@ -379,7 +379,7 @@ void pair(const std::array<uint8_t, 6>& /*addr*/) {
 }
 
 void unpair(const std::array<uint8_t, 6>& addr) {
-    struct Device* dev = getDevice();
+    struct Device* dev = findFirstDevice();
     if (dev != nullptr) {
         bluetooth_unpair(dev, addr.data());
     }
@@ -406,7 +406,7 @@ void disconnect(const std::array<uint8_t, 6>& addr, int profileId) {
     } else if (profileId == BT_PROFILE_HID_DEVICE) {
         hidDeviceStop();
     } else {
-        struct Device* dev = getDevice();
+        struct Device* dev = findFirstDevice();
         if (dev == nullptr) return;
         bluetooth_disconnect(dev, addr.data(), (BtProfileId)profileId);
     }
@@ -420,41 +420,48 @@ bool isProfileSupported(int profileId) {
 }
 
 bool sppStart() {
-    struct Device* dev = getDevice();
+    struct Device* dev = findFirstDevice();
     if (dev == nullptr) return false;
     settings::setSppAutoStart(true);
     return bluetooth_serial_start(dev) == ERROR_NONE;
 }
 
 void sppStop() {
-    struct Device* dev = getDevice();
+    struct Device* dev = findFirstDevice();
     if (dev == nullptr) return;
     settings::setSppAutoStart(false);
     bluetooth_serial_stop(dev);
 }
 
 bool midiStart() {
-    struct Device* dev = getDevice();
+    struct Device* dev = findFirstDevice();
     if (dev == nullptr) return false;
     settings::setMidiAutoStart(true);
     return bluetooth_midi_start(dev) == ERROR_NONE;
 }
 
 void midiStop() {
-    struct Device* dev = getDevice();
+    struct Device* dev = findFirstDevice();
     if (dev == nullptr) return;
     settings::setMidiAutoStart(false);
     bluetooth_midi_stop(dev);
 }
 
-bool hidDeviceStart(uint16_t /*appearance*/) {
-    struct Device* dev = getDevice();
+bool hidDeviceStart(uint16_t appearance) {
+    struct Device* dev = findFirstDevice();
     if (dev == nullptr) return false;
-    return bluetooth_hid_device_start(dev) == ERROR_NONE;
+    BtHidDeviceMode mode;
+    switch (appearance) {
+        case 0x03C2: mode = BT_HID_DEVICE_MODE_MOUSE;           break;
+        case 0x03C4: mode = BT_HID_DEVICE_MODE_GAMEPAD;         break;
+        case 0x03C0: mode = BT_HID_DEVICE_MODE_KEYBOARD_MOUSE;  break;
+        default:     mode = BT_HID_DEVICE_MODE_KEYBOARD;        break;
+    }
+    return bluetooth_hid_device_start(dev, mode) == ERROR_NONE;
 }
 
 void hidDeviceStop() {
-    struct Device* dev = getDevice();
+    struct Device* dev = findFirstDevice();
     if (dev == nullptr) return;
     bluetooth_hid_device_stop(dev);
 }

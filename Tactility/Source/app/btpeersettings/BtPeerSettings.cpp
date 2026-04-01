@@ -124,7 +124,7 @@ public:
     }
 
     void onShow(AppContext& app, lv_obj_t* parent) override {
-        if (struct Device* dev = bluetooth::getDevice()) {
+        if (struct Device* dev = bluetooth::findFirstDevice()) {
             bluetooth_add_event_callback(dev, this, onKernelBtEvent);
         }
 
@@ -192,7 +192,7 @@ public:
     }
 
     void onHide(AppContext& app) override {
-        if (struct Device* dev = bluetooth::getDevice()) {
+        if (struct Device* dev = bluetooth::findFirstDevice()) {
             bluetooth_remove_event_callback(dev, onKernelBtEvent);
         }
         viewEnabled = false;
