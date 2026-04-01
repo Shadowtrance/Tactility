@@ -7,6 +7,9 @@
 #if defined(CONFIG_BT_NIMBLE_ENABLED)
 
 #include <tactility/drivers/bluetooth.h>
+#include <tactility/drivers/bluetooth_serial.h>
+#include <tactility/drivers/bluetooth_midi.h>
+#include <tactility/drivers/bluetooth_hid_device.h>
 #include <tactility/error.h>
 // Must be included before any NimBLE header: log_common.h (pulled in by ble_hs.h)
 // defines LOG_LEVEL_* as macros with the same names as tactility/log.h's LogLevel enum.
@@ -85,6 +88,11 @@ struct BleCtx {
 
     // Device reference (passed to BtEventCallback)
     struct Device* device;
+
+    // Child devices (created by esp32_ble_start_device, destroyed by stop_device)
+    struct Device* serial_child;
+    struct Device* midi_child;
+    struct Device* hid_device_child;
 };
 
 // ---- Global context pointer ----
@@ -139,8 +147,8 @@ extern uint16_t       hid_appearance;         // esp32_ble_hid_device.cpp
 extern BleHidProfile  current_hid_profile;    // esp32_ble_hid_device.cpp
 
 // ---- Cross-module sub-API structs ----
-extern const BtHidApi    nimble_hid_api;    // esp32_ble_hid_device.cpp
-extern const BtSerialApi nimble_serial_api; // esp32_ble_spp.cpp
-extern const BtMidiApi   nimble_midi_api;   // esp32_ble_midi.cpp
+extern const BtHidDeviceApi nimble_hid_device_api; // esp32_ble_hid_device.cpp
+extern const BtSerialApi    nimble_serial_api;     // esp32_ble_spp.cpp
+extern const BtMidiApi      nimble_midi_api;       // esp32_ble_midi.cpp
 
 #endif // CONFIG_BT_NIMBLE_ENABLED

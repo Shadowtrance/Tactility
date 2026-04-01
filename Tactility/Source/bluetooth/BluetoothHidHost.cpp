@@ -847,6 +847,39 @@ bool hidHostGetConnectedPeer(std::array<uint8_t, 6>& addr_out) {
     return true;
 }
 
+void autoConnectHidHost() {
+    if (hidHostIsConnected()) return;
+
+    // Connect to the first saved HID host peer that appeared in the last scan.
+    // cacheScanAddr() is populated during scanning so addr_type is available for ble_gap_connect.
+    auto scan = getScanResults();
+    for (const auto& r : scan) {
+        settings::PairedDevice stored;
+        if (settings::load(settings::addrToHex(r.addr), stored) &&
+            stored.autoConnect &&
+            stored.profileId == BT_PROFILE_HID_HOST) {
+            LOGGER.info("Auto-connecting HID host to {}", settings::addrToHex(r.addr));
+            hidHostConnect(r.addr);
+            return;
+        }
+    }
+
+    // Device not in the last scan. If we have an autoConnect HID host peer, restart
+    // scanning so we keep checking until the device powers back on.
+    auto peers = settings::loadAll();
+    for (const auto& peer : peers) {
+        if (peer.autoConnect && peer.profileId == BT_PROFILE_HID_HOST) {
+            if (struct Device* dev = findFirstDevice()) {
+                if (!bluetooth_is_scanning(dev)) {
+                    LOGGER.info("Auto-connect HID host: device not in scan, retrying scan");
+                    bluetooth_scan_start(dev);
+                }
+            }
+            break;
+        }
+    }
+}
+
 } // namespace tt::bluetooth
 
 #endif // CONFIG_BT_NIMBLE_ENABLED

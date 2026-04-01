@@ -102,55 +102,6 @@ static void cachePeerRecord(const BtPeerRecord& krecord) {
     scan_results_cache.push_back(std::move(rec));
 }
 
-// ---- Auto-connect HID host after scan ----
-
-void autoConnectHidHost() {
-    if (hidHostIsConnected()) return; // already connected
-
-    // Collect addresses seen in the most recent scan.
-    std::vector<std::array<uint8_t, 6>> scanned_addrs;
-    {
-        auto lock = scan_cache_mutex.asScopedLock();
-        lock.lock();
-        for (const auto& r : scan_results_cache) {
-            scanned_addrs.push_back(r.addr);
-        }
-    }
-
-    // Connect to the first saved HID host peer that appeared in the scan.
-    // Direct file lookup by scan address (same as old working approach) ensures the
-    // addr_type is cached and ble_gap_connect succeeds.
-    for (const auto& addr : scanned_addrs) {
-        settings::PairedDevice stored;
-        if (settings::load(settings::addrToHex(addr), stored) &&
-            stored.autoConnect &&
-            stored.profileId == BT_PROFILE_HID_HOST) {
-            LOGGER.info("Auto-connecting HID host to {}", settings::addrToHex(addr));
-            hidHostConnect(addr);
-            return;
-        }
-    }
-
-    // Device not found in this scan. If we have an autoConnect HID host peer, start
-    // another scan so we keep checking until the device powers back on.
-    auto peers = settings::loadAll();
-    bool has_auto = false;
-    for (const auto& peer : peers) {
-        if (peer.autoConnect && peer.profileId == BT_PROFILE_HID_HOST) {
-            has_auto = true;
-            break;
-        }
-    }
-    if (has_auto) {
-        if (struct Device* dev = findFirstDevice()) {
-            if (!bluetooth_is_scanning(dev)) {
-                LOGGER.info("Auto-connect HID host: device not in scan, retrying scan");
-                bluetooth_scan_start(dev);
-            }
-        }
-    }
-}
-
 // ---- Bridge callback (registered with kernel driver) ----
 // This callback listens to platform driver events to perform auto-start logic
 // and settings management. Consumers should register their own callbacks via
@@ -417,53 +368,6 @@ bool isProfileSupported(int profileId) {
            profileId == BT_PROFILE_HID_DEVICE ||
            profileId == BT_PROFILE_SPP ||
            profileId == BT_PROFILE_MIDI;
-}
-
-bool sppStart() {
-    struct Device* dev = findFirstDevice();
-    if (dev == nullptr) return false;
-    settings::setSppAutoStart(true);
-    return bluetooth_serial_start(dev) == ERROR_NONE;
-}
-
-void sppStop() {
-    struct Device* dev = findFirstDevice();
-    if (dev == nullptr) return;
-    settings::setSppAutoStart(false);
-    bluetooth_serial_stop(dev);
-}
-
-bool midiStart() {
-    struct Device* dev = findFirstDevice();
-    if (dev == nullptr) return false;
-    settings::setMidiAutoStart(true);
-    return bluetooth_midi_start(dev) == ERROR_NONE;
-}
-
-void midiStop() {
-    struct Device* dev = findFirstDevice();
-    if (dev == nullptr) return;
-    settings::setMidiAutoStart(false);
-    bluetooth_midi_stop(dev);
-}
-
-bool hidDeviceStart(uint16_t appearance) {
-    struct Device* dev = findFirstDevice();
-    if (dev == nullptr) return false;
-    BtHidDeviceMode mode;
-    switch (appearance) {
-        case 0x03C2: mode = BT_HID_DEVICE_MODE_MOUSE;           break;
-        case 0x03C4: mode = BT_HID_DEVICE_MODE_GAMEPAD;         break;
-        case 0x03C0: mode = BT_HID_DEVICE_MODE_KEYBOARD_MOUSE;  break;
-        default:     mode = BT_HID_DEVICE_MODE_KEYBOARD;        break;
-    }
-    return bluetooth_hid_device_start(dev, mode) == ERROR_NONE;
-}
-
-void hidDeviceStop() {
-    struct Device* dev = findFirstDevice();
-    if (dev == nullptr) return;
-    bluetooth_hid_device_stop(dev);
 }
 
 } // namespace tt::bluetooth

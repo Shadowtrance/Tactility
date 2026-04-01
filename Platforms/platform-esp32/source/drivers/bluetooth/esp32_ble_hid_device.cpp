@@ -499,17 +499,15 @@ static bool hid_device_is_connected(struct Device* /*device*/) {
     return ctx != nullptr && ctx->hid_conn_handle.load() != BLE_HS_CONN_HANDLE_NONE;
 }
 
-const BtHidApi nimble_hid_api = {
-    .host_connect         = nullptr, // HID host managed in Tactility layer
-    .host_disconnect      = nullptr,
-    .device_start         = hid_device_start,
-    .device_stop          = hid_device_stop,
-    .device_send_key      = hid_device_send_key,
-    .device_send_keyboard = hid_device_send_keyboard,
-    .device_send_consumer = hid_device_send_consumer,
-    .device_send_mouse    = hid_device_send_mouse,
-    .device_send_gamepad  = hid_device_send_gamepad,
-    .device_is_connected  = hid_device_is_connected,
+const BtHidDeviceApi nimble_hid_device_api = {
+    .start         = hid_device_start,
+    .stop          = hid_device_stop,
+    .send_key      = hid_device_send_key,
+    .send_keyboard = hid_device_send_keyboard,
+    .send_consumer = hid_device_send_consumer,
+    .send_mouse    = hid_device_send_mouse,
+    .send_gamepad  = hid_device_send_gamepad,
+    .is_connected  = hid_device_is_connected,
 };
 
 #pragma GCC diagnostic pop

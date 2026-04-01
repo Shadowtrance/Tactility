@@ -764,7 +764,7 @@ static error_t api_connect(struct Device* device, const BtAddr addr, enum BtProf
     BleCtx* ctx = (BleCtx*)device_get_driver_data(device);
     if (!ctx) return ERROR_INVALID_STATE;
     if (profile == BT_PROFILE_HID_DEVICE) {
-        return nimble_hid_api.device_start(device, BT_HID_DEVICE_MODE_KEYBOARD);
+        return nimble_hid_device_api.start(device, BT_HID_DEVICE_MODE_KEYBOARD);
     } else if (profile == BT_PROFILE_SPP) {
         return ble_spp_start_internal(ctx);
     } else if (profile == BT_PROFILE_MIDI) {
@@ -778,7 +778,7 @@ static error_t api_disconnect(struct Device* device, const BtAddr addr, enum BtP
     BleCtx* ctx = (BleCtx*)device_get_driver_data(device);
     if (!ctx) return ERROR_INVALID_STATE;
     if (profile == BT_PROFILE_HID_DEVICE) {
-        return nimble_hid_api.device_stop(device);
+        return nimble_hid_device_api.stop(device);
     } else if (profile == BT_PROFILE_SPP) {
         return nimble_serial_api.stop(device);
     } else if (profile == BT_PROFILE_MIDI) {
@@ -848,14 +848,77 @@ const BluetoothApi nimble_bluetooth_api = {
     .remove_event_callback  = api_remove_event_callback,
     .set_hid_host_active    = api_set_hid_host_active,
     .fire_event             = api_fire_event,
-    .hid                    = &nimble_hid_api,
-    .serial                 = &nimble_serial_api,
-    .midi                   = &nimble_midi_api,
+};
+
+// ---- Child device drivers ----
+// Serial, MIDI and HID device are child devices of the Bluetooth parent device.
+// Their drivers have no start/stop of their own (lifecycle is tied to the parent BleCtx).
+// driver_construct is called once at first start; the static DriverInternal persists.
+
+static Driver esp32_ble_serial_driver = {
+    .name         = "esp32-ble-serial",
+    .compatible   = nullptr,
+    .start_device = nullptr,
+    .stop_device  = nullptr,
+    .api          = &nimble_serial_api,
+    .device_type  = &BLUETOOTH_SERIAL_TYPE,
+    .owner        = nullptr,
+    .internal     = nullptr,
+};
+
+static Driver esp32_ble_midi_driver = {
+    .name         = "esp32-ble-midi",
+    .compatible   = nullptr,
+    .start_device = nullptr,
+    .stop_device  = nullptr,
+    .api          = &nimble_midi_api,
+    .device_type  = &BLUETOOTH_MIDI_TYPE,
+    .owner        = nullptr,
+    .internal     = nullptr,
+};
+
+static Driver esp32_ble_hid_device_driver = {
+    .name         = "esp32-ble-hid-device",
+    .compatible   = nullptr,
+    .start_device = nullptr,
+    .stop_device  = nullptr,
+    .api          = &nimble_hid_device_api,
+    .device_type  = &BLUETOOTH_HID_DEVICE_TYPE,
+    .owner        = nullptr,
+    .internal     = nullptr,
 };
 
 // ---- Driver lifecycle ----
 
+static void create_child_device(struct Device* parent, const char* name,
+                                Driver* drv, struct Device*& out) {
+    out = new Device { .name = name, .config = nullptr, .parent = nullptr, .internal = nullptr };
+    device_construct(out);
+    device_set_parent(out, parent);
+    device_set_driver(out, drv);
+    device_add(out);
+    device_start(out);
+}
+
+static void destroy_child_device(struct Device*& child) {
+    if (child == nullptr) return;
+    device_stop(child);
+    device_remove(child);
+    device_destruct(child);
+    delete child;
+    child = nullptr;
+}
+
 static error_t esp32_ble_start_device(struct Device* device) {
+    // Construct child drivers once (they are static; DriverInternal persists for process lifetime).
+    static bool child_drivers_constructed = false;
+    if (!child_drivers_constructed) {
+        driver_construct(&esp32_ble_serial_driver);
+        driver_construct(&esp32_ble_midi_driver);
+        driver_construct(&esp32_ble_hid_device_driver);
+        child_drivers_constructed = true;
+    }
+
     BleCtx* ctx = new BleCtx();
     ctx->radio_mutex = xSemaphoreCreateRecursiveMutex();
     ctx->data_mutex  = xSemaphoreCreateMutex();
@@ -877,7 +940,10 @@ static error_t esp32_ble_start_device(struct Device* device) {
     ctx->midi_keepalive_timer = nullptr;
     ctx->adv_restart_timer    = nullptr;
     ctx->disable_timer        = nullptr;
-    ctx->device = device;
+    ctx->device               = device;
+    ctx->serial_child         = nullptr;
+    ctx->midi_child           = nullptr;
+    ctx->hid_device_child     = nullptr;
 
     // Create the disable timer used to dispatch dispatchDisable off the NimBLE host task.
     esp_timer_create_args_t disable_args = {};
@@ -892,12 +958,23 @@ static error_t esp32_ble_start_device(struct Device* device) {
 
     device_set_driver_data(device, ctx);
     g_ctx = ctx;
+
+    // Create child devices for the serial, MIDI and HID device profiles.
+    create_child_device(device, "ble-serial",     &esp32_ble_serial_driver,     ctx->serial_child);
+    create_child_device(device, "ble-midi",       &esp32_ble_midi_driver,       ctx->midi_child);
+    create_child_device(device, "ble-hid-device", &esp32_ble_hid_device_driver, ctx->hid_device_child);
+
     return ERROR_NONE;
 }
 
 static error_t esp32_ble_stop_device(struct Device* device) {
     BleCtx* ctx = (BleCtx*)device_get_driver_data(device);
     if (!ctx) return ERROR_NONE;
+
+    // Destroy child devices before stopping the radio and freeing the context.
+    destroy_child_device(ctx->hid_device_child);
+    destroy_child_device(ctx->midi_child);
+    destroy_child_device(ctx->serial_child);
 
     if (ctx->radio_state.load() != BT_RADIO_STATE_OFF) {
         dispatch_disable(ctx);

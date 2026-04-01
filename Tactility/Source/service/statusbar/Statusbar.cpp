@@ -13,6 +13,8 @@
 #include <Tactility/service/ServiceRegistration.h>
 #include <Tactility/bluetooth/Bluetooth.h>
 #include <tactility/drivers/bluetooth.h>
+#include <tactility/drivers/bluetooth_serial.h>
+#include <tactility/drivers/bluetooth_midi.h>
 #include <Tactility/service/gps/GpsService.h>
 #include <Tactility/service/wifi/Wifi.h>
 #include <tactility/check.h>
@@ -159,7 +161,10 @@ class StatusbarService final : public Service {
         auto radio_state = tt::bluetooth::getRadioState();
         struct Device* btdev = tt::bluetooth::findFirstDevice();
         bool scanning = btdev ? bluetooth_is_scanning(btdev) : false;
-        bool connected = btdev && (bluetooth_serial_is_connected(btdev) || bluetooth_midi_is_connected(btdev));
+        struct Device* serial_dev = bluetooth_serial_get_device();
+        struct Device* midi_dev = bluetooth_midi_get_device();
+        bool connected = (serial_dev && bluetooth_serial_is_connected(serial_dev)) ||
+                         (midi_dev && bluetooth_midi_is_connected(midi_dev));
         const char* desired_icon = getBluetoothStatusIcon(radio_state, scanning, connected);
         if (bt_last_icon != desired_icon) {
             if (desired_icon != nullptr) {
