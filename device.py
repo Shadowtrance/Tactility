@@ -308,14 +308,15 @@ def write_usb_variables(output_file, device_properties: ConfigParser):
         output_file.write("CONFIG_TINYUSB_MSC_MOUNT_PATH=\"/sdcard\"\n")
 
 def write_bluetooth_variables(output_file, device_properties: ConfigParser):
+    idf_target = get_property_or_exit(device_properties, "hardware", "target").lower()
     has_bluetooth = get_boolean_property_or_false(device_properties, "hardware", "bluetooth")
     if has_bluetooth:
         output_file.write("# Bluetooth (NimBLE)\n")
         output_file.write("CONFIG_BT_ENABLED=y\n")
         output_file.write("CONFIG_BT_NIMBLE_ENABLED=y\n")
-        output_file.write("CONFIG_BT_NIMBLE_ROLE_CENTRAL=y\n")
-        output_file.write("CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y\n")
-        output_file.write("CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y\n")
+        if idf_target == "esp32p4":
+            output_file.write(f"CONFIG_BT_NIMBLE_TRANSPORT_UART=n\n")
+            output_file.write(f"CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y\n")
         # Increase NimBLE host task stack from the 4096-byte default.
         # GAP/GATT event processing + C++ frames push the default over the limit,
         # causing stack-protection faults on events like BLE_GAP_EVENT_SUBSCRIBE.
