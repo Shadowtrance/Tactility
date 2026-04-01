@@ -307,6 +307,20 @@ def write_usb_variables(output_file, device_properties: ConfigParser):
         output_file.write("CONFIG_TINYUSB_MSC_ENABLED=y\n")
         output_file.write("CONFIG_TINYUSB_MSC_MOUNT_PATH=\"/sdcard\"\n")
 
+def write_bluetooth_variables(output_file, device_properties: ConfigParser):
+    has_bluetooth = get_boolean_property_or_false(device_properties, "hardware", "bluetooth")
+    if has_bluetooth:
+        output_file.write("# Bluetooth (NimBLE)\n")
+        output_file.write("CONFIG_BT_ENABLED=y\n")
+        output_file.write("CONFIG_BT_NIMBLE_ENABLED=y\n")
+        output_file.write("CONFIG_BT_NIMBLE_ROLE_CENTRAL=y\n")
+        output_file.write("CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y\n")
+        output_file.write("CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y\n")
+        # Increase NimBLE host task stack from the 4096-byte default.
+        # GAP/GATT event processing + C++ frames push the default over the limit,
+        # causing stack-protection faults on events like BLE_GAP_EVENT_SUBSCRIBE.
+        output_file.write("CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192\n")
+
 def write_custom_sdkconfig(output_file, device_properties: ConfigParser):
     if "sdkconfig" in device_properties.sections():
         output_file.write("# Custom\n")
@@ -325,6 +339,7 @@ def write_properties(output_file, device_properties: ConfigParser, device_id: st
     write_spiram_variables(output_file, device_properties)
     write_performance_improvements(output_file, device_properties)
     write_usb_variables(output_file, device_properties)
+    write_bluetooth_variables(output_file, device_properties)
     write_custom_sdkconfig(output_file, device_properties)
     write_lvgl_variables(output_file, device_properties)
 
