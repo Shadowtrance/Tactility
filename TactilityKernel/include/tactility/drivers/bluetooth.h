@@ -13,6 +13,15 @@ extern "C" {
 struct Device;
 struct DeviceType;
 
+// ---- Device name ----
+
+/**
+ * Maximum BLE device name length in bytes, excluding the NUL terminator.
+ * Must match CONFIG_BT_NIMBLE_GAP_DEVICE_NAME_MAX_LEN (set in device.py for BT devices).
+ * ble_svc_gap_device_name_set() returns BLE_HS_EINVAL for names longer than this.
+ */
+#define BLE_DEVICE_NAME_MAX 64
+
 // ---- Address ----
 
 #define BT_ADDR_LEN 6
@@ -227,6 +236,25 @@ struct BluetoothApi {
     error_t (*remove_event_callback)(struct Device* device, BtEventCallback callback);
 
     /**
+     * Set the BLE device name used in advertising and the GAP service.
+     * Can be called before or after the radio is enabled.
+     * If called while advertising is active, advertising restarts with the new name.
+     * @param[in] device the bluetooth device
+     * @param[in] name   NUL-terminated name (max BLE_DEVICE_NAME_MAX bytes)
+     * @return ERROR_NONE on success, ERROR_INVALID_ARGUMENT if name is too long or NULL
+     */
+    error_t (*set_device_name)(struct Device* device, const char* name);
+
+    /**
+     * Get the current BLE device name.
+     * @param[in]  device  the bluetooth device
+     * @param[out] buf     buffer to write the name into
+     * @param[in]  buf_len size of buf (must be >= BLE_DEVICE_NAME_MAX + 1)
+     * @return ERROR_NONE on success
+     */
+    error_t (*get_device_name)(struct Device* device, char* buf, size_t buf_len);
+
+    /**
      * Notify the driver that a HID host connection is in progress or complete.
      * Called by the Tactility HID host module to prevent name resolution from
      * initiating a simultaneous central connection (BLE_HS_EALREADY).
@@ -268,6 +296,8 @@ error_t bluetooth_connect(struct Device* device, const BtAddr addr, enum BtProfi
 error_t bluetooth_disconnect(struct Device* device, const BtAddr addr, enum BtProfileId profile);
 error_t bluetooth_add_event_callback(struct Device* device, void* context, BtEventCallback callback);
 error_t bluetooth_remove_event_callback(struct Device* device, BtEventCallback callback);
+error_t bluetooth_set_device_name(struct Device* device, const char* name);
+error_t bluetooth_get_device_name(struct Device* device, char* buf, size_t buf_len);
 void    bluetooth_set_hid_host_active(struct Device* device, bool active);
 void    bluetooth_fire_event(struct Device* device, struct BtEvent event);
 

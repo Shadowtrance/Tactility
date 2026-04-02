@@ -327,6 +327,9 @@ def write_bluetooth_variables(output_file, device_properties: ConfigParser):
         has_spiram = get_boolean_property_or_false(device_properties, "hardware", "spiRam")
         if has_spiram:
             output_file.write("CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y\n")
+        # Expand NimBLE's GAP device name buffer to match BLE_DEVICE_NAME_MAX.
+        # The default (31) is too short for some device names and leaves no headroom.
+        output_file.write("CONFIG_BT_NIMBLE_GAP_DEVICE_NAME_MAX_LEN=64\n")
         # Increase NimBLE host task stack from the 4096-byte default.
         # GAP/GATT event processing + C++ frames push the default over the limit,
         # causing stack-protection faults on events like BLE_GAP_EVENT_SUBSCRIBE.

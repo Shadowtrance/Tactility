@@ -86,6 +86,9 @@ struct BleCtx {
     // nimble_port_stop() must not be called from the NimBLE host task itself.
     esp_timer_handle_t disable_timer;
 
+    // BLE device name (set before or after radio enable; applied in dispatch_enable)
+    char device_name[BLE_DEVICE_NAME_MAX + 1];
+
     // Device reference (passed to BtEventCallback)
     struct Device* device;
 

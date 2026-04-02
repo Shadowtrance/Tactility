@@ -417,6 +417,10 @@ static void ble_host_task(void* param) {
 void ble_start_advertising(const ble_uuid128_t* svc_uuid) {
     ble_gap_adv_stop();
 
+    // Always sync the GAP name from ctx right before building the advertising packet,
+    // so bluetooth_set_device_name() is honoured regardless of call timing.
+    if (g_ctx) ble_svc_gap_device_name_set(g_ctx->device_name);
+
     int rc;
     if (svc_uuid != nullptr) {
         const char* name = ble_svc_gap_device_name();
@@ -491,6 +495,9 @@ void ble_start_advertising(const ble_uuid128_t* svc_uuid) {
 
 void ble_start_advertising_hid(uint16_t appearance) {
     ble_gap_adv_stop();
+
+    // Always sync the GAP name from ctx right before building the advertising packet.
+    if (g_ctx) ble_svc_gap_device_name_set(g_ctx->device_name);
 
     const char* name  = ble_svc_gap_device_name();
     uint8_t name_len  = (uint8_t)strlen(name);
@@ -598,7 +605,7 @@ static void dispatch_enable(BleCtx* ctx) {
     // Register base GATT services (NUS + MIDI; HID added by switch_profile when started)
     ble_hid_device_init_gatt();
 
-    ble_svc_gap_device_name_set(CONFIG_TT_DEVICE_NAME);
+    ble_svc_gap_device_name_set(ctx->device_name);
     ble_att_set_preferred_mtu(BLE_ATT_MTU_MAX);
 
     // Start NimBLE host task (on_sync will fire when ready)
@@ -821,6 +828,33 @@ static error_t api_remove_event_callback(struct Device* device, BtEventCallback 
     return ERROR_NOT_FOUND;
 }
 
+static error_t api_set_device_name(struct Device* device, const char* name) {
+    BleCtx* ctx = (BleCtx*)device_get_driver_data(device);
+    if (!ctx || !name) return ERROR_INVALID_ARGUMENT;
+    if (strlen(name) > BLE_DEVICE_NAME_MAX) return ERROR_INVALID_ARGUMENT;
+    xSemaphoreTake(ctx->radio_mutex, portMAX_DELAY);
+    strncpy(ctx->device_name, name, BLE_DEVICE_NAME_MAX);
+    ctx->device_name[BLE_DEVICE_NAME_MAX] = '\0';
+    if (ctx->radio_state.load() == BT_RADIO_STATE_ON) {
+        ble_svc_gap_device_name_set(ctx->device_name);
+        // Restart advertising so the new name is broadcast immediately.
+        // ble_schedule_adv_restart checks active profiles; no-op if nothing is advertising.
+        ble_schedule_adv_restart(ctx, 0);
+    }
+    xSemaphoreGive(ctx->radio_mutex);
+    return ERROR_NONE;
+}
+
+static error_t api_get_device_name(struct Device* device, char* buf, size_t buf_len) {
+    BleCtx* ctx = (BleCtx*)device_get_driver_data(device);
+    if (!ctx || !buf || buf_len == 0) return ERROR_INVALID_ARGUMENT;
+    xSemaphoreTake(ctx->radio_mutex, portMAX_DELAY);
+    strncpy(buf, ctx->device_name, buf_len - 1);
+    buf[buf_len - 1] = '\0';
+    xSemaphoreGive(ctx->radio_mutex);
+    return ERROR_NONE;
+}
+
 static void api_set_hid_host_active(struct Device* device, bool active) {
     BleCtx* ctx = (BleCtx*)device_get_driver_data(device);
     if (ctx) ctx->hid_host_active.store(active);
@@ -846,6 +880,8 @@ const BluetoothApi nimble_bluetooth_api = {
     .disconnect             = api_disconnect,
     .add_event_callback     = api_add_event_callback,
     .remove_event_callback  = api_remove_event_callback,
+    .set_device_name        = api_set_device_name,
+    .get_device_name        = api_get_device_name,
     .set_hid_host_active    = api_set_hid_host_active,
     .fire_event             = api_fire_event,
 };
@@ -940,6 +976,11 @@ static error_t esp32_ble_start_device(struct Device* device) {
     ctx->midi_keepalive_timer = nullptr;
     ctx->adv_restart_timer    = nullptr;
     ctx->disable_timer        = nullptr;
+    // Device name: prefer the Kconfig-supplied TT_DEVICE_NAME, fall back to "Tactility"
+    const char* cfg_name = CONFIG_TT_DEVICE_NAME;
+    if (cfg_name == nullptr || cfg_name[0] == '\0') cfg_name = "Tactility";
+    strncpy(ctx->device_name, cfg_name, BLE_DEVICE_NAME_MAX);
+    ctx->device_name[BLE_DEVICE_NAME_MAX] = '\0';
     ctx->device               = device;
     ctx->serial_child         = nullptr;
     ctx->midi_child           = nullptr;

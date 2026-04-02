@@ -134,6 +134,8 @@ const struct ModuleSymbol KERNEL_SYMBOLS[] = {
     DEFINE_MODULE_SYMBOL(bluetooth_disconnect),
     DEFINE_MODULE_SYMBOL(bluetooth_add_event_callback),
     DEFINE_MODULE_SYMBOL(bluetooth_remove_event_callback),
+    DEFINE_MODULE_SYMBOL(bluetooth_set_device_name),
+    DEFINE_MODULE_SYMBOL(bluetooth_get_device_name),
     DEFINE_MODULE_SYMBOL(bluetooth_set_hid_host_active),
     DEFINE_MODULE_SYMBOL(bluetooth_fire_event),
     DEFINE_MODULE_SYMBOL(BLUETOOTH_TYPE),

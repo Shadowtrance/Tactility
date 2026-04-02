@@ -72,6 +72,14 @@ error_t bluetooth_remove_event_callback(struct Device* device, BtEventCallback c
     return BT_API(device)->remove_event_callback(device, callback);
 }
 
+error_t bluetooth_set_device_name(struct Device* device, const char* name) {
+    return BT_API(device)->set_device_name(device, name);
+}
+
+error_t bluetooth_get_device_name(struct Device* device, char* buf, size_t buf_len) {
+    return BT_API(device)->get_device_name(device, buf, buf_len);
+}
+
 // ---- HID host active flag ----
 
 void bluetooth_set_hid_host_active(struct Device* device, bool active) {
