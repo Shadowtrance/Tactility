@@ -6,13 +6,14 @@
 
 #include <bluetooth/esp32_ble_internal.h>
 
+#include <algorithm>
+#include <cstring>
 #include <host/ble_gap.h>
 #include <host/ble_gatt.h>
 #include <host/ble_hs_mbuf.h>
-#include <algorithm>
-#include <cstring>
 
 #define TAG "esp32_ble_spp"
+#include <tactility/device.h>
 #include <tactility/log.h>
 
 #pragma GCC diagnostic push
@@ -40,21 +41,22 @@ static const ble_uuid128_t NUS_TX_UUID = BLE_UUID128_INIT(
 
 uint16_t nus_tx_handle;
 
+// nus_chr_access is called with the serial child Device* (set via ble_spp_init_gatt_handles).
 static int nus_chr_access(uint16_t conn_handle, uint16_t attr_handle,
                           struct ble_gatt_access_ctxt* ctxt, void* arg) {
     if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
         uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
         LOG_I(TAG, "NUS RX %u bytes", (unsigned)len);
-        struct Device* device = (struct Device*)arg;
-        BleCtx* ctx = ble_get_ctx(device);
-        if (ctx != nullptr && len > 0) {
+        struct Device* device = (struct Device*)arg; // serial child device
+        BleSppCtx* sctx = (BleSppCtx*)device_get_driver_data(device);
+        if (sctx != nullptr && len > 0) {
             std::vector<uint8_t> packet(len);
             os_mbuf_copydata(ctxt->om, 0, len, packet.data());
             {
-                xSemaphoreTake(ctx->data_mutex, portMAX_DELAY);
-                ctx->spp_rx_queue.push_back(std::move(packet));
-                while (ctx->spp_rx_queue.size() > 16) ctx->spp_rx_queue.pop_front();
-                xSemaphoreGive(ctx->data_mutex);
+                xSemaphoreTake(sctx->rx_mutex, portMAX_DELAY);
+                sctx->rx_queue.push_back(std::move(packet));
+                while (sctx->rx_queue.size() > 16) sctx->rx_queue.pop_front();
+                xSemaphoreGive(sctx->rx_mutex);
             }
             struct BtEvent e = {};
             e.type = BT_EVENT_SPP_DATA_RECEIVED;
@@ -68,59 +70,58 @@ struct ble_gatt_chr_def nus_chars_with_handle[] = {
     {
         .uuid      = &NUS_RX_UUID.u,
         .access_cb = nus_chr_access,
-        .arg       = nullptr, // set to Device* in ble_spp_init_gatt_handles()
+        .arg       = nullptr, // set to serial child Device* in ble_spp_init_gatt_handles()
         .flags     = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
     },
     {
         .uuid       = &NUS_TX_UUID.u,
         .access_cb  = nus_chr_access,
-        .arg        = nullptr, // set to Device* in ble_spp_init_gatt_handles()
+        .arg        = nullptr, // set to serial child Device* in ble_spp_init_gatt_handles()
         .flags      = BLE_GATT_CHR_F_NOTIFY,
         .val_handle = &nus_tx_handle,
     },
     { 0 }
 };
 
-void ble_spp_init_gatt_handles(struct Device* device) {
-    // Set the Device* arg so that nus_chr_access can retrieve context without a global.
+void ble_spp_init_gatt_handles(struct Device* serial_child) {
+    // Store the serial child Device* as the GATT callback arg so that nus_chr_access
+    // can retrieve BleSppCtx via device_get_driver_data without a global pointer.
     // nus_tx_handle is written by NimBLE via the val_handle pointer above.
-    nus_chars_with_handle[0].arg = device;
-    nus_chars_with_handle[1].arg = device;
+    nus_chars_with_handle[0].arg = serial_child;
+    nus_chars_with_handle[1].arg = serial_child;
 }
 
 // ---- SPP sub-API implementations ----
+// All functions receive the serial child Device*.
 
 static error_t spp_start(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx == nullptr) return ERROR_INVALID_STATE;
-    ctx->spp_active.store(true);
+    ble_ctx_set_spp_active(device, true);
     ble_start_advertising(device, &NUS_SVC_UUID);
     return ERROR_NONE;
 }
 
-error_t ble_spp_start_internal(struct Device* device) {
-    return spp_start(device);
+error_t ble_spp_start_internal(struct Device* serial_child) {
+    return spp_start(serial_child);
 }
 
 static error_t spp_stop(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx == nullptr) return ERROR_NONE;
-    ctx->spp_active.store(false);
-    if (ctx->spp_conn_handle.load() != BLE_HS_CONN_HANDLE_NONE) {
-        ble_gap_terminate(ctx->spp_conn_handle.load(), BLE_ERR_REM_USER_CONN_TERM);
-        ctx->spp_conn_handle.store(BLE_HS_CONN_HANDLE_NONE);
+    ble_ctx_set_spp_active(device, false);
+    uint16_t conn = ble_ctx_get_spp_conn_handle(device);
+    if (conn != BLE_HS_CONN_HANDLE_NONE) {
+        ble_gap_terminate(conn, BLE_ERR_REM_USER_CONN_TERM);
+        ble_ctx_set_spp_conn_handle(device, BLE_HS_CONN_HANDLE_NONE);
     }
     // Do NOT restart advertising after user-initiated stop — restarting name-only
     // advertising causes bonded Windows hosts to auto-reconnect in a tight loop.
-    if (!ctx->midi_active.load() && !ctx->hid_active.load()) {
+    if (!ble_ctx_get_midi_active(device) && !ble_ctx_get_hid_active(device)) {
         ble_gap_adv_stop();
     }
     return ERROR_NONE;
 }
 
 static error_t spp_write(struct Device* device, const uint8_t* data, size_t len, size_t* written) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx == nullptr || ctx->spp_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
+    uint16_t conn = ble_ctx_get_spp_conn_handle(device);
+    if (conn == BLE_HS_CONN_HANDLE_NONE) {
         if (written) *written = 0;
         return ERROR_INVALID_STATE;
     }
@@ -129,7 +130,7 @@ static error_t spp_write(struct Device* device, const uint8_t* data, size_t len,
         if (written) *written = 0;
         return ERROR_INVALID_STATE;
     }
-    int rc = ble_gatts_notify_custom(ctx->spp_conn_handle.load(), nus_tx_handle, om);
+    int rc = ble_gatts_notify_custom(conn, nus_tx_handle, om);
     if (rc != 0) {
         os_mbuf_free_chain(om);
         if (written) *written = 0;
@@ -140,29 +141,28 @@ static error_t spp_write(struct Device* device, const uint8_t* data, size_t len,
 }
 
 static error_t spp_read(struct Device* device, uint8_t* data, size_t max_len, size_t* read_out) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx == nullptr || data == nullptr || max_len == 0) {
+    BleSppCtx* sctx = (BleSppCtx*)device_get_driver_data(device);
+    if (sctx == nullptr || data == nullptr || max_len == 0) {
         if (read_out) *read_out = 0;
         return ERROR_NONE;
     }
-    xSemaphoreTake(ctx->data_mutex, portMAX_DELAY);
-    if (ctx->spp_rx_queue.empty()) {
-        xSemaphoreGive(ctx->data_mutex);
+    xSemaphoreTake(sctx->rx_mutex, portMAX_DELAY);
+    if (sctx->rx_queue.empty()) {
+        xSemaphoreGive(sctx->rx_mutex);
         if (read_out) *read_out = 0;
         return ERROR_NONE;
     }
-    auto& front = ctx->spp_rx_queue.front();
+    auto& front = sctx->rx_queue.front();
     size_t copy_len = std::min(front.size(), max_len);
     memcpy(data, front.data(), copy_len);
-    ctx->spp_rx_queue.pop_front();
-    xSemaphoreGive(ctx->data_mutex);
+    sctx->rx_queue.pop_front();
+    xSemaphoreGive(sctx->rx_mutex);
     if (read_out) *read_out = copy_len;
     return ERROR_NONE;
 }
 
 static bool spp_is_connected(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx != nullptr && ctx->spp_conn_handle.load() != BLE_HS_CONN_HANDLE_NONE;
+    return ble_ctx_get_spp_conn_handle(device) != BLE_HS_CONN_HANDLE_NONE;
 }
 
 const BtSerialApi nimble_serial_api = {

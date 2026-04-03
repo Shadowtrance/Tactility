@@ -6,15 +6,16 @@
 
 #include <bluetooth/esp32_ble_internal.h>
 
+#include <algorithm>
+#include <cstring>
 #include <host/ble_gap.h>
 #include <host/ble_gatt.h>
 #include <host/ble_hs_mbuf.h>
-#include <algorithm>
-#include <cstring>
 
 #define TAG "esp32_ble_midi"
-#include <tactility/log.h>
 #include <esp_timer.h>
+#include <tactility/device.h>
+#include <tactility/log.h>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
@@ -35,21 +36,22 @@ static const ble_uuid128_t MIDI_IO_UUID = BLE_UUID128_INIT(
 
 uint16_t midi_io_handle;
 
+// midi_chr_access is called with the midi child Device* (set via ble_midi_init_gatt_handles).
 static int midi_chr_access(uint16_t conn_handle, uint16_t attr_handle,
                            struct ble_gatt_access_ctxt* ctxt, void* arg) {
     if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
         uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
         LOG_I(TAG, "MIDI RX %u bytes", (unsigned)len);
-        struct Device* device = (struct Device*)arg;
-        BleCtx* ctx = ble_get_ctx(device);
-        if (ctx != nullptr && len > 0) {
+        struct Device* device = (struct Device*)arg; // midi child device
+        BleMidiCtx* mctx = (BleMidiCtx*)device_get_driver_data(device);
+        if (mctx != nullptr && len > 0) {
             std::vector<uint8_t> packet(len);
             os_mbuf_copydata(ctxt->om, 0, len, packet.data());
             {
-                xSemaphoreTake(ctx->data_mutex, portMAX_DELAY);
-                ctx->midi_rx_queue.push_back(std::move(packet));
-                while (ctx->midi_rx_queue.size() > 16) ctx->midi_rx_queue.pop_front();
-                xSemaphoreGive(ctx->data_mutex);
+                xSemaphoreTake(mctx->rx_mutex, portMAX_DELAY);
+                mctx->rx_queue.push_back(std::move(packet));
+                while (mctx->rx_queue.size() > 16) mctx->rx_queue.pop_front();
+                xSemaphoreGive(mctx->rx_mutex);
             }
             struct BtEvent e = {};
             e.type = BT_EVENT_MIDI_DATA_RECEIVED;
@@ -63,88 +65,70 @@ struct ble_gatt_chr_def midi_chars[] = {
     {
         .uuid       = &MIDI_IO_UUID.u,
         .access_cb  = midi_chr_access,
-        .arg        = nullptr, // set to Device* in ble_midi_init_gatt_handles()
+        .arg        = nullptr, // set to midi child Device* in ble_midi_init_gatt_handles()
         .flags      = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE_NO_RSP | BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_INDICATE,
         .val_handle = &midi_io_handle,
     },
     { 0 }
 };
 
-void ble_midi_init_gatt_handles(struct Device* device) {
-    // Set the Device* arg so that midi_chr_access can retrieve context without a global.
+void ble_midi_init_gatt_handles(struct Device* midi_child) {
+    // Store the midi child Device* as the GATT callback arg so that midi_chr_access
+    // can retrieve BleMidiCtx via device_get_driver_data without a global pointer.
     // midi_io_handle is written by NimBLE via the val_handle pointer above.
-    midi_chars[0].arg = device;
+    midi_chars[0].arg = midi_child;
 }
 
 // ---- MIDI Active Sensing keepalive ----
+// Callback arg is the midi child Device*.
 
 static void midi_keepalive_cb(void* arg) {
-    struct Device* device = (struct Device*)arg;
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx == nullptr || ctx->midi_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) return;
+    struct Device* device = (struct Device*)arg; // midi child device
+    uint16_t conn = ble_ctx_get_midi_conn_handle(device);
+    if (conn == BLE_HS_CONN_HANDLE_NONE) return;
     static const uint8_t as_pkt[3] = { 0x80, 0x80, 0xFE };
     struct os_mbuf* om = ble_hs_mbuf_from_flat(as_pkt, 3);
     if (om == nullptr) return;
-    int rc = ctx->midi_use_indicate.load()
-        ? ble_gatts_indicate_custom(ctx->midi_conn_handle.load(), midi_io_handle, om)
-        : ble_gatts_notify_custom(ctx->midi_conn_handle.load(), midi_io_handle, om);
+    int rc = ble_ctx_get_midi_use_indicate(device)
+        ? ble_gatts_indicate_custom(conn, midi_io_handle, om)
+        : ble_gatts_notify_custom(conn, midi_io_handle, om);
     if (rc != 0) os_mbuf_free_chain(om);
 }
 
 // ---- MIDI sub-API implementations ----
+// All functions receive the midi child Device*.
 
 static error_t midi_start(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx == nullptr) return ERROR_INVALID_STATE;
-    ctx->midi_active.store(true);
+    ble_ctx_set_midi_active(device, true);
     // Create 2-second periodic Active Sensing timer to prevent Windows BLE MIDI
     // driver from declaring the connection idle and disconnecting (~8-10 s timeout).
-    if (ctx->midi_keepalive_timer == nullptr) {
-        esp_timer_create_args_t args = {};
-        args.callback        = midi_keepalive_cb;
-        args.arg             = device;
-        args.dispatch_method = ESP_TIMER_TASK;
-        args.name            = "ble_midi_as";
-        int rc = esp_timer_create(&args, &ctx->midi_keepalive_timer);
-        if (rc != ESP_OK) {
-            LOG_E(TAG, "midi_start: keepalive timer create failed (rc=%d)", rc);
-            return ERROR_INVALID_STATE;
-        }
-    }
-    int rc = esp_timer_start_periodic(ctx->midi_keepalive_timer, 2'000'000);
-    if (rc != ESP_OK) {
-        LOG_E(TAG, "midi_start: keepalive timer start failed (rc=%d)", rc);
-    }
+    error_t rc = ble_ctx_ensure_midi_keepalive(device, midi_keepalive_cb, 2'000'000);
+    if (rc != ERROR_NONE) return rc;
     ble_start_advertising(device, &MIDI_SVC_UUID);
     return ERROR_NONE;
 }
 
-error_t ble_midi_start_internal(struct Device* device) {
-    return midi_start(device);
+error_t ble_midi_start_internal(struct Device* midi_child) {
+    return midi_start(midi_child);
 }
 
 static error_t midi_stop(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx == nullptr) return ERROR_NONE;
-    ctx->midi_active.store(false);
-    if (ctx->midi_keepalive_timer != nullptr) {
-        esp_timer_stop(ctx->midi_keepalive_timer);
+    ble_ctx_set_midi_active(device, false);
+    ble_ctx_stop_midi_keepalive(device);
+    uint16_t conn = ble_ctx_get_midi_conn_handle(device);
+    if (conn != BLE_HS_CONN_HANDLE_NONE) {
+        ble_gap_terminate(conn, BLE_ERR_REM_USER_CONN_TERM);
+        ble_ctx_set_midi_conn_handle(device, BLE_HS_CONN_HANDLE_NONE);
     }
-    if (ctx->midi_conn_handle.load() != BLE_HS_CONN_HANDLE_NONE) {
-        ble_gap_terminate(ctx->midi_conn_handle.load(), BLE_ERR_REM_USER_CONN_TERM);
-        ctx->midi_conn_handle.store(BLE_HS_CONN_HANDLE_NONE);
-    }
-    if (!ctx->spp_active.load() && !ctx->hid_active.load()) {
+    if (!ble_ctx_get_spp_active(device) && !ble_ctx_get_hid_active(device)) {
         ble_gap_adv_stop();
     }
     return ERROR_NONE;
 }
 
 static error_t midi_send(struct Device* device, const uint8_t* msg, size_t len) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx == nullptr || ctx->midi_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
-        return ERROR_INVALID_STATE;
-    }
+    uint16_t conn = ble_ctx_get_midi_conn_handle(device);
+    if (conn == BLE_HS_CONN_HANDLE_NONE) return ERROR_INVALID_STATE;
     // BLE MIDI 2-byte header: [0x80|(ts_high&0x3F)][0x80|(ts_low&0x7F)]
     uint8_t header[2] = { 0x80, 0x80 };
     struct os_mbuf* om = ble_hs_mbuf_from_flat(header, 2);
@@ -154,10 +138,10 @@ static error_t midi_send(struct Device* device, const uint8_t* msg, size_t len) 
         LOG_E(TAG, "midi_send: mbuf append failed");
         return ERROR_INVALID_STATE;
     }
-    LOG_I(TAG, "midi_send %u bytes (indicate=%d)", (unsigned)len, (int)ctx->midi_use_indicate.load());
-    int rc = ctx->midi_use_indicate.load()
-        ? ble_gatts_indicate_custom(ctx->midi_conn_handle.load(), midi_io_handle, om)
-        : ble_gatts_notify_custom(ctx->midi_conn_handle.load(), midi_io_handle, om);
+    LOG_I(TAG, "midi_send %u bytes (indicate=%d)", (unsigned)len, (int)ble_ctx_get_midi_use_indicate(device));
+    int rc = ble_ctx_get_midi_use_indicate(device)
+        ? ble_gatts_indicate_custom(conn, midi_io_handle, om)
+        : ble_gatts_notify_custom(conn, midi_io_handle, om);
     if (rc != 0) {
         os_mbuf_free_chain(om);
         LOG_E(TAG, "midi_send failed rc=%d", rc);
@@ -166,8 +150,7 @@ static error_t midi_send(struct Device* device, const uint8_t* msg, size_t len) 
 }
 
 static bool midi_is_connected(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx != nullptr && ctx->midi_conn_handle.load() != BLE_HS_CONN_HANDLE_NONE;
+    return ble_ctx_get_midi_conn_handle(device) != BLE_HS_CONN_HANDLE_NONE;
 }
 
 const BtMidiApi nimble_midi_api = {
