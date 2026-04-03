@@ -36,6 +36,63 @@ static const ble_uuid128_t MIDI_IO_UUID = BLE_UUID128_INIT(
 
 uint16_t midi_io_handle;
 
+// ---- MIDI field accessor implementations ----
+
+bool ble_midi_get_active(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
+    return ctx && ctx->midi_active.load();
+}
+void ble_midi_set_active(struct Device* device, bool v) {
+    BleCtx* ctx = ble_get_ctx(device);
+    if (ctx) ctx->midi_active.store(v);
+}
+uint16_t ble_midi_get_conn_handle(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
+    return ctx ? ctx->midi_conn_handle.load() : (uint16_t)BLE_HS_CONN_HANDLE_NONE;
+}
+void ble_midi_set_conn_handle(struct Device* device, uint16_t h) {
+    BleCtx* ctx = ble_get_ctx(device);
+    if (ctx) ctx->midi_conn_handle.store(h);
+}
+bool ble_midi_get_use_indicate(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
+    return ctx && ctx->midi_use_indicate.load();
+}
+void ble_midi_set_use_indicate(struct Device* device, bool v) {
+    BleCtx* ctx = ble_get_ctx(device);
+    if (ctx) ctx->midi_use_indicate.store(v);
+}
+
+error_t ble_midi_ensure_keepalive(struct Device* device, esp_timer_cb_t cb, uint64_t period_us) {
+    BleCtx* ctx = ble_get_ctx(device);
+    if (!ctx) return ERROR_INVALID_STATE;
+    if (ctx->midi_keepalive_timer == nullptr) {
+        esp_timer_create_args_t args = {};
+        args.callback        = cb;
+        args.arg             = device;
+        args.dispatch_method = ESP_TIMER_TASK;
+        args.name            = "ble_midi_as";
+        int rc = esp_timer_create(&args, &ctx->midi_keepalive_timer);
+        if (rc != ESP_OK) {
+            LOG_E(TAG, "midi keepalive timer create failed (rc=%d)", rc);
+            return ERROR_INVALID_STATE;
+        }
+    }
+    int rc = esp_timer_start_periodic(ctx->midi_keepalive_timer, period_us);
+    if (rc != ESP_OK) {
+        LOG_E(TAG, "midi keepalive timer start failed (rc=%d)", rc);
+        return ERROR_INVALID_STATE;
+    }
+    return ERROR_NONE;
+}
+
+void ble_midi_stop_keepalive(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
+    if (ctx && ctx->midi_keepalive_timer != nullptr) {
+        esp_timer_stop(ctx->midi_keepalive_timer);
+    }
+}
+
 // midi_chr_access is called with the midi child Device* (set via ble_midi_init_gatt_handles).
 static int midi_chr_access(uint16_t conn_handle, uint16_t attr_handle,
                            struct ble_gatt_access_ctxt* ctxt, void* arg) {

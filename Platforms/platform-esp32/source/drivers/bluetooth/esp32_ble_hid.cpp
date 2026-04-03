@@ -299,6 +299,17 @@ static const struct ble_gatt_svc_def gatt_svcs_gamepad[] = {
     { 0 }
 };
 
+// ---- HID field accessor implementations ----
+
+bool ble_hid_get_active(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
+    return ctx && ctx->hid_active.load();
+}
+void ble_hid_set_active(struct Device* device, bool v) {
+    BleCtx* ctx = ble_get_ctx(device);
+    if (ctx) ctx->hid_active.store(v);
+}
+
 // ---- GATT profile switch ----
 // device must be the HID device child Device*.
 
