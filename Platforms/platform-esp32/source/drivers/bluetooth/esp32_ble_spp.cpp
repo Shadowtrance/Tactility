@@ -91,25 +91,6 @@ void ble_spp_init_gatt_handles(struct Device* serial_child) {
     nus_chars_with_handle[1].arg = serial_child;
 }
 
-// ---- SPP field accessor implementations ----
-
-bool ble_spp_get_active(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx && ctx->spp_active.load();
-}
-void ble_spp_set_active(struct Device* device, bool v) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->spp_active.store(v);
-}
-uint16_t ble_spp_get_conn_handle(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx ? ctx->spp_conn_handle.load() : (uint16_t)BLE_HS_CONN_HANDLE_NONE;
-}
-void ble_spp_set_conn_handle(struct Device* device, uint16_t h) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->spp_conn_handle.store(h);
-}
-
 // ---- SPP sub-API implementations ----
 // All functions receive the serial child Device*.
 
