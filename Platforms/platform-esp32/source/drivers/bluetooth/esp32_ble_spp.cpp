@@ -45,7 +45,8 @@ static int nus_chr_access(uint16_t conn_handle, uint16_t attr_handle,
     if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
         uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
         LOG_I(TAG, "NUS RX %u bytes", (unsigned)len);
-        BleCtx* ctx = g_ctx;
+        struct Device* device = (struct Device*)arg;
+        BleCtx* ctx = ble_get_ctx(device);
         if (ctx != nullptr && len > 0) {
             std::vector<uint8_t> packet(len);
             os_mbuf_copydata(ctxt->om, 0, len, packet.data());
@@ -57,48 +58,52 @@ static int nus_chr_access(uint16_t conn_handle, uint16_t attr_handle,
             }
             struct BtEvent e = {};
             e.type = BT_EVENT_SPP_DATA_RECEIVED;
-            ble_publish_event(ctx, e);
+            ble_publish_event(device, e);
         }
     }
     return 0;
 }
 
-const struct ble_gatt_chr_def nus_chars_with_handle[] = {
+struct ble_gatt_chr_def nus_chars_with_handle[] = {
     {
         .uuid      = &NUS_RX_UUID.u,
         .access_cb = nus_chr_access,
+        .arg       = nullptr, // set to Device* in ble_spp_init_gatt_handles()
         .flags     = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
     },
     {
         .uuid       = &NUS_TX_UUID.u,
         .access_cb  = nus_chr_access,
+        .arg        = nullptr, // set to Device* in ble_spp_init_gatt_handles()
         .flags      = BLE_GATT_CHR_F_NOTIFY,
         .val_handle = &nus_tx_handle,
     },
     { 0 }
 };
 
-void ble_spp_init_gatt_handles(BleCtx* /*ctx*/) {
+void ble_spp_init_gatt_handles(struct Device* device) {
+    // Set the Device* arg so that nus_chr_access can retrieve context without a global.
     // nus_tx_handle is written by NimBLE via the val_handle pointer above.
-    // Nothing else needed; the extern variable is accessed directly by esp32_ble.cpp.
+    nus_chars_with_handle[0].arg = device;
+    nus_chars_with_handle[1].arg = device;
 }
 
 // ---- SPP sub-API implementations ----
 
 static error_t spp_start(struct Device* device) {
-    BleCtx* ctx = g_ctx;
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr) return ERROR_INVALID_STATE;
     ctx->spp_active.store(true);
-    ble_start_advertising(&NUS_SVC_UUID);
+    ble_start_advertising(device, &NUS_SVC_UUID);
     return ERROR_NONE;
 }
 
-error_t ble_spp_start_internal(BleCtx* ctx) {
-    return spp_start(nullptr);
+error_t ble_spp_start_internal(struct Device* device) {
+    return spp_start(device);
 }
 
 static error_t spp_stop(struct Device* device) {
-    BleCtx* ctx = g_ctx;
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr) return ERROR_NONE;
     ctx->spp_active.store(false);
     if (ctx->spp_conn_handle.load() != BLE_HS_CONN_HANDLE_NONE) {
@@ -114,7 +119,7 @@ static error_t spp_stop(struct Device* device) {
 }
 
 static error_t spp_write(struct Device* device, const uint8_t* data, size_t len, size_t* written) {
-    BleCtx* ctx = g_ctx;
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr || ctx->spp_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
         if (written) *written = 0;
         return ERROR_INVALID_STATE;
@@ -135,7 +140,7 @@ static error_t spp_write(struct Device* device, const uint8_t* data, size_t len,
 }
 
 static error_t spp_read(struct Device* device, uint8_t* data, size_t max_len, size_t* read_out) {
-    BleCtx* ctx = g_ctx;
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr || data == nullptr || max_len == 0) {
         if (read_out) *read_out = 0;
         return ERROR_NONE;
@@ -156,7 +161,7 @@ static error_t spp_read(struct Device* device, uint8_t* data, size_t max_len, si
 }
 
 static bool spp_is_connected(struct Device* device) {
-    BleCtx* ctx = g_ctx;
+    BleCtx* ctx = ble_get_ctx(device);
     return ctx != nullptr && ctx->spp_conn_handle.load() != BLE_HS_CONN_HANDLE_NONE;
 }
 

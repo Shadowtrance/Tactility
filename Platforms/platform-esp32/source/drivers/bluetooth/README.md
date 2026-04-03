@@ -25,7 +25,7 @@ SPP, MIDI, and HID Device profiles are exposed as **child devices** created by
 `esp32_ble_start_device()`. Each gets its own `DeviceType` and is found at runtime via
 `bluetooth_serial_get_device()`, `bluetooth_midi_get_device()`, or
 `bluetooth_hid_device_get_device()`. Their drivers have `start_device=nullptr` since
-initialization is handled by the parent driver; they share the global `BleCtx` (`g_ctx`).
+initialization is handled by the parent driver; they obtain the shared `BleCtx` via `ble_get_ctx(device)`.
 
 ## Profiles
 

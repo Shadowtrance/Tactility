@@ -40,7 +40,8 @@ static int midi_chr_access(uint16_t conn_handle, uint16_t attr_handle,
     if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
         uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
         LOG_I(TAG, "MIDI RX %u bytes", (unsigned)len);
-        BleCtx* ctx = g_ctx;
+        struct Device* device = (struct Device*)arg;
+        BleCtx* ctx = ble_get_ctx(device);
         if (ctx != nullptr && len > 0) {
             std::vector<uint8_t> packet(len);
             os_mbuf_copydata(ctxt->om, 0, len, packet.data());
@@ -52,31 +53,34 @@ static int midi_chr_access(uint16_t conn_handle, uint16_t attr_handle,
             }
             struct BtEvent e = {};
             e.type = BT_EVENT_MIDI_DATA_RECEIVED;
-            ble_publish_event(ctx, e);
+            ble_publish_event(device, e);
         }
     }
     return 0;
 }
 
-const struct ble_gatt_chr_def midi_chars[] = {
+struct ble_gatt_chr_def midi_chars[] = {
     {
         .uuid       = &MIDI_IO_UUID.u,
         .access_cb  = midi_chr_access,
+        .arg        = nullptr, // set to Device* in ble_midi_init_gatt_handles()
         .flags      = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE_NO_RSP | BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_INDICATE,
         .val_handle = &midi_io_handle,
     },
     { 0 }
 };
 
-void ble_midi_init_gatt_handles(BleCtx* /*ctx*/) {
+void ble_midi_init_gatt_handles(struct Device* device) {
+    // Set the Device* arg so that midi_chr_access can retrieve context without a global.
     // midi_io_handle is written by NimBLE via the val_handle pointer above.
-    // Nothing else needed; the extern variable is accessed directly by esp32_ble.cpp.
+    midi_chars[0].arg = device;
 }
 
 // ---- MIDI Active Sensing keepalive ----
 
-static void midi_keepalive_cb(void* /*arg*/) {
-    BleCtx* ctx = g_ctx;
+static void midi_keepalive_cb(void* arg) {
+    struct Device* device = (struct Device*)arg;
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr || ctx->midi_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) return;
     static const uint8_t as_pkt[3] = { 0x80, 0x80, 0xFE };
     struct os_mbuf* om = ble_hs_mbuf_from_flat(as_pkt, 3);
@@ -90,7 +94,7 @@ static void midi_keepalive_cb(void* /*arg*/) {
 // ---- MIDI sub-API implementations ----
 
 static error_t midi_start(struct Device* device) {
-    BleCtx* ctx = g_ctx;
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr) return ERROR_INVALID_STATE;
     ctx->midi_active.store(true);
     // Create 2-second periodic Active Sensing timer to prevent Windows BLE MIDI
@@ -98,6 +102,7 @@ static error_t midi_start(struct Device* device) {
     if (ctx->midi_keepalive_timer == nullptr) {
         esp_timer_create_args_t args = {};
         args.callback        = midi_keepalive_cb;
+        args.arg             = device;
         args.dispatch_method = ESP_TIMER_TASK;
         args.name            = "ble_midi_as";
         int rc = esp_timer_create(&args, &ctx->midi_keepalive_timer);
@@ -110,16 +115,16 @@ static error_t midi_start(struct Device* device) {
     if (rc != ESP_OK) {
         LOG_E(TAG, "midi_start: keepalive timer start failed (rc=%d)", rc);
     }
-    ble_start_advertising(&MIDI_SVC_UUID);
+    ble_start_advertising(device, &MIDI_SVC_UUID);
     return ERROR_NONE;
 }
 
-error_t ble_midi_start_internal(BleCtx* ctx) {
-    return midi_start(nullptr);
+error_t ble_midi_start_internal(struct Device* device) {
+    return midi_start(device);
 }
 
 static error_t midi_stop(struct Device* device) {
-    BleCtx* ctx = g_ctx;
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr) return ERROR_NONE;
     ctx->midi_active.store(false);
     if (ctx->midi_keepalive_timer != nullptr) {
@@ -136,7 +141,7 @@ static error_t midi_stop(struct Device* device) {
 }
 
 static error_t midi_send(struct Device* device, const uint8_t* msg, size_t len) {
-    BleCtx* ctx = g_ctx;
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr || ctx->midi_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
         return ERROR_INVALID_STATE;
     }
@@ -161,7 +166,7 @@ static error_t midi_send(struct Device* device, const uint8_t* msg, size_t len) 
 }
 
 static bool midi_is_connected(struct Device* device) {
-    BleCtx* ctx = g_ctx;
+    BleCtx* ctx = ble_get_ctx(device);
     return ctx != nullptr && ctx->midi_conn_handle.load() != BLE_HS_CONN_HANDLE_NONE;
 }
 

@@ -98,38 +98,41 @@ struct BleCtx {
     struct Device* hid_device_child;
 };
 
-// ---- Global context pointer ----
-// Set in start_device; used by NimBLE callbacks that cannot receive a Device* argument.
-extern BleCtx* g_ctx;
+// ---- Context accessor (defined in esp32_ble.cpp) ----
+// Retrieves the BleCtx stored in the device driver-data slot.
+// All cross-module functions accept Device* and call this internally.
+BleCtx* ble_get_ctx(struct Device* device);
 
 // ---- Event publishing ----
-void ble_publish_event(BleCtx* ctx, struct BtEvent event);
+void ble_publish_event(struct Device* device, struct BtEvent event);
 
 // ---- Advertising helpers (defined in esp32_ble.cpp) ----
-void ble_start_advertising(const ble_uuid128_t* svc_uuid);   // svc_uuid=nullptr → name-only
-void ble_start_advertising_hid(uint16_t appearance);
-void ble_schedule_adv_restart(BleCtx* ctx, uint64_t delay_us);
+void ble_start_advertising(struct Device* device, const ble_uuid128_t* svc_uuid);  // svc_uuid=nullptr → name-only
+void ble_start_advertising_hid(struct Device* device, uint16_t appearance);
+void ble_schedule_adv_restart(struct Device* device, uint64_t delay_us);
 
 // ---- GAP scan callback (defined in esp32_ble_scan.cpp) ----
 int  ble_gap_disc_event_handler(struct ble_gap_event* event, void* arg);
-void ble_resolve_next_unnamed_peer(BleCtx* ctx, size_t start_idx);
+void ble_resolve_next_unnamed_peer(struct Device* device, size_t start_idx);
 
 // ---- SPP GATT (defined in esp32_ble_spp.cpp) ----
-void    ble_spp_init_gatt_handles(BleCtx* ctx);
-error_t ble_spp_start_internal(BleCtx* ctx);
+void    ble_spp_init_gatt_handles(struct Device* device);
+error_t ble_spp_start_internal(struct Device* device);
 
 // ---- MIDI GATT (defined in esp32_ble_midi.cpp) ----
-void    ble_midi_init_gatt_handles(BleCtx* ctx);
-error_t ble_midi_start_internal(BleCtx* ctx);
+void    ble_midi_init_gatt_handles(struct Device* device);
+error_t ble_midi_start_internal(struct Device* device);
 
 // ---- HID device GATT (defined in esp32_ble_hid_device.cpp) ----
 void ble_hid_device_init_gatt();
 void ble_hid_device_init_gatt_handles();
-void ble_hid_device_switch_profile(BleCtx* ctx, BleHidProfile profile);
+void ble_hid_device_switch_profile(struct Device* device, BleHidProfile profile);
 
 // ---- Cross-module GATT char / service arrays ----
-extern const struct ble_gatt_chr_def nus_chars_with_handle[];  // esp32_ble_spp.cpp
-extern const struct ble_gatt_chr_def midi_chars[];              // esp32_ble_midi.cpp
+// Non-const: the .arg field is set to the parent Device* at init time so that
+// NimBLE access callbacks can retrieve the context without a global pointer.
+extern struct ble_gatt_chr_def nus_chars_with_handle[];  // esp32_ble_spp.cpp
+extern struct ble_gatt_chr_def midi_chars[];              // esp32_ble_midi.cpp
 
 // ---- Cross-module service UUIDs ----
 extern const ble_uuid128_t NUS_SVC_UUID;   // esp32_ble_spp.cpp

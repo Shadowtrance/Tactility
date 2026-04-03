@@ -15,10 +15,17 @@
 #define TAG "esp32_ble_scan"
 #include <tactility/log.h>
 
+// Module-static device pointer used only by the name-resolution GAP/GATT callbacks
+// whose void* arg is already occupied by the peer index (uintptr_t).
+// Set at the start of ble_resolve_next_unnamed_peer; valid for the duration of
+// the sequential resolution chain (single-device, single-scan at a time).
+static struct Device* s_scan_device = nullptr;
+
 // ---- GAP scan callback ----
 
 int ble_gap_disc_event_handler(struct ble_gap_event* event, void* arg) {
-    BleCtx* ctx = g_ctx;
+    struct Device* device = (struct Device*)arg;
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr) return 0;
 
     switch (event->type) {
@@ -66,7 +73,7 @@ int ble_gap_disc_event_handler(struct ble_gap_event* event, void* arg) {
             struct BtEvent e = {};
             e.type = BT_EVENT_PEER_FOUND;
             e.peer  = record;
-            ble_publish_event(ctx, e);
+            ble_publish_event(device, e);
             break;
         }
 
@@ -74,7 +81,7 @@ int ble_gap_disc_event_handler(struct ble_gap_event* event, void* arg) {
             LOG_I(TAG, "Scan complete (reason=%d)", event->disc_complete.reason);
             // Keep scan_active=true; resolveNextUnnamedPeer clears it and fires ScanFinished
             // once name resolution finishes, so the UI spinner stays active throughout.
-            ble_resolve_next_unnamed_peer(ctx, 0);
+            ble_resolve_next_unnamed_peer(device, 0);
             break;
 
         default:
@@ -94,7 +101,8 @@ int ble_gap_disc_event_handler(struct ble_gap_event* event, void* arg) {
 
 static int name_read_callback(uint16_t conn_handle, const struct ble_gatt_error* error,
                               struct ble_gatt_attr* attr, void* arg) {
-    BleCtx* ctx = g_ctx;
+    struct Device* device = s_scan_device;
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr) return 0;
 
     if (error->status == 0 && attr != nullptr) {
@@ -116,7 +124,7 @@ static int name_read_callback(uint16_t conn_handle, const struct ble_gatt_error*
                 struct BtEvent e = {};
                 e.type = BT_EVENT_PEER_FOUND;
                 e.peer  = record;
-                ble_publish_event(ctx, e);
+                ble_publish_event(device, e);
             }
         }
         return 0; // wait for BLE_HS_EDONE
@@ -129,7 +137,8 @@ static int name_read_callback(uint16_t conn_handle, const struct ble_gatt_error*
 
 static int name_res_gap_callback(struct ble_gap_event* event, void* arg) {
     size_t idx = (size_t)(uintptr_t)arg;
-    BleCtx* ctx = g_ctx;
+    struct Device* device = s_scan_device;
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr) return 0;
 
     switch (event->type) {
@@ -147,13 +156,13 @@ static int name_res_gap_callback(struct ble_gap_event* event, void* arg) {
                 }
             } else {
                 LOG_I(TAG, "Name resolution: connect failed (idx=%u status=%d)", (unsigned)idx, event->connect.status);
-                ble_resolve_next_unnamed_peer(ctx, idx + 1);
+                ble_resolve_next_unnamed_peer(device, idx + 1);
             }
             break;
 
         case BLE_GAP_EVENT_DISCONNECT:
             LOG_I(TAG, "Name resolution: disconnected (idx=%u)", (unsigned)idx);
-            ble_resolve_next_unnamed_peer(ctx, idx + 1);
+            ble_resolve_next_unnamed_peer(device, idx + 1);
             break;
 
         default:
@@ -162,7 +171,10 @@ static int name_res_gap_callback(struct ble_gap_event* event, void* arg) {
     return 0;
 }
 
-void ble_resolve_next_unnamed_peer(BleCtx* ctx, size_t start_idx) {
+void ble_resolve_next_unnamed_peer(struct Device* device, size_t start_idx) {
+    BleCtx* ctx = ble_get_ctx(device);
+    s_scan_device = device;
+
     // Skip if a profile server or HID host connection attempt is active —
     // initiating a central connection simultaneously would fail (BLE_HS_EALREADY).
     if (ctx->midi_active.load() || ctx->spp_active.load() ||
@@ -171,7 +183,7 @@ void ble_resolve_next_unnamed_peer(BleCtx* ctx, size_t start_idx) {
         ctx->scan_active.store(false);
         struct BtEvent e = {};
         e.type = BT_EVENT_SCAN_FINISHED;
-        ble_publish_event(ctx, e);
+        ble_publish_event(device, e);
         return;
     }
 
@@ -197,7 +209,7 @@ void ble_resolve_next_unnamed_peer(BleCtx* ctx, size_t start_idx) {
             ctx->scan_active.store(false);
             struct BtEvent e = {};
             e.type = BT_EVENT_SCAN_FINISHED;
-            ble_publish_event(ctx, e);
+            ble_publish_event(device, e);
             return;
         }
 

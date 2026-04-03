@@ -6,6 +6,7 @@
 #include <Tactility/Logger.h>
 #include <Tactility/LogMessages.h>
 #include <Tactility/lvgl/LvglSync.h>
+#include <Tactility/Tactility.h>
 
 #include <tactility/lvgl_icon_shared.h>
 
@@ -121,8 +122,15 @@ void BtManage::onBtEvent(const struct BtEvent& event) {
 }
 
 static void onKernelBtEvent(struct Device* /*device*/, void* context, struct BtEvent event) {
+    // BT event callbacks can fire from the NimBLE host task (e.g. DISCONNECT during
+    // nimble_port_stop shutdown). Calling onBtEvent() synchronously from the NimBLE
+    // task would block it on the LVGL mutex (held by the LVGL task waiting in
+    // nimble_port_stop), creating a permanent deadlock. Dispatch to the main task so
+    // the NimBLE host task is never blocked by BtManage's state updates or LVGL lock.
     auto* self = static_cast<BtManage*>(context);
-    self->onBtEvent(event);
+    getMainDispatcher().dispatch([self, event] {
+        self->onBtEvent(event);
+    });
 }
 
 void BtManage::onShow(AppContext& app, lv_obj_t* parent) {

@@ -32,9 +32,23 @@
 // ble_store_config_init() is not declared in the public header in some IDF versions.
 extern "C" void ble_store_config_init(void);
 
-// ---- Global context pointer ----
-// Set in start_device(); used by NimBLE callbacks that cannot receive a Device*.
-BleCtx* g_ctx = nullptr;
+// ---- Context accessor ----
+
+BleCtx* ble_get_ctx(struct Device* device) {
+    void* data = device_get_driver_data(device);
+    if (data == nullptr) {
+        // Child devices (serial, midi, hid-device) have no driver data of their own —
+        // their context lives in the parent BLE device.
+        struct Device* parent = device_get_parent(device);
+        if (parent != nullptr) data = device_get_driver_data(parent);
+    }
+    return (BleCtx*)data;
+}
+
+// File-static device pointer used only by NimBLE host callbacks whose signature
+// is fixed by the NimBLE API (on_sync, on_reset) and cannot carry a Device*.
+// All other callbacks receive Device* via their void* arg parameter.
+static struct Device* s_device = nullptr;
 
 // ---- Forward declarations ----
 static void ble_host_task(void* param);
@@ -46,7 +60,8 @@ static int  gap_event_handler(struct ble_gap_event* event, void* arg);
 
 // ---- Event publishing ----
 
-void ble_publish_event(BleCtx* ctx, struct BtEvent event) {
+void ble_publish_event(struct Device* device, struct BtEvent event) {
+    BleCtx* ctx = ble_get_ctx(device);
     // Copy under mutex so callbacks can safely call add/remove_event_callback
     BleCallbackEntry local[BLE_MAX_CALLBACKS];
     size_t count;
@@ -61,26 +76,29 @@ void ble_publish_event(BleCtx* ctx, struct BtEvent event) {
 
 // ---- Advertising restart helper ----
 
-static void adv_restart_callback(void* /*arg*/) {
-    BleCtx* ctx = g_ctx;
+static void adv_restart_callback(void* arg) {
+    struct Device* device = (struct Device*)arg;
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr || ctx->radio_state.load() != BT_RADIO_STATE_ON) return;
     if (ctx->midi_active.load() && ctx->midi_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
-        ble_start_advertising(&MIDI_SVC_UUID);
+        ble_start_advertising(device, &MIDI_SVC_UUID);
     } else if (ctx->spp_active.load() && ctx->spp_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
-        ble_start_advertising(&NUS_SVC_UUID);
+        ble_start_advertising(device, &NUS_SVC_UUID);
     } else if (ctx->hid_active.load() && ctx->hid_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
-        ble_start_advertising_hid(hid_appearance);
+        ble_start_advertising_hid(device, hid_appearance);
     }
 }
 
-void ble_schedule_adv_restart(BleCtx* ctx, uint64_t delay_us) {
+void ble_schedule_adv_restart(struct Device* device, uint64_t delay_us) {
+    BleCtx* ctx = ble_get_ctx(device);
     if (delay_us == 0) {
-        adv_restart_callback(nullptr);
+        adv_restart_callback(device);
         return;
     }
     if (ctx->adv_restart_timer == nullptr) {
         esp_timer_create_args_t args = {};
         args.callback        = adv_restart_callback;
+        args.arg             = device;
         args.dispatch_method = ESP_TIMER_TASK;
         args.name            = "ble_adv_restart";
         int rc = esp_timer_create(&args, &ctx->adv_restart_timer);
@@ -99,7 +117,8 @@ void ble_schedule_adv_restart(BleCtx* ctx, uint64_t delay_us) {
 // ---- GAP connection event handler ----
 
 static int gap_event_handler(struct ble_gap_event* event, void* arg) {
-    BleCtx* ctx = g_ctx;
+    struct Device* device = (struct Device*)arg;
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr) return 0;
 
     switch (event->type) {
@@ -117,7 +136,7 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
             } else {
                 LOG_W(TAG, "Connection failed (status=%d)", event->connect.status);
                 // Delay restart so NimBLE can clean up SMP/connection state before peer retries.
-                ble_schedule_adv_restart(ctx, 500'000);
+                ble_schedule_adv_restart(device, 500'000);
             }
             break;
 
@@ -134,17 +153,24 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
             // If HID was stopped while connected, switch profile to None now that the
             // connection is gone. ble_gatts_mutable() is true here (no active connection,
             // advertising stopped by hid_device_stop), so switch_profile is safe.
-            if (was_hid && !ctx->hid_active.load() && current_hid_profile != BleHidProfile::None) {
-                ble_hid_device_switch_profile(ctx, BleHidProfile::None);
+            // Skip during shutdown — ble_gatts_reset() is unsafe while nimble_port_stop() runs.
+            if (was_hid && !ctx->hid_active.load() && current_hid_profile != BleHidProfile::None &&
+                ctx->radio_state.load() != BT_RADIO_STATE_OFF_PENDING) {
+                ble_hid_device_switch_profile(device, BleHidProfile::None);
             }
             // Restart advertising whenever a service is active without a live connection.
             // Covers both normal disconnect and Windows discovery-only connections.
-            if (ctx->midi_active.load() && ctx->midi_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
-                ble_start_advertising(&MIDI_SVC_UUID);
-            } else if (ctx->spp_active.load() && ctx->spp_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
-                ble_start_advertising(&NUS_SVC_UUID);
-            } else if (ctx->hid_active.load() && ctx->hid_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
-                ble_start_advertising_hid(hid_appearance);
+            // Skip if the radio is going OFF_PENDING — nimble_port_stop() is in progress
+            // and calling ble_gap_adv_start() from within the NimBLE host task while the
+            // controller is shutting down would block the host task and hang nimble_port_stop().
+            if (ctx->radio_state.load() != BT_RADIO_STATE_OFF_PENDING) {
+                if (ctx->midi_active.load() && ctx->midi_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
+                    ble_start_advertising(device, &MIDI_SVC_UUID);
+                } else if (ctx->spp_active.load() && ctx->spp_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
+                    ble_start_advertising(device, &NUS_SVC_UUID);
+                } else if (ctx->hid_active.load() && ctx->hid_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
+                    ble_start_advertising_hid(device, hid_appearance);
+                }
             }
             break;
         }
@@ -178,7 +204,7 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
                         memcpy(e.profile_state.addr, sub_desc.peer_id_addr.val, 6);
                         e.profile_state.profile = BT_PROFILE_SPP;
                         e.profile_state.state   = BT_PROFILE_STATE_CONNECTED;
-                        ble_publish_event(ctx, e);
+                        ble_publish_event(device, e);
                     }
                 }
             } else if (event->subscribe.attr_handle == midi_io_handle) {
@@ -200,7 +226,7 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
                             memcpy(e.profile_state.addr, sub_desc.peer_id_addr.val, 6);
                             e.profile_state.profile = BT_PROFILE_MIDI;
                             e.profile_state.state   = BT_PROFILE_STATE_CONNECTED;
-                            ble_publish_event(ctx, e);
+                            ble_publish_event(device, e);
                         }
                     }
                     // Send MIDI Active Sensing immediately after subscription.
@@ -287,7 +313,7 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
                                           : ctx->spp_active.load()  ? BT_PROFILE_SPP
                                           : ctx->hid_active.load()  ? BT_PROFILE_HID_DEVICE
                                                                      : BT_PROFILE_HID_HOST;
-                    ble_publish_event(ctx, e);
+                    ble_publish_event(device, e);
                 }
             }
             // Re-send Active Sensing now that the link is encrypted.
@@ -328,7 +354,7 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
                     e.type = BT_EVENT_PAIR_RESULT;
                     memcpy(e.pair_result.addr, desc.peer_id_addr.val, 6);
                     e.pair_result.result = BT_PAIR_RESULT_BOND_LOST;
-                    ble_publish_event(ctx, e);
+                    ble_publish_event(device, e);
                 }
             }
             // If already encrypted, IGNORE so the current session continues.
@@ -354,7 +380,7 @@ static void on_sync() {
              nus_tx_handle, midi_io_handle,
              hid_kb_input_handle, hid_consumer_input_handle,
              hid_mouse_input_handle, hid_gamepad_input_handle);
-    BleCtx* ctx = g_ctx;
+    BleCtx* ctx = ble_get_ctx(s_device);
     if (ctx == nullptr) return;
 
     ctx->pending_reset_count.store(0);
@@ -365,21 +391,21 @@ static void on_sync() {
     rc = ble_hs_id_infer_auto(0, &own_addr_type);
     if (rc != 0) LOG_E(TAG, "infer addr type failed (rc=%d)", rc);
 
-    // Sync GATT handle values
-    ble_spp_init_gatt_handles(ctx);
-    ble_midi_init_gatt_handles(ctx);
+    // Sync GATT handle values (also sets .arg = device on chr def entries)
+    ble_spp_init_gatt_handles(s_device);
+    ble_midi_init_gatt_handles(s_device);
     ble_hid_device_init_gatt_handles();
 
     ctx->radio_state.store(BT_RADIO_STATE_ON);
     struct BtEvent e = {};
     e.type = BT_EVENT_RADIO_STATE_CHANGED;
     e.radio_state = BT_RADIO_STATE_ON;
-    ble_publish_event(ctx, e);
+    ble_publish_event(s_device, e);
 
     // The Tactility bridge handles auto-start (SPP/MIDI) in response to
     // BT_EVENT_RADIO_STATE_CHANGED(ON). We just start name-only advertising
     // so the device is visible immediately.
-    ble_start_advertising(nullptr);
+    ble_start_advertising(s_device, nullptr);
 }
 
 static void dispatch_disable_timer_cb(void* arg) {
@@ -389,7 +415,7 @@ static void dispatch_disable_timer_cb(void* arg) {
 
 static void on_reset(int reason) {
     LOG_W(TAG, "NimBLE host reset (reason=%d)", reason);
-    BleCtx* ctx = g_ctx;
+    BleCtx* ctx = ble_get_ctx(s_device);
     if (ctx == nullptr) return;
 
     if (ctx->radio_state.load() == BT_RADIO_STATE_ON_PENDING) {
@@ -414,12 +440,13 @@ static void ble_host_task(void* param) {
 
 // ---- Advertising helpers ----
 
-void ble_start_advertising(const ble_uuid128_t* svc_uuid) {
+void ble_start_advertising(struct Device* device, const ble_uuid128_t* svc_uuid) {
     ble_gap_adv_stop();
 
     // Always sync the GAP name from ctx right before building the advertising packet,
     // so bluetooth_set_device_name() is honoured regardless of call timing.
-    if (g_ctx) ble_svc_gap_device_name_set(g_ctx->device_name);
+    BleCtx* _name_ctx = ble_get_ctx(device);
+    if (_name_ctx) ble_svc_gap_device_name_set(_name_ctx->device_name);
 
     int rc;
     if (svc_uuid != nullptr) {
@@ -485,7 +512,7 @@ void ble_start_advertising(const ble_uuid128_t* svc_uuid) {
     adv_params.itvl_max  = 240; // 150 ms
 
     rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, nullptr, BLE_HS_FOREVER,
-                           &adv_params, gap_event_handler, nullptr);
+                           &adv_params, gap_event_handler, device);
     if (rc != 0 && rc != BLE_HS_EALREADY) {
         LOG_E(TAG, "startAdvertising: adv_start failed rc=%d", rc);
     } else {
@@ -493,11 +520,12 @@ void ble_start_advertising(const ble_uuid128_t* svc_uuid) {
     }
 }
 
-void ble_start_advertising_hid(uint16_t appearance) {
+void ble_start_advertising_hid(struct Device* device, uint16_t appearance) {
     ble_gap_adv_stop();
 
     // Always sync the GAP name from ctx right before building the advertising packet.
-    if (g_ctx) ble_svc_gap_device_name_set(g_ctx->device_name);
+    BleCtx* _name_ctx = ble_get_ctx(device);
+    if (_name_ctx) ble_svc_gap_device_name_set(_name_ctx->device_name);
 
     const char* name  = ble_svc_gap_device_name();
     uint8_t name_len  = (uint8_t)strlen(name);
@@ -546,7 +574,7 @@ void ble_start_advertising_hid(uint16_t appearance) {
     adv_params.itvl_max  = 240;
 
     rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, nullptr, BLE_HS_FOREVER,
-                           &adv_params, gap_event_handler, nullptr);
+                           &adv_params, gap_event_handler, device);
     if (rc != 0 && rc != BLE_HS_EALREADY) {
         LOG_E(TAG, "startAdvertisingHid: adv_start failed rc=%d", rc);
     } else {
@@ -569,7 +597,7 @@ static void dispatch_enable(BleCtx* ctx) {
         struct BtEvent e = {};
         e.type = BT_EVENT_RADIO_STATE_CHANGED;
         e.radio_state = BT_RADIO_STATE_ON_PENDING;
-        ble_publish_event(ctx, e);
+        ble_publish_event(ctx->device, e);
     }
 
     int rc = nimble_port_init();
@@ -579,7 +607,7 @@ static void dispatch_enable(BleCtx* ctx) {
         struct BtEvent e = {};
         e.type = BT_EVENT_RADIO_STATE_CHANGED;
         e.radio_state = BT_RADIO_STATE_OFF;
-        ble_publish_event(ctx, e);
+        ble_publish_event(ctx->device, e);
         return;
     }
 
@@ -625,7 +653,7 @@ static void dispatch_disable(BleCtx* ctx) {
         struct BtEvent e = {};
         e.type = BT_EVENT_RADIO_STATE_CHANGED;
         e.radio_state = BT_RADIO_STATE_OFF_PENDING;
-        ble_publish_event(ctx, e);
+        ble_publish_event(ctx->device, e);
     }
 
     // Blocking: waits for nimble_port_run() to exit.
@@ -662,7 +690,7 @@ static void dispatch_disable(BleCtx* ctx) {
         struct BtEvent e = {};
         e.type = BT_EVENT_RADIO_STATE_CHANGED;
         e.radio_state = BT_RADIO_STATE_OFF;
-        ble_publish_event(ctx, e);
+        ble_publish_event(ctx->device, e);
     }
 }
 
@@ -715,7 +743,7 @@ static error_t api_scan_start(struct Device* device) {
     uint8_t own_addr_type;
     ble_hs_id_infer_auto(0, &own_addr_type);
 
-    int rc = ble_gap_disc(own_addr_type, 5000, &disc_params, ble_gap_disc_event_handler, nullptr);
+    int rc = ble_gap_disc(own_addr_type, 5000, &disc_params, ble_gap_disc_event_handler, device);
     if (rc != 0 && rc != BLE_HS_EALREADY) {
         LOG_E(TAG, "ble_gap_disc failed (rc=%d)", rc);
         return ERROR_UNDEFINED;
@@ -725,7 +753,7 @@ static error_t api_scan_start(struct Device* device) {
     {
         struct BtEvent e = {};
         e.type = BT_EVENT_SCAN_STARTED;
-        ble_publish_event(ctx, e);
+        ble_publish_event(device, e);
     }
     return ERROR_NONE;
 }
@@ -737,7 +765,7 @@ static error_t api_scan_stop(struct Device* device) {
     ctx->scan_active.store(false);
     struct BtEvent e = {};
     e.type = BT_EVENT_SCAN_FINISHED;
-    ble_publish_event(ctx, e);
+    ble_publish_event(device, e);
     return ERROR_NONE;
 }
 
@@ -773,9 +801,9 @@ static error_t api_connect(struct Device* device, const BtAddr addr, enum BtProf
     if (profile == BT_PROFILE_HID_DEVICE) {
         return nimble_hid_device_api.start(device, BT_HID_DEVICE_MODE_KEYBOARD);
     } else if (profile == BT_PROFILE_SPP) {
-        return ble_spp_start_internal(ctx);
+        return ble_spp_start_internal(device);
     } else if (profile == BT_PROFILE_MIDI) {
-        return ble_midi_start_internal(ctx);
+        return ble_midi_start_internal(device);
     }
     // BT_PROFILE_HID_HOST is handled entirely in the Tactility layer.
     return ERROR_NOT_SUPPORTED;
@@ -839,7 +867,7 @@ static error_t api_set_device_name(struct Device* device, const char* name) {
         ble_svc_gap_device_name_set(ctx->device_name);
         // Restart advertising so the new name is broadcast immediately.
         // ble_schedule_adv_restart checks active profiles; no-op if nothing is advertising.
-        ble_schedule_adv_restart(ctx, 0);
+        ble_schedule_adv_restart(device, 0);
     }
     xSemaphoreGive(ctx->radio_mutex);
     return ERROR_NONE;
@@ -862,7 +890,7 @@ static void api_set_hid_host_active(struct Device* device, bool active) {
 
 static void api_fire_event(struct Device* device, struct BtEvent event) {
     BleCtx* ctx = (BleCtx*)device_get_driver_data(device);
-    if (ctx) ble_publish_event(ctx, event);
+    if (ctx) ble_publish_event(device, event);
 }
 
 // ---- BluetoothApi struct ----
@@ -998,7 +1026,7 @@ static error_t esp32_ble_start_device(struct Device* device) {
     }
 
     device_set_driver_data(device, ctx);
-    g_ctx = ctx;
+    s_device = device;
 
     // Create child devices for the serial, MIDI and HID device profiles.
     create_child_device(device, "ble-serial",     &esp32_ble_serial_driver,     ctx->serial_child);
@@ -1027,7 +1055,7 @@ static error_t esp32_ble_stop_device(struct Device* device) {
         ctx->disable_timer = nullptr;
     }
 
-    g_ctx = nullptr;
+    s_device = nullptr;
     device_set_driver_data(device, nullptr);
     delete ctx;
     return ERROR_NONE;

@@ -300,12 +300,13 @@ static const struct ble_gatt_svc_def gatt_svcs_gamepad[] = {
 
 // ---- GATT profile switch ----
 
-void ble_hid_device_switch_profile(BleCtx* ctx, BleHidProfile profile) {
+void ble_hid_device_switch_profile(struct Device* device, BleHidProfile profile) {
     if (profile == current_hid_profile) return;
     LOG_I(TAG, "switchGattProfile: %d -> %d", (int)current_hid_profile, (int)profile);
 
     ble_gap_adv_stop();
 
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx && ctx->hid_conn_handle.load() != BLE_HS_CONN_HANDLE_NONE) {
         ble_gap_terminate(ctx->hid_conn_handle.load(), BLE_ERR_REM_USER_CONN_TERM);
         ctx->hid_conn_handle.store(BLE_HS_CONN_HANDLE_NONE);
@@ -384,8 +385,8 @@ void ble_hid_device_init_gatt_handles() {
 
 // ---- HID Device sub-API implementations ----
 
-static error_t hid_device_start(struct Device* /*device*/, enum BtHidDeviceMode mode) {
-    BleCtx* ctx = g_ctx;
+static error_t hid_device_start(struct Device* device, enum BtHidDeviceMode mode) {
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr) return ERROR_INVALID_STATE;
 
     BleHidProfile profile;
@@ -410,14 +411,14 @@ static error_t hid_device_start(struct Device* /*device*/, enum BtHidDeviceMode 
     }
 
     hid_appearance = appearance;
-    ble_hid_device_switch_profile(ctx, profile);
+    ble_hid_device_switch_profile(device, profile);
     ctx->hid_active.store(true);
-    ble_start_advertising_hid(hid_appearance);
+    ble_start_advertising_hid(device, hid_appearance);
     return ERROR_NONE;
 }
 
-static error_t hid_device_stop(struct Device* /*device*/) {
-    BleCtx* ctx = g_ctx;
+static error_t hid_device_stop(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr) return ERROR_NONE;
     ctx->hid_active.store(false);
     ble_gap_adv_stop();
@@ -431,14 +432,14 @@ static error_t hid_device_stop(struct Device* /*device*/) {
     } else {
         // Not connected: GATT is mutable, switch profile immediately.
         if (current_hid_profile != BleHidProfile::None) {
-            ble_hid_device_switch_profile(ctx, BleHidProfile::None);
+            ble_hid_device_switch_profile(device, BleHidProfile::None);
         }
     }
     return ERROR_NONE;
 }
 
-static error_t hid_device_send_key(struct Device* /*device*/, uint8_t keycode, bool pressed) {
-    BleCtx* ctx = g_ctx;
+static error_t hid_device_send_key(struct Device* device, uint8_t keycode, bool pressed) {
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr || ctx->hid_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
         return ERROR_INVALID_STATE;
     }
@@ -462,40 +463,40 @@ static error_t hid_notify(uint16_t conn_handle, uint16_t attr_handle,
     return (rc == 0) ? ERROR_NONE : ERROR_INVALID_STATE;
 }
 
-static error_t hid_device_send_keyboard(struct Device* /*device*/, const uint8_t* report, size_t len) {
-    BleCtx* ctx = g_ctx;
+static error_t hid_device_send_keyboard(struct Device* device, const uint8_t* report, size_t len) {
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr) return ERROR_INVALID_STATE;
     uint8_t buf[8] = {};
     memcpy(buf, report, len < sizeof(buf) ? len : sizeof(buf));
     return hid_notify(ctx->hid_conn_handle.load(), hid_kb_input_handle, buf, sizeof(buf));
 }
 
-static error_t hid_device_send_consumer(struct Device* /*device*/, const uint8_t* report, size_t len) {
-    BleCtx* ctx = g_ctx;
+static error_t hid_device_send_consumer(struct Device* device, const uint8_t* report, size_t len) {
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr) return ERROR_INVALID_STATE;
     uint8_t buf[2] = {};
     memcpy(buf, report, len < sizeof(buf) ? len : sizeof(buf));
     return hid_notify(ctx->hid_conn_handle.load(), hid_consumer_input_handle, buf, sizeof(buf));
 }
 
-static error_t hid_device_send_mouse(struct Device* /*device*/, const uint8_t* report, size_t len) {
-    BleCtx* ctx = g_ctx;
+static error_t hid_device_send_mouse(struct Device* device, const uint8_t* report, size_t len) {
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr) return ERROR_INVALID_STATE;
     uint8_t buf[4] = {};
     memcpy(buf, report, len < sizeof(buf) ? len : sizeof(buf));
     return hid_notify(ctx->hid_conn_handle.load(), hid_mouse_input_handle, buf, sizeof(buf));
 }
 
-static error_t hid_device_send_gamepad(struct Device* /*device*/, const uint8_t* report, size_t len) {
-    BleCtx* ctx = g_ctx;
+static error_t hid_device_send_gamepad(struct Device* device, const uint8_t* report, size_t len) {
+    BleCtx* ctx = ble_get_ctx(device);
     if (ctx == nullptr) return ERROR_INVALID_STATE;
     uint8_t buf[8] = {};
     memcpy(buf, report, len < sizeof(buf) ? len : sizeof(buf));
     return hid_notify(ctx->hid_conn_handle.load(), hid_gamepad_input_handle, buf, sizeof(buf));
 }
 
-static bool hid_device_is_connected(struct Device* /*device*/) {
-    BleCtx* ctx = g_ctx;
+static bool hid_device_is_connected(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
     return ctx != nullptr && ctx->hid_conn_handle.load() != BLE_HS_CONN_HANDLE_NONE;
 }
 
