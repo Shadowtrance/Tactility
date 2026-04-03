@@ -11,7 +11,7 @@ Only compiled when `CONFIG_BT_NIMBLE_ENABLED=y`.
 | `esp32_ble_scan.cpp` | GAP discovery, name resolution, auto-connect dispatch |
 | `esp32_ble_spp.cpp` | NUS (Nordic UART Service) GATT server — `BtSerialApi` |
 | `esp32_ble_midi.cpp` | BLE MIDI GATT server — `BtMidiApi` |
-| `esp32_ble_hid_device.cpp` | HID peripheral (keyboard / mouse / gamepad) — `BtHidDeviceApi` |
+| `esp32_ble_hid.cpp` | HID peripheral (keyboard / mouse / gamepad) — `BtHidDeviceApi` |
 
 Internal shared state is defined in
 `Platforms/platform-esp32/private/bluetooth/esp32_ble_internal.h` (`BleCtx`).

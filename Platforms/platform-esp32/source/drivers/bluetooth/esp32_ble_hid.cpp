@@ -299,10 +299,21 @@ static const struct ble_gatt_svc_def gatt_svcs_gamepad[] = {
     { 0 }
 };
 
+// ---- HID field accessor implementations ----
+
+bool ble_hid_get_active(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
+    return ctx && ctx->hid_active.load();
+}
+void ble_hid_set_active(struct Device* device, bool v) {
+    BleCtx* ctx = ble_get_ctx(device);
+    if (ctx) ctx->hid_active.store(v);
+}
+
 // ---- GATT profile switch ----
 // device must be the HID device child Device*.
 
-void ble_hid_device_switch_profile(struct Device* device, BleHidProfile profile) {
+void ble_hid_switch_profile(struct Device* device, BleHidProfile profile) {
     if (profile == current_hid_profile) return;
     LOG_I(TAG, "switchGattProfile: %d -> %d", (int)current_hid_profile, (int)profile);
 
@@ -361,7 +372,7 @@ void ble_hid_device_switch_profile(struct Device* device, BleHidProfile profile)
     current_hid_profile = profile;
 }
 
-void ble_hid_device_init_gatt() {
+void ble_hid_init_gatt() {
     current_hid_profile    = BleHidProfile::None;
     active_hid_rpt_map     = nullptr;
     active_hid_rpt_map_len = 0;
@@ -376,7 +387,7 @@ void ble_hid_device_init_gatt() {
     }
 }
 
-void ble_hid_device_init_gatt_handles() {
+void ble_hid_init_gatt_handles() {
     // val_handle pointers in char arrays are updated by NimBLE at registration time.
     // No explicit action needed here; called for symmetry with spp/midi init.
     (void)hid_kb_input_handle;
@@ -417,14 +428,14 @@ static error_t hid_device_start(struct Device* device, enum BtHidDeviceMode mode
     }
 
     hid_appearance = appearance;
-    ble_hid_device_switch_profile(device, profile);
-    ble_ctx_set_hid_active(device, true);
+    ble_hid_switch_profile(device, profile);
+    ble_hid_set_active(device, true);
     ble_start_advertising_hid(device, hid_appearance);
     return ERROR_NONE;
 }
 
 static error_t hid_device_stop(struct Device* device) {
-    ble_ctx_set_hid_active(device, false);
+    ble_hid_set_active(device, false);
     ble_gap_adv_stop();
     BleHidDeviceCtx* hid_ctx = (BleHidDeviceCtx*)device_get_driver_data(device);
     uint16_t conn = hid_ctx ? hid_ctx->hid_conn_handle.load() : (uint16_t)BLE_HS_CONN_HANDLE_NONE;
@@ -439,7 +450,7 @@ static error_t hid_device_stop(struct Device* device) {
     } else {
         // Not connected: GATT is mutable, switch profile immediately.
         if (current_hid_profile != BleHidProfile::None) {
-            ble_hid_device_switch_profile(device, BleHidProfile::None);
+            ble_hid_switch_profile(device, BleHidProfile::None);
         }
         delete hid_ctx;
         device_set_driver_data(device, nullptr);

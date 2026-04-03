@@ -32,74 +32,18 @@
 // ble_store_config_init() is not declared in the public header in some IDF versions.
 extern "C" void ble_store_config_init(void);
 
-// ---- BleCtx ----
-// Private to this translation unit. Sub-modules access BleCtx fields exclusively
-// through the accessor functions declared in esp32_ble_internal.h.
-
-#define BLE_MAX_CALLBACKS 8
-#define BLE_SCAN_MAX 64
-
-struct BleCallbackEntry {
-    BtEventCallback fn;
-    void* ctx;
-};
-
-struct BleCtx {
-    // Mutexes
-    SemaphoreHandle_t radio_mutex;  // guards radio state transitions
-    SemaphoreHandle_t cb_mutex;     // guards callbacks array
-
-    // Radio / scan state (atomic — read from multiple tasks)
-    std::atomic<BtRadioState> radio_state;
-    std::atomic<bool> scan_active;
-    // Set by Tactility HID host to prevent simultaneous central connection during name resolution
-    std::atomic<bool> hid_host_active;
-
-    // Event callbacks (guarded by cb_mutex)
-    BleCallbackEntry callbacks[BLE_MAX_CALLBACKS];
-    size_t callback_count;
-
-    // Connection handles + active flags (atomic — accessed from multiple tasks)
-    std::atomic<uint16_t> spp_conn_handle;
-    std::atomic<bool>     spp_active;
-    std::atomic<uint16_t> midi_conn_handle;
-    std::atomic<bool>     midi_active;
-    std::atomic<bool>     midi_use_indicate;  // true when client subscribed for INDICATE (e.g. Windows)
-    std::atomic<bool>     hid_active;
-    std::atomic<bool>     link_encrypted;
-    std::atomic<int>      pending_reset_count;
-
-    // Timers
-    esp_timer_handle_t midi_keepalive_timer; // 2-second periodic Active Sensing
-    esp_timer_handle_t adv_restart_timer;    // one-shot after connect failure (500 ms)
-    // One-shot timer used to dispatch dispatchDisable off the NimBLE host task.
-    // nimble_port_stop() must not be called from the NimBLE host task itself.
-    esp_timer_handle_t disable_timer;
-
-    // BLE device name (set before or after radio enable; applied in dispatch_enable)
-    char device_name[BLE_DEVICE_NAME_MAX + 1];
-
-    // Device reference (passed to BtEventCallback)
-    struct Device* device;
-
-    // Child devices (created by esp32_ble_start_device, destroyed by stop_device)
-    struct Device* serial_child;
-    struct Device* midi_child;
-    struct Device* hid_device_child;
-};
-
 // File-static device pointer used only by NimBLE host callbacks whose signature
 // is fixed by the NimBLE API (on_sync, on_reset) and cannot carry a Device*.
 // All other callbacks receive Device* via their void* arg parameter.
 static struct Device* s_device = nullptr;
 
-// ---- Context accessor (file-private) ----
+// ---- Context accessor ----
 // Always returns the root BLE device's BleCtx regardless of which device is passed
 // (root, child, or grandchild). Using s_device directly avoids device-tree traversal
 // ambiguity: the root BLE device may itself have a parent in the device tree, and
 // walking up from it would land on the wrong node.
 
-static BleCtx* ble_get_ctx(struct Device* /*device*/) {
+BleCtx* ble_get_ctx(struct Device* /*device*/) {
     return s_device ? (BleCtx*)device_get_driver_data(s_device) : nullptr;
 }
 
@@ -111,105 +55,24 @@ static void dispatch_enable(BleCtx* ctx);
 static void dispatch_disable(BleCtx* ctx);
 static int  gap_event_handler(struct ble_gap_event* event, void* arg);
 
-// ---- BleCtx field accessor implementations ----
+// ---- General field accessor implementations ----
 
-BtRadioState ble_ctx_get_radio_state(struct Device* device) {
+BtRadioState ble_get_radio_state(struct Device* device) {
     BleCtx* ctx = ble_get_ctx(device);
     return ctx ? ctx->radio_state.load() : BT_RADIO_STATE_OFF;
 }
 
-bool ble_ctx_get_hid_active(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx && ctx->hid_active.load();
-}
-void ble_ctx_set_hid_active(struct Device* device, bool v) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->hid_active.store(v);
-}
-
-bool ble_ctx_get_spp_active(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx && ctx->spp_active.load();
-}
-void ble_ctx_set_spp_active(struct Device* device, bool v) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->spp_active.store(v);
-}
-uint16_t ble_ctx_get_spp_conn_handle(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx ? ctx->spp_conn_handle.load() : (uint16_t)BLE_HS_CONN_HANDLE_NONE;
-}
-void ble_ctx_set_spp_conn_handle(struct Device* device, uint16_t h) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->spp_conn_handle.store(h);
-}
-
-bool ble_ctx_get_midi_active(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx && ctx->midi_active.load();
-}
-void ble_ctx_set_midi_active(struct Device* device, bool v) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->midi_active.store(v);
-}
-uint16_t ble_ctx_get_midi_conn_handle(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx ? ctx->midi_conn_handle.load() : (uint16_t)BLE_HS_CONN_HANDLE_NONE;
-}
-void ble_ctx_set_midi_conn_handle(struct Device* device, uint16_t h) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->midi_conn_handle.store(h);
-}
-bool ble_ctx_get_midi_use_indicate(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx && ctx->midi_use_indicate.load();
-}
-void ble_ctx_set_midi_use_indicate(struct Device* device, bool v) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->midi_use_indicate.store(v);
-}
-
-bool ble_ctx_get_hid_host_active(struct Device* device) {
+bool ble_hid_get_host_active(struct Device* device) {
     BleCtx* ctx = ble_get_ctx(device);
     return ctx && ctx->hid_host_active.load();
 }
-bool ble_ctx_get_scan_active(struct Device* device) {
+bool ble_get_scan_active(struct Device* device) {
     BleCtx* ctx = ble_get_ctx(device);
     return ctx && ctx->scan_active.load();
 }
-void ble_ctx_set_scan_active(struct Device* device, bool v) {
+void ble_set_scan_active(struct Device* device, bool v) {
     BleCtx* ctx = ble_get_ctx(device);
     if (ctx) ctx->scan_active.store(v);
-}
-
-error_t ble_ctx_ensure_midi_keepalive(struct Device* device, esp_timer_cb_t cb, uint64_t period_us) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (!ctx) return ERROR_INVALID_STATE;
-    if (ctx->midi_keepalive_timer == nullptr) {
-        esp_timer_create_args_t args = {};
-        args.callback        = cb;
-        args.arg             = device;
-        args.dispatch_method = ESP_TIMER_TASK;
-        args.name            = "ble_midi_as";
-        int rc = esp_timer_create(&args, &ctx->midi_keepalive_timer);
-        if (rc != ESP_OK) {
-            LOG_E(TAG, "midi keepalive timer create failed (rc=%d)", rc);
-            return ERROR_INVALID_STATE;
-        }
-    }
-    int rc = esp_timer_start_periodic(ctx->midi_keepalive_timer, period_us);
-    if (rc != ESP_OK) {
-        LOG_E(TAG, "midi keepalive timer start failed (rc=%d)", rc);
-        return ERROR_INVALID_STATE;
-    }
-    return ERROR_NONE;
-}
-
-void ble_ctx_stop_midi_keepalive(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx && ctx->midi_keepalive_timer != nullptr) {
-        esp_timer_stop(ctx->midi_keepalive_timer);
-    }
 }
 
 // ---- Event publishing ----
@@ -320,7 +183,7 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
             // Skip during shutdown — ble_gatts_reset() is unsafe while nimble_port_stop() runs.
             if (was_hid && !ctx->hid_active.load() && current_hid_profile != BleHidProfile::None &&
                 ctx->radio_state.load() != BT_RADIO_STATE_OFF_PENDING) {
-                ble_hid_device_switch_profile(ctx->hid_device_child, BleHidProfile::None);
+                ble_hid_switch_profile(ctx->hid_device_child, BleHidProfile::None);
             }
             // Restart advertising whenever a service is active without a live connection.
             // Covers both normal disconnect and Windows discovery-only connections.
@@ -560,7 +423,7 @@ static void on_sync() {
     // can retrieve child driver data (BleSppCtx / BleMidiCtx) without globals.
     ble_spp_init_gatt_handles(ctx->serial_child);
     ble_midi_init_gatt_handles(ctx->midi_child);
-    ble_hid_device_init_gatt_handles();
+    ble_hid_init_gatt_handles();
 
     ctx->radio_state.store(BT_RADIO_STATE_ON);
     struct BtEvent e = {};
@@ -798,7 +661,7 @@ static void dispatch_enable(BleCtx* ctx) {
     ble_svc_gatt_init();
 
     // Register base GATT services (NUS + MIDI; HID added by switch_profile when started)
-    ble_hid_device_init_gatt();
+    ble_hid_init_gatt();
 
     ble_svc_gap_device_name_set(ctx->device_name);
     ble_att_set_preferred_mtu(BLE_ATT_MTU_MAX);

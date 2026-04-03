@@ -36,6 +36,63 @@ static const ble_uuid128_t MIDI_IO_UUID = BLE_UUID128_INIT(
 
 uint16_t midi_io_handle;
 
+// ---- MIDI field accessor implementations ----
+
+bool ble_midi_get_active(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
+    return ctx && ctx->midi_active.load();
+}
+void ble_midi_set_active(struct Device* device, bool v) {
+    BleCtx* ctx = ble_get_ctx(device);
+    if (ctx) ctx->midi_active.store(v);
+}
+uint16_t ble_midi_get_conn_handle(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
+    return ctx ? ctx->midi_conn_handle.load() : (uint16_t)BLE_HS_CONN_HANDLE_NONE;
+}
+void ble_midi_set_conn_handle(struct Device* device, uint16_t h) {
+    BleCtx* ctx = ble_get_ctx(device);
+    if (ctx) ctx->midi_conn_handle.store(h);
+}
+bool ble_midi_get_use_indicate(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
+    return ctx && ctx->midi_use_indicate.load();
+}
+void ble_midi_set_use_indicate(struct Device* device, bool v) {
+    BleCtx* ctx = ble_get_ctx(device);
+    if (ctx) ctx->midi_use_indicate.store(v);
+}
+
+error_t ble_midi_ensure_keepalive(struct Device* device, esp_timer_cb_t cb, uint64_t period_us) {
+    BleCtx* ctx = ble_get_ctx(device);
+    if (!ctx) return ERROR_INVALID_STATE;
+    if (ctx->midi_keepalive_timer == nullptr) {
+        esp_timer_create_args_t args = {};
+        args.callback        = cb;
+        args.arg             = device;
+        args.dispatch_method = ESP_TIMER_TASK;
+        args.name            = "ble_midi_as";
+        int rc = esp_timer_create(&args, &ctx->midi_keepalive_timer);
+        if (rc != ESP_OK) {
+            LOG_E(TAG, "midi keepalive timer create failed (rc=%d)", rc);
+            return ERROR_INVALID_STATE;
+        }
+    }
+    int rc = esp_timer_start_periodic(ctx->midi_keepalive_timer, period_us);
+    if (rc != ESP_OK) {
+        LOG_E(TAG, "midi keepalive timer start failed (rc=%d)", rc);
+        return ERROR_INVALID_STATE;
+    }
+    return ERROR_NONE;
+}
+
+void ble_midi_stop_keepalive(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
+    if (ctx && ctx->midi_keepalive_timer != nullptr) {
+        esp_timer_stop(ctx->midi_keepalive_timer);
+    }
+}
+
 // midi_chr_access is called with the midi child Device* (set via ble_midi_init_gatt_handles).
 static int midi_chr_access(uint16_t conn_handle, uint16_t attr_handle,
                            struct ble_gatt_access_ctxt* ctxt, void* arg) {
@@ -84,12 +141,12 @@ void ble_midi_init_gatt_handles(struct Device* midi_child) {
 
 static void midi_keepalive_cb(void* arg) {
     struct Device* device = (struct Device*)arg; // midi child device
-    uint16_t conn = ble_ctx_get_midi_conn_handle(device);
+    uint16_t conn = ble_midi_get_conn_handle(device);
     if (conn == BLE_HS_CONN_HANDLE_NONE) return;
     static const uint8_t as_pkt[3] = { 0x80, 0x80, 0xFE };
     struct os_mbuf* om = ble_hs_mbuf_from_flat(as_pkt, 3);
     if (om == nullptr) return;
-    int rc = ble_ctx_get_midi_use_indicate(device)
+    int rc = ble_midi_get_use_indicate(device)
         ? ble_gatts_indicate_custom(conn, midi_io_handle, om)
         : ble_gatts_notify_custom(conn, midi_io_handle, om);
     if (rc != 0) os_mbuf_free_chain(om);
@@ -99,10 +156,10 @@ static void midi_keepalive_cb(void* arg) {
 // All functions receive the midi child Device*.
 
 static error_t midi_start(struct Device* device) {
-    ble_ctx_set_midi_active(device, true);
+    ble_midi_set_active(device, true);
     // Create 2-second periodic Active Sensing timer to prevent Windows BLE MIDI
     // driver from declaring the connection idle and disconnecting (~8-10 s timeout).
-    error_t rc = ble_ctx_ensure_midi_keepalive(device, midi_keepalive_cb, 2'000'000);
+    error_t rc = ble_midi_ensure_keepalive(device, midi_keepalive_cb, 2'000'000);
     if (rc != ERROR_NONE) return rc;
     ble_start_advertising(device, &MIDI_SVC_UUID);
     return ERROR_NONE;
@@ -113,21 +170,21 @@ error_t ble_midi_start_internal(struct Device* midi_child) {
 }
 
 static error_t midi_stop(struct Device* device) {
-    ble_ctx_set_midi_active(device, false);
-    ble_ctx_stop_midi_keepalive(device);
-    uint16_t conn = ble_ctx_get_midi_conn_handle(device);
+    ble_midi_set_active(device, false);
+    ble_midi_stop_keepalive(device);
+    uint16_t conn = ble_midi_get_conn_handle(device);
     if (conn != BLE_HS_CONN_HANDLE_NONE) {
         ble_gap_terminate(conn, BLE_ERR_REM_USER_CONN_TERM);
-        ble_ctx_set_midi_conn_handle(device, BLE_HS_CONN_HANDLE_NONE);
+        ble_midi_set_conn_handle(device, BLE_HS_CONN_HANDLE_NONE);
     }
-    if (!ble_ctx_get_spp_active(device) && !ble_ctx_get_hid_active(device)) {
+    if (!ble_spp_get_active(device) && !ble_hid_get_active(device)) {
         ble_gap_adv_stop();
     }
     return ERROR_NONE;
 }
 
 static error_t midi_send(struct Device* device, const uint8_t* msg, size_t len) {
-    uint16_t conn = ble_ctx_get_midi_conn_handle(device);
+    uint16_t conn = ble_midi_get_conn_handle(device);
     if (conn == BLE_HS_CONN_HANDLE_NONE) return ERROR_INVALID_STATE;
     // BLE MIDI 2-byte header: [0x80|(ts_high&0x3F)][0x80|(ts_low&0x7F)]
     uint8_t header[2] = { 0x80, 0x80 };
@@ -138,8 +195,8 @@ static error_t midi_send(struct Device* device, const uint8_t* msg, size_t len) 
         LOG_E(TAG, "midi_send: mbuf append failed");
         return ERROR_INVALID_STATE;
     }
-    LOG_I(TAG, "midi_send %u bytes (indicate=%d)", (unsigned)len, (int)ble_ctx_get_midi_use_indicate(device));
-    int rc = ble_ctx_get_midi_use_indicate(device)
+    LOG_I(TAG, "midi_send %u bytes (indicate=%d)", (unsigned)len, (int)ble_midi_get_use_indicate(device));
+    int rc = ble_midi_get_use_indicate(device)
         ? ble_gatts_indicate_custom(conn, midi_io_handle, om)
         : ble_gatts_notify_custom(conn, midi_io_handle, om);
     if (rc != 0) {
@@ -150,7 +207,7 @@ static error_t midi_send(struct Device* device, const uint8_t* msg, size_t len) 
 }
 
 static bool midi_is_connected(struct Device* device) {
-    return ble_ctx_get_midi_conn_handle(device) != BLE_HS_CONN_HANDLE_NONE;
+    return ble_midi_get_conn_handle(device) != BLE_HS_CONN_HANDLE_NONE;
 }
 
 const BtMidiApi nimble_midi_api = {

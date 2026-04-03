@@ -7,9 +7,6 @@
 #if defined(CONFIG_BT_NIMBLE_ENABLED)
 
 #include <tactility/drivers/bluetooth.h>
-#include <tactility/drivers/bluetooth_serial.h>
-#include <tactility/drivers/bluetooth_midi.h>
-#include <tactility/drivers/bluetooth_hid_device.h>
 #include <tactility/error.h>
 // Must be included before any NimBLE header: log_common.h (pulled in by ble_hs.h)
 // defines LOG_LEVEL_* as macros with the same names as tactility/log.h's LogLevel enum.
@@ -29,56 +26,78 @@
 #include <deque>
 #include <vector>
 
-// ---- HID profile selection ----
+// ---- Per-module headers (structs, accessors, sub-API externs) ----
 
-enum class BleHidProfile { None, KbConsumer, Mouse, KbMouse, Gamepad };
+#include <bluetooth/esp32_ble_spp.h>
+#include <bluetooth/esp32_ble_midi.h>
+#include <bluetooth/esp32_ble_hid.h>
 
-// ---- Child device driver data structs ----
-// Each struct is stored as driver data on the corresponding child Device*.
+// ---- BleCtx ----
+// Private shared state for the ESP32 BLE driver.
+// Sub-modules access it exclusively through ble_get_ctx().
 
-struct BleHidDeviceCtx {
-    std::atomic<uint16_t> hid_conn_handle;
+#define BLE_MAX_CALLBACKS 8
+
+struct BleCallbackEntry {
+    BtEventCallback fn;
+    void*           ctx;
 };
 
-struct BleMidiCtx {
-    SemaphoreHandle_t             rx_mutex;
-    std::deque<std::vector<uint8_t>> rx_queue;
+struct BleCtx {
+    // Mutexes
+    SemaphoreHandle_t radio_mutex;  // guards radio state transitions
+    SemaphoreHandle_t cb_mutex;     // guards callbacks array
+
+    // Radio / scan state (atomic — read from multiple tasks)
+    std::atomic<BtRadioState> radio_state;
+    std::atomic<bool>         scan_active;
+    // Set by Tactility HID host to prevent simultaneous central connection during name resolution
+    std::atomic<bool>         hid_host_active;
+
+    // Event callbacks (guarded by cb_mutex)
+    BleCallbackEntry callbacks[BLE_MAX_CALLBACKS];
+    size_t           callback_count;
+
+    // Connection handles + active flags (atomic — accessed from multiple tasks)
+    std::atomic<uint16_t> spp_conn_handle;
+    std::atomic<bool>     spp_active;
+    std::atomic<uint16_t> midi_conn_handle;
+    std::atomic<bool>     midi_active;
+    std::atomic<bool>     midi_use_indicate;  // true when client subscribed for INDICATE (e.g. Windows)
+    std::atomic<bool>     hid_active;
+    std::atomic<bool>     link_encrypted;
+    std::atomic<int>      pending_reset_count;
+
+    // Timers
+    esp_timer_handle_t midi_keepalive_timer; // 2-second periodic Active Sensing
+    esp_timer_handle_t adv_restart_timer;    // one-shot after connect failure (500 ms)
+    // One-shot timer used to dispatch dispatchDisable off the NimBLE host task.
+    // nimble_port_stop() must not be called from the NimBLE host task itself.
+    esp_timer_handle_t disable_timer;
+
+    // BLE device name (set before or after radio enable; applied in dispatch_enable)
+    char device_name[BLE_DEVICE_NAME_MAX + 1];
+
+    // Device reference (passed to BtEventCallback)
+    struct Device* device;
+
+    // Child devices (created by esp32_ble_start_device, destroyed by stop_device)
+    struct Device* serial_child;
+    struct Device* midi_child;
+    struct Device* hid_device_child;
 };
 
-struct BleSppCtx {
-    SemaphoreHandle_t             rx_mutex;
-    std::deque<std::vector<uint8_t>> rx_queue;
-};
+// Always returns the root BLE device's BleCtx regardless of which device is passed.
+BleCtx* ble_get_ctx(struct Device* device);
 
-// ---- BleCtx field accessors (defined in esp32_ble.cpp) ----
-// Work correctly when called with either the parent BLE device or any child device.
+// ---- General field accessors (defined in esp32_ble.cpp) ----
 
-BtRadioState ble_ctx_get_radio_state(struct Device* device);
+BtRadioState ble_get_radio_state(struct Device* device);
 
-bool     ble_ctx_get_hid_active(struct Device* device);
-void     ble_ctx_set_hid_active(struct Device* device, bool v);
+bool ble_hid_get_host_active(struct Device* device);
 
-bool     ble_ctx_get_spp_active(struct Device* device);
-void     ble_ctx_set_spp_active(struct Device* device, bool v);
-uint16_t ble_ctx_get_spp_conn_handle(struct Device* device);
-void     ble_ctx_set_spp_conn_handle(struct Device* device, uint16_t h);
-
-bool     ble_ctx_get_midi_active(struct Device* device);
-void     ble_ctx_set_midi_active(struct Device* device, bool v);
-uint16_t ble_ctx_get_midi_conn_handle(struct Device* device);
-void     ble_ctx_set_midi_conn_handle(struct Device* device, uint16_t h);
-bool     ble_ctx_get_midi_use_indicate(struct Device* device);
-void     ble_ctx_set_midi_use_indicate(struct Device* device, bool v);
-
-bool     ble_ctx_get_hid_host_active(struct Device* device);
-bool     ble_ctx_get_scan_active(struct Device* device);
-void     ble_ctx_set_scan_active(struct Device* device, bool v);
-
-// MIDI keepalive timer helpers — timer handle lives in BleCtx.
-// ble_ctx_ensure_midi_keepalive creates the timer if needed and starts it periodically.
-// ble_ctx_stop_midi_keepalive stops (but does not delete) the timer.
-error_t ble_ctx_ensure_midi_keepalive(struct Device* device, esp_timer_cb_t cb, uint64_t period_us);
-void    ble_ctx_stop_midi_keepalive(struct Device* device);
+bool ble_get_scan_active(struct Device* device);
+void ble_set_scan_active(struct Device* device, bool v);
 
 // ---- Scan data management (defined in esp32_ble_scan.cpp) ----
 void ble_scan_init();
@@ -107,12 +126,6 @@ error_t ble_spp_start_internal(struct Device* serial_child);
 void    ble_midi_init_gatt_handles(struct Device* midi_child);
 error_t ble_midi_start_internal(struct Device* midi_child);
 
-// ---- HID device GATT (defined in esp32_ble_hid_device.cpp) ----
-void ble_hid_device_init_gatt();
-void ble_hid_device_init_gatt_handles();
-// device must be the hid_device child Device*.
-void ble_hid_device_switch_profile(struct Device* hid_child, BleHidProfile profile);
-
 // ---- Cross-module GATT char / service arrays ----
 // Non-const: the .arg field is set to the child Device* at init time so that
 // NimBLE access callbacks can retrieve the context without a global pointer.
@@ -126,20 +139,15 @@ extern const ble_uuid128_t MIDI_SVC_UUID;  // esp32_ble_midi.cpp
 // ---- Cross-module GATT handle variables ----
 extern uint16_t nus_tx_handle;              // esp32_ble_spp.cpp
 extern uint16_t midi_io_handle;             // esp32_ble_midi.cpp
-extern uint16_t hid_kb_input_handle;        // esp32_ble_hid_device.cpp
-extern uint16_t hid_consumer_input_handle;  // esp32_ble_hid_device.cpp
-extern uint16_t hid_mouse_input_handle;     // esp32_ble_hid_device.cpp
-extern uint16_t hid_gamepad_input_handle;   // esp32_ble_hid_device.cpp
+extern uint16_t hid_kb_input_handle;        // esp32_ble_hid.cpp
+extern uint16_t hid_consumer_input_handle;  // esp32_ble_hid.cpp
+extern uint16_t hid_mouse_input_handle;     // esp32_ble_hid.cpp
+extern uint16_t hid_gamepad_input_handle;   // esp32_ble_hid.cpp
 
 // ---- HID active report map / appearance ----
-extern const uint8_t* active_hid_rpt_map;    // esp32_ble_hid_device.cpp
-extern size_t         active_hid_rpt_map_len; // esp32_ble_hid_device.cpp
-extern uint16_t       hid_appearance;         // esp32_ble_hid_device.cpp
-extern BleHidProfile  current_hid_profile;    // esp32_ble_hid_device.cpp
-
-// ---- Cross-module sub-API structs ----
-extern const BtHidDeviceApi nimble_hid_device_api; // esp32_ble_hid_device.cpp
-extern const BtSerialApi    nimble_serial_api;     // esp32_ble_spp.cpp
-extern const BtMidiApi      nimble_midi_api;       // esp32_ble_midi.cpp
+extern const uint8_t* active_hid_rpt_map;    // esp32_ble_hid.cpp
+extern size_t         active_hid_rpt_map_len; // esp32_ble_hid.cpp
+extern uint16_t       hid_appearance;         // esp32_ble_hid.cpp
+extern BleHidProfile  current_hid_profile;    // esp32_ble_hid.cpp
 
 #endif // CONFIG_BT_NIMBLE_ENABLED

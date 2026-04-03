@@ -204,10 +204,10 @@ void ble_resolve_next_unnamed_peer(struct Device* device, size_t start_idx) {
 
     // Skip if a profile server or HID host connection attempt is active —
     // initiating a central connection simultaneously would fail (BLE_HS_EALREADY).
-    if (ble_ctx_get_midi_active(device) || ble_ctx_get_spp_active(device) ||
-        ble_ctx_get_hid_active(device)  || ble_ctx_get_hid_host_active(device)) {
+    if (ble_midi_get_active(device) || ble_spp_get_active(device) ||
+        ble_hid_get_active(device)  || ble_hid_get_host_active(device)) {
         LOG_I(TAG, "Name resolution: skipping (server or HID host active)");
-        ble_ctx_set_scan_active(device, false);
+        ble_set_scan_active(device, false);
         struct BtEvent e = {};
         e.type = BT_EVENT_SCAN_FINISHED;
         ble_publish_event(device, e);
@@ -233,7 +233,7 @@ void ble_resolve_next_unnamed_peer(struct Device* device, size_t start_idx) {
 
         if (!found) {
             LOG_I(TAG, "Name resolution: complete (%u devices)", (unsigned)i);
-            ble_ctx_set_scan_active(device, false);
+            ble_set_scan_active(device, false);
             struct BtEvent e = {};
             e.type = BT_EVENT_SCAN_FINISHED;
             ble_publish_event(device, e);

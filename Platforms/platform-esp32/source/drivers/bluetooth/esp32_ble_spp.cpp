@@ -91,11 +91,30 @@ void ble_spp_init_gatt_handles(struct Device* serial_child) {
     nus_chars_with_handle[1].arg = serial_child;
 }
 
+// ---- SPP field accessor implementations ----
+
+bool ble_spp_get_active(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
+    return ctx && ctx->spp_active.load();
+}
+void ble_spp_set_active(struct Device* device, bool v) {
+    BleCtx* ctx = ble_get_ctx(device);
+    if (ctx) ctx->spp_active.store(v);
+}
+uint16_t ble_spp_get_conn_handle(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
+    return ctx ? ctx->spp_conn_handle.load() : (uint16_t)BLE_HS_CONN_HANDLE_NONE;
+}
+void ble_spp_set_conn_handle(struct Device* device, uint16_t h) {
+    BleCtx* ctx = ble_get_ctx(device);
+    if (ctx) ctx->spp_conn_handle.store(h);
+}
+
 // ---- SPP sub-API implementations ----
 // All functions receive the serial child Device*.
 
 static error_t spp_start(struct Device* device) {
-    ble_ctx_set_spp_active(device, true);
+    ble_spp_set_active(device, true);
     ble_start_advertising(device, &NUS_SVC_UUID);
     return ERROR_NONE;
 }
@@ -105,22 +124,22 @@ error_t ble_spp_start_internal(struct Device* serial_child) {
 }
 
 static error_t spp_stop(struct Device* device) {
-    ble_ctx_set_spp_active(device, false);
-    uint16_t conn = ble_ctx_get_spp_conn_handle(device);
+    ble_spp_set_active(device, false);
+    uint16_t conn = ble_spp_get_conn_handle(device);
     if (conn != BLE_HS_CONN_HANDLE_NONE) {
         ble_gap_terminate(conn, BLE_ERR_REM_USER_CONN_TERM);
-        ble_ctx_set_spp_conn_handle(device, BLE_HS_CONN_HANDLE_NONE);
+        ble_spp_set_conn_handle(device, BLE_HS_CONN_HANDLE_NONE);
     }
     // Do NOT restart advertising after user-initiated stop — restarting name-only
     // advertising causes bonded Windows hosts to auto-reconnect in a tight loop.
-    if (!ble_ctx_get_midi_active(device) && !ble_ctx_get_hid_active(device)) {
+    if (!ble_midi_get_active(device) && !ble_hid_get_active(device)) {
         ble_gap_adv_stop();
     }
     return ERROR_NONE;
 }
 
 static error_t spp_write(struct Device* device, const uint8_t* data, size_t len, size_t* written) {
-    uint16_t conn = ble_ctx_get_spp_conn_handle(device);
+    uint16_t conn = ble_spp_get_conn_handle(device);
     if (conn == BLE_HS_CONN_HANDLE_NONE) {
         if (written) *written = 0;
         return ERROR_INVALID_STATE;
@@ -162,7 +181,7 @@ static error_t spp_read(struct Device* device, uint8_t* data, size_t max_len, si
 }
 
 static bool spp_is_connected(struct Device* device) {
-    return ble_ctx_get_spp_conn_handle(device) != BLE_HS_CONN_HANDLE_NONE;
+    return ble_spp_get_conn_handle(device) != BLE_HS_CONN_HANDLE_NONE;
 }
 
 const BtSerialApi nimble_serial_api = {
