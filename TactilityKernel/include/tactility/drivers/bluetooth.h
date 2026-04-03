@@ -283,7 +283,7 @@ extern const struct DeviceType BLUETOOTH_TYPE;
  * since data symbols may not be exported by the ELF loader.
  * @return the first ready Device of BLUETOOTH_TYPE, or NULL if none found.
  */
-struct Device* bluetooth_get_device(void);
+struct Device* bluetooth_find_first_ready_device(void);
 
 error_t bluetooth_get_radio_state(struct Device* device, enum BtRadioState* state);
 error_t bluetooth_set_radio_enabled(struct Device* device, bool enabled);

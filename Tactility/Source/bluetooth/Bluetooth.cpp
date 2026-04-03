@@ -166,7 +166,7 @@ static void bt_event_bridge(struct Device* /*device*/, void* /*context*/, struct
                     std::array<uint8_t, 6> peer_addr;
                     memcpy(peer_addr.data(), addr_buf, 6);
                     const auto hex = settings::addrToHex(peer_addr);
-                    if (!settings::contains(hex)) {
+                    if (!settings::hasFileForDevice(hex)) {
                         settings::PairedDevice dev;
                         dev.addr        = peer_addr;
                         dev.name        = "";

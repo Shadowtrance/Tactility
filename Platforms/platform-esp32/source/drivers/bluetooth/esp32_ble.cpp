@@ -48,7 +48,7 @@ BleCtx* ble_get_ctx(struct Device* /*device*/) {
 }
 
 // ---- Forward declarations ----
-static void ble_host_task(void* param);
+static void host_task(void* param);
 static void on_sync();
 static void on_reset(int reason);
 static void dispatch_enable(BleCtx* ctx);
@@ -460,7 +460,7 @@ static void on_reset(int reason) {
     }
 }
 
-static void ble_host_task(void* param) {
+static void host_task(void* param) {
     LOG_I(TAG, "BLE host task started");
     nimble_port_run();
     // nimble_port_deinit() is called by dispatch_disable() after nimble_port_stop() returns.
@@ -667,7 +667,7 @@ static void dispatch_enable(BleCtx* ctx) {
     ble_att_set_preferred_mtu(BLE_ATT_MTU_MAX);
 
     // Start NimBLE host task (on_sync will fire when ready)
-    nimble_port_freertos_init(ble_host_task);
+    nimble_port_freertos_init(host_task);
 }
 
 static void dispatch_disable(BleCtx* ctx) {

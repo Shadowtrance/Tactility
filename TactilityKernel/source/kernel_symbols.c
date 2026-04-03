@@ -122,7 +122,7 @@ const struct ModuleSymbol KERNEL_SYMBOLS[] = {
     DEFINE_MODULE_SYMBOL(uart_controller_flush_input),
     DEFINE_MODULE_SYMBOL(UART_CONTROLLER_TYPE),
     // drivers/bluetooth
-    DEFINE_MODULE_SYMBOL(bluetooth_get_device),
+    DEFINE_MODULE_SYMBOL(bluetooth_find_first_ready_device),
     DEFINE_MODULE_SYMBOL(bluetooth_get_radio_state),
     DEFINE_MODULE_SYMBOL(bluetooth_set_radio_enabled),
     DEFINE_MODULE_SYMBOL(bluetooth_scan_start),

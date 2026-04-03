@@ -8,7 +8,7 @@ extern "C" {
 
 // ---- Device lookup ----
 
-struct Device* bluetooth_get_device() {
+struct Device* bluetooth_find_first_ready_device() {
     struct Device* found = nullptr;
     device_for_each_of_type(&BLUETOOTH_TYPE, &found, [](struct Device* dev, void* ctx) -> bool {
         if (device_is_ready(dev)) {

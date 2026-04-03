@@ -32,10 +32,6 @@
 #include <bluetooth/esp32_ble_midi.h>
 #include <bluetooth/esp32_ble_hid.h>
 
-// ---- BleCtx ----
-// Private shared state for the ESP32 BLE driver.
-// Sub-modules access it exclusively through ble_get_ctx().
-
 #define BLE_MAX_CALLBACKS 8
 
 struct BleCallbackEntry {

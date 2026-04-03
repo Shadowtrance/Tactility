@@ -1,6 +1,6 @@
 description: ESP32 BLE driver (NimBLE)
 
-compatible: "esp32,ble-nimble"
+compatible: "esp32,ble"
 
 properties:
   _unused:

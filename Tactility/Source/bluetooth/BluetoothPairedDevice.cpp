@@ -55,7 +55,7 @@ static std::string getFilePath(const std::string& addr_hex) {
     return std::format(DEVICE_SETTINGS_FORMAT, DATA_DIR, addr_hex);
 }
 
-bool contains(const std::string& addr_hex) {
+bool hasFileForDevice(const std::string& addr_hex) {
     return file::isFile(getFilePath(addr_hex));
 }
 

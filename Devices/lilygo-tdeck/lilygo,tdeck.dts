@@ -4,7 +4,7 @@
 #include <tactility/bindings/esp32_gpio.h>
 #include <tactility/bindings/esp32_i2c.h>
 #include <tactility/bindings/esp32_i2s.h>
-#include <tactility/bindings/esp32_ble_nimble.h>
+#include <tactility/bindings/esp32_ble.h>
 #include <tactility/bindings/esp32_spi.h>
 #include <tactility/bindings/esp32_uart.h>
 
@@ -14,7 +14,7 @@
 	model = "LilyGO T-Deck";
 
 	ble0 {
-		compatible = "esp32,ble-nimble";
+		compatible = "esp32,ble";
 	};
 
 	gpio0 {

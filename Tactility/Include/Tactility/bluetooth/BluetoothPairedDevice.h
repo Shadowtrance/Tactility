@@ -17,7 +17,7 @@ struct PairedDevice {
 
 std::string addrToHex(const std::array<uint8_t, 6>& addr);
 
-bool contains(const std::string& addr_hex);
+bool hasFileForDevice(const std::string& addr_hex);
 
 bool load(const std::string& addr_hex, PairedDevice& device);
 

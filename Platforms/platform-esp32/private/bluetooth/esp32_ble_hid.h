@@ -11,7 +11,7 @@
 #include <atomic>
 #include <cstdint>
 
-enum class BleHidProfile { None, KbConsumer, Mouse, KbMouse, Gamepad };
+enum BleHidProfile { None, KbConsumer, Mouse, KbMouse, Gamepad };
 
 struct BleHidDeviceCtx {
     std::atomic<uint16_t> hid_conn_handle;
