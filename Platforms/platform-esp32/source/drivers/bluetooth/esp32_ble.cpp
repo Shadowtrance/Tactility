@@ -32,19 +32,29 @@
 // ble_store_config_init() is not declared in the public header in some IDF versions.
 extern "C" void ble_store_config_init(void);
 
-// File-static device pointer used only by NimBLE host callbacks whose signature
+// Sub-module API structs (defined in their respective cpp files).
+extern const BtHidDeviceApi nimble_hid_device_api;
+extern const BtSerialApi nimble_serial_api;
+extern const BtMidiApi   nimble_midi_api;
+
+// File-static BleCtx pointer used only by NimBLE host callbacks whose signature
 // is fixed by the NimBLE API (on_sync, on_reset) and cannot carry a Device*.
 // All other callbacks receive Device* via their void* arg parameter.
-static struct Device* s_device = nullptr;
+static BleCtx* s_ctx = nullptr;
 
 // ---- Context accessor ----
-// Always returns the root BLE device's BleCtx regardless of which device is passed
-// (root, child, or grandchild). Using s_device directly avoids device-tree traversal
-// ambiguity: the root BLE device may itself have a parent in the device tree, and
-// walking up from it would land on the wrong node.
+// Returns the BleCtx for any BLE device (root or child).
+// If device is the root BLE device (BLUETOOTH_TYPE) its driver_data IS the BleCtx.
+// If device is a child BLE device its parent is the root BLE device.
+// We must NOT use device_get_parent blindly: the DTS root node is the parent of ble0,
+// so device_get_parent(ble0) returns a non-null node whose driver_data is not BleCtx.
 
-BleCtx* ble_get_ctx(struct Device* /*device*/) {
-    return s_device ? (BleCtx*)device_get_driver_data(s_device) : nullptr;
+BleCtx* ble_get_ctx(struct Device* device) {
+    if (device_get_type(device) == &BLUETOOTH_TYPE) {
+        return (BleCtx*)device_get_driver_data(device);
+    }
+    struct Device* parent = device_get_parent(device);
+    return parent ? (BleCtx*)device_get_driver_data(parent) : nullptr;
 }
 
 // ---- Forward declarations ----
@@ -58,21 +68,17 @@ static int  gap_event_handler(struct ble_gap_event* event, void* arg);
 // ---- General field accessor implementations ----
 
 BtRadioState ble_get_radio_state(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx ? ctx->radio_state.load() : BT_RADIO_STATE_OFF;
+    return ble_get_ctx(device)->radio_state.load();
 }
 
 bool ble_hid_get_host_active(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx && ctx->hid_host_active.load();
+    return ble_get_ctx(device)->hid_host_active.load();
 }
 bool ble_get_scan_active(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx && ctx->scan_active.load();
+    return ble_get_ctx(device)->scan_active.load();
 }
 void ble_set_scan_active(struct Device* device, bool v) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->scan_active.store(v);
+    ble_get_ctx(device)->scan_active.store(v);
 }
 
 // ---- Event publishing ----
@@ -97,11 +103,9 @@ void ble_publish_event(struct Device* device, struct BtEvent event) {
 static void adv_restart_callback(void* arg) {
     struct Device* device = (struct Device*)arg;
     BleCtx* ctx = ble_get_ctx(device);
-    if (ctx == nullptr || ctx->radio_state.load() != BT_RADIO_STATE_ON) return;
+    if (ctx->radio_state.load() != BT_RADIO_STATE_ON) return;
 
-    BleHidDeviceCtx* hid_ctx = ctx->hid_device_child
-        ? (BleHidDeviceCtx*)device_get_driver_data(ctx->hid_device_child) : nullptr;
-    uint16_t hid_conn = hid_ctx ? hid_ctx->hid_conn_handle.load() : (uint16_t)BLE_HS_CONN_HANDLE_NONE;
+    uint16_t hid_conn = ble_hid_get_conn_handle(ctx->hid_device_child);
 
     if (ctx->midi_active.load() && ctx->midi_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
         ble_start_advertising(device, &MIDI_SVC_UUID);
@@ -142,11 +146,6 @@ void ble_schedule_adv_restart(struct Device* device, uint64_t delay_us) {
 static int gap_event_handler(struct ble_gap_event* event, void* arg) {
     struct Device* device = (struct Device*)arg;
     BleCtx* ctx = ble_get_ctx(device);
-    if (ctx == nullptr) return 0;
-
-    // Resolve HID device child context once for the whole handler.
-    BleHidDeviceCtx* hid_ctx = ctx->hid_device_child
-        ? (BleHidDeviceCtx*)device_get_driver_data(ctx->hid_device_child) : nullptr;
 
     switch (event->type) {
         case BLE_GAP_EVENT_CONNECT:
@@ -154,7 +153,7 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
                 LOG_I(TAG, "Connected (handle=%u hid_active=%d hid_conn=%u)",
                          event->connect.conn_handle,
                          (int)ctx->hid_active.load(),
-                         (unsigned)(hid_ctx ? hid_ctx->hid_conn_handle.load() : BLE_HS_CONN_HANDLE_NONE));
+                         (unsigned)ble_hid_get_conn_handle(ctx->hid_device_child));
                 // Do NOT call ble_gap_security_initiate() here.
                 // Windows BLE MIDI initiates encryption itself; calling here creates a race
                 // with REPEAT_PAIRING+RETRY → two concurrent SM procedures → disconnect.
@@ -172,10 +171,10 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
             uint16_t hdl = event->disconnect.conn.conn_handle;
             bool was_spp  = (ctx->spp_conn_handle.load()  == hdl);
             bool was_midi = (ctx->midi_conn_handle.load() == hdl);
-            bool was_hid  = hid_ctx && (hid_ctx->hid_conn_handle.load() == hdl);
+            bool was_hid  = (ble_hid_get_conn_handle(ctx->hid_device_child) == hdl);
             if (was_spp)  ctx->spp_conn_handle.store(BLE_HS_CONN_HANDLE_NONE);
             if (was_midi) { ctx->midi_conn_handle.store(BLE_HS_CONN_HANDLE_NONE); ctx->midi_use_indicate.store(false); }
-            if (was_hid && hid_ctx) hid_ctx->hid_conn_handle.store(BLE_HS_CONN_HANDLE_NONE);
+            if (was_hid)  ble_hid_set_conn_handle(ctx->hid_device_child, BLE_HS_CONN_HANDLE_NONE);
             ctx->link_encrypted.store(false);
             // If HID was stopped while connected, switch profile to None now that the
             // connection is gone. ble_gatts_mutable() is true here (no active connection,
@@ -191,7 +190,7 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
             // and calling ble_gap_adv_start() from within the NimBLE host task while the
             // controller is shutting down would block the host task and hang nimble_port_stop().
             if (ctx->radio_state.load() != BT_RADIO_STATE_OFF_PENDING) {
-                uint16_t hid_conn_now = hid_ctx ? hid_ctx->hid_conn_handle.load() : (uint16_t)BLE_HS_CONN_HANDLE_NONE;
+                uint16_t hid_conn_now = ble_hid_get_conn_handle(ctx->hid_device_child);
                 if (ctx->midi_active.load() && ctx->midi_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
                     ble_start_advertising(device, &MIDI_SVC_UUID);
                 } else if (ctx->spp_active.load() && ctx->spp_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
@@ -288,8 +287,8 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
                 }
                 LOG_I(TAG, "HID CCCD subscribed: %s (attr=%u conn=%u)",
                          rpt_name, event->subscribe.attr_handle, event->subscribe.conn_handle);
-                if (hid_ctx && hid_ctx->hid_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
-                    hid_ctx->hid_conn_handle.store(event->subscribe.conn_handle);
+                if (ble_hid_get_conn_handle(ctx->hid_device_child) == BLE_HS_CONN_HANDLE_NONE) {
+                    ble_hid_set_conn_handle(ctx->hid_device_child, event->subscribe.conn_handle);
                 }
             }
             break;
@@ -323,9 +322,9 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
                 // Windows only writes HID CCCDs in Phase 2; NimBLE may restore them from NVS
                 // silently (no SUBSCRIBE event). Without this, hid_conn_handle stays NONE
                 // and hid_device_is_connected() returns false for the entire Phase 2 session.
-                if (ctx->hid_active.load() && hid_ctx &&
-                    hid_ctx->hid_conn_handle.load() == BLE_HS_CONN_HANDLE_NONE) {
-                    hid_ctx->hid_conn_handle.store(event->enc_change.conn_handle);
+                if (ctx->hid_active.load() &&
+                    ble_hid_get_conn_handle(ctx->hid_device_child) == BLE_HS_CONN_HANDLE_NONE) {
+                    ble_hid_set_conn_handle(ctx->hid_device_child, event->enc_change.conn_handle);
                     LOG_I(TAG, "HID conn handle set on ENC_CHANGE (conn=%u)",
                              event->enc_change.conn_handle);
                 }
@@ -408,7 +407,7 @@ static void on_sync() {
              nus_tx_handle, midi_io_handle,
              hid_kb_input_handle, hid_consumer_input_handle,
              hid_mouse_input_handle, hid_gamepad_input_handle);
-    BleCtx* ctx = ble_get_ctx(s_device);
+    BleCtx* ctx = s_ctx;
     if (ctx == nullptr) return;
 
     ctx->pending_reset_count.store(0);
@@ -423,18 +422,17 @@ static void on_sync() {
     // can retrieve child driver data (BleSppCtx / BleMidiCtx) without globals.
     ble_spp_init_gatt_handles(ctx->serial_child);
     ble_midi_init_gatt_handles(ctx->midi_child);
-    ble_hid_init_gatt_handles();
 
     ctx->radio_state.store(BT_RADIO_STATE_ON);
     struct BtEvent e = {};
     e.type = BT_EVENT_RADIO_STATE_CHANGED;
     e.radio_state = BT_RADIO_STATE_ON;
-    ble_publish_event(s_device, e);
+    ble_publish_event(ctx->device, e);
 
     // The Tactility bridge handles auto-start (SPP/MIDI) in response to
     // BT_EVENT_RADIO_STATE_CHANGED(ON). We just start name-only advertising
     // so the device is visible immediately.
-    ble_start_advertising(s_device, nullptr);
+    ble_start_advertising(ctx->device, nullptr);
 }
 
 static void dispatch_disable_timer_cb(void* arg) {
@@ -444,7 +442,7 @@ static void dispatch_disable_timer_cb(void* arg) {
 
 static void on_reset(int reason) {
     LOG_W(TAG, "NimBLE host reset (reason=%d)", reason);
-    BleCtx* ctx = ble_get_ctx(s_device);
+    BleCtx* ctx = s_ctx;
     if (ctx == nullptr) return;
 
     if (ctx->radio_state.load() == BT_RADIO_STATE_ON_PENDING) {
@@ -704,10 +702,7 @@ static void dispatch_disable(BleCtx* ctx) {
     active_hid_rpt_map_len = 0;
 
     // Clear hid_conn_handle in the child device driver data if still alive.
-    if (ctx->hid_device_child != nullptr) {
-        BleHidDeviceCtx* hid_ctx = (BleHidDeviceCtx*)device_get_driver_data(ctx->hid_device_child);
-        if (hid_ctx) hid_ctx->hid_conn_handle.store(BLE_HS_CONN_HANDLE_NONE);
-    }
+    ble_hid_set_conn_handle(ctx->hid_device_child, BLE_HS_CONN_HANDLE_NONE);
 
     if (ctx->midi_keepalive_timer != nullptr) {
         esp_timer_stop(ctx->midi_keepalive_timer);
@@ -764,7 +759,7 @@ static error_t api_scan_start(struct Device* device) {
         return ERROR_INVALID_STATE;
     }
 
-    ble_scan_clear_results();
+    ble_scan_clear_results(device);
 
     struct ble_gap_disc_params disc_params = {};
     disc_params.passive         = 0;
@@ -944,88 +939,10 @@ const BluetoothApi nimble_bluetooth_api = {
     .fire_event             = api_fire_event,
 };
 
-// ---- Child device lifecycle functions ----
-// Serial (SPP) and MIDI children create/destroy their driver data (BleSppCtx / BleMidiCtx)
-// in their device start/stop lifecycle functions.  The HID device child manages its own
-// driver data (BleHidDeviceCtx) in the API hid_device_start/stop functions.
-
-static error_t esp32_ble_serial_start_device(struct Device* device) {
-    BleSppCtx* sctx = new BleSppCtx();
-    sctx->rx_mutex = xSemaphoreCreateMutex();
-    device_set_driver_data(device, sctx);
-    return ERROR_NONE;
-}
-
-static error_t esp32_ble_serial_stop_device(struct Device* device) {
-    BleSppCtx* sctx = (BleSppCtx*)device_get_driver_data(device);
-    if (sctx != nullptr) {
-        vSemaphoreDelete(sctx->rx_mutex);
-        delete sctx;
-        device_set_driver_data(device, nullptr);
-    }
-    return ERROR_NONE;
-}
-
-static error_t esp32_ble_midi_start_device(struct Device* device) {
-    BleMidiCtx* mctx = new BleMidiCtx();
-    mctx->rx_mutex = xSemaphoreCreateMutex();
-    device_set_driver_data(device, mctx);
-    return ERROR_NONE;
-}
-
-static error_t esp32_ble_midi_stop_device(struct Device* device) {
-    BleMidiCtx* mctx = (BleMidiCtx*)device_get_driver_data(device);
-    if (mctx != nullptr) {
-        vSemaphoreDelete(mctx->rx_mutex);
-        delete mctx;
-        device_set_driver_data(device, nullptr);
-    }
-    return ERROR_NONE;
-}
-
-static error_t esp32_ble_hid_device_stop_device(struct Device* device) {
-    // Safety cleanup: free any BleHidDeviceCtx that was not deleted by hid_device_stop()
-    // (e.g. if the BLE device is stopped while HID is still connected).
-    BleHidDeviceCtx* hid_ctx = (BleHidDeviceCtx*)device_get_driver_data(device);
-    delete hid_ctx; // safe even if nullptr
-    device_set_driver_data(device, nullptr);
-    return ERROR_NONE;
-}
-
 // ---- Driver definitions ----
-
-static Driver esp32_ble_serial_driver = {
-    .name         = "esp32-ble-serial",
-    .compatible   = nullptr,
-    .start_device = esp32_ble_serial_start_device,
-    .stop_device  = esp32_ble_serial_stop_device,
-    .api          = &nimble_serial_api,
-    .device_type  = &BLUETOOTH_SERIAL_TYPE,
-    .owner        = nullptr,
-    .internal     = nullptr,
-};
-
-static Driver esp32_ble_midi_driver = {
-    .name         = "esp32-ble-midi",
-    .compatible   = nullptr,
-    .start_device = esp32_ble_midi_start_device,
-    .stop_device  = esp32_ble_midi_stop_device,
-    .api          = &nimble_midi_api,
-    .device_type  = &BLUETOOTH_MIDI_TYPE,
-    .owner        = nullptr,
-    .internal     = nullptr,
-};
-
-static Driver esp32_ble_hid_device_driver = {
-    .name         = "esp32-ble-hid-device",
-    .compatible   = nullptr,
-    .start_device = nullptr,
-    .stop_device  = esp32_ble_hid_device_stop_device,
-    .api          = &nimble_hid_device_api,
-    .device_type  = &BLUETOOTH_HID_DEVICE_TYPE,
-    .owner        = nullptr,
-    .internal     = nullptr,
-};
+// Child driver structs (esp32_ble_serial_driver, esp32_ble_midi_driver,
+// esp32_ble_hid_device_driver) are defined in their respective sub-module files
+// and declared extern in esp32_ble_internal.h.
 
 // ---- Driver lifecycle ----
 
@@ -1049,15 +966,6 @@ static void destroy_child_device(struct Device*& child) {
 }
 
 static error_t esp32_ble_start_device(struct Device* device) {
-    // Construct child drivers once (they are static; DriverInternal persists for process lifetime).
-    static bool child_drivers_constructed = false;
-    if (!child_drivers_constructed) {
-        driver_construct(&esp32_ble_serial_driver);
-        driver_construct(&esp32_ble_midi_driver);
-        driver_construct(&esp32_ble_hid_device_driver);
-        child_drivers_constructed = true;
-    }
-
     BleCtx* ctx = new BleCtx();
     ctx->radio_mutex = xSemaphoreCreateRecursiveMutex();
     ctx->cb_mutex    = xSemaphoreCreateMutex();
@@ -1085,6 +993,9 @@ static error_t esp32_ble_start_device(struct Device* device) {
     ctx->serial_child         = nullptr;
     ctx->midi_child           = nullptr;
     ctx->hid_device_child     = nullptr;
+    ctx->scan_mutex           = xSemaphoreCreateMutex();
+    ctx->scan_count           = 0;
+    memset(ctx->scan_results, 0, sizeof(ctx->scan_results));
 
     // Create the disable timer used to dispatch dispatchDisable off the NimBLE host task.
     esp_timer_create_args_t disable_args = {};
@@ -1098,9 +1009,7 @@ static error_t esp32_ble_start_device(struct Device* device) {
     }
 
     device_set_driver_data(device, ctx);
-    s_device = device;
-
-    ble_scan_init();
+    s_ctx = ctx;
 
     // Create child devices for the serial, MIDI and HID device profiles.
     // device_start() on each child will invoke start_device (for serial/midi)
@@ -1127,7 +1036,10 @@ static error_t esp32_ble_stop_device(struct Device* device) {
         dispatch_disable(ctx);
     }
 
-    ble_scan_deinit();
+    if (ctx->scan_mutex != nullptr) {
+        vSemaphoreDelete(ctx->scan_mutex);
+        ctx->scan_mutex = nullptr;
+    }
 
     if (ctx->disable_timer != nullptr) {
         esp_timer_stop(ctx->disable_timer);
@@ -1135,7 +1047,7 @@ static error_t esp32_ble_stop_device(struct Device* device) {
         ctx->disable_timer = nullptr;
     }
 
-    s_device = nullptr;
+    s_ctx = nullptr;
     device_set_driver_data(device, nullptr);
     delete ctx;
     return ERROR_NONE;
@@ -1143,7 +1055,7 @@ static error_t esp32_ble_stop_device(struct Device* device) {
 
 // ---- Driver registration ----
 
-static const char* esp32_bt_compatible[] = { "esp32,ble-nimble", nullptr };
+static const char* esp32_bt_compatible[] = { "esp32,ble", nullptr };
 
 Driver esp32_bluetooth_driver = {
     .name         = "esp32-bluetooth",

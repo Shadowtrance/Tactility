@@ -16,10 +16,19 @@
 
 #define TAG "esp32_ble_hid"
 #include <tactility/device.h>
+#include <tactility/driver.h>
 #include <tactility/log.h>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+
+// ---- HID device context (stored as driver data of the HID device child) ----
+
+#include <atomic>
+
+struct BleHidDeviceCtx {
+    std::atomic<uint16_t> hid_conn_handle;
+};
 
 // ---- Module globals ----
 
@@ -301,13 +310,25 @@ static const struct ble_gatt_svc_def gatt_svcs_gamepad[] = {
 
 // ---- HID field accessor implementations ----
 
+static BleCtx* hid_root_ctx(struct Device* device) {
+    return ble_get_ctx(device);
+}
+
 bool ble_hid_get_active(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx && ctx->hid_active.load();
+    return hid_root_ctx(device)->hid_active.load();
 }
 void ble_hid_set_active(struct Device* device, bool v) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->hid_active.store(v);
+    hid_root_ctx(device)->hid_active.store(v);
+}
+uint16_t ble_hid_get_conn_handle(struct Device* device) {
+    if (device == nullptr) return (uint16_t)BLE_HS_CONN_HANDLE_NONE;
+    BleHidDeviceCtx* hid_ctx = (BleHidDeviceCtx*)device_get_driver_data(device);
+    return hid_ctx ? hid_ctx->hid_conn_handle.load() : (uint16_t)BLE_HS_CONN_HANDLE_NONE;
+}
+void ble_hid_set_conn_handle(struct Device* device, uint16_t h) {
+    if (device == nullptr) return;
+    BleHidDeviceCtx* hid_ctx = (BleHidDeviceCtx*)device_get_driver_data(device);
+    if (hid_ctx) hid_ctx->hid_conn_handle.store(h);
 }
 
 // ---- GATT profile switch ----
@@ -385,15 +406,6 @@ void ble_hid_init_gatt() {
             LOG_E(TAG, "gatts_add_svcs failed (rc=%d)", rc);
         }
     }
-}
-
-void ble_hid_init_gatt_handles() {
-    // val_handle pointers in char arrays are updated by NimBLE at registration time.
-    // No explicit action needed here; called for symmetry with spp/midi init.
-    (void)hid_kb_input_handle;
-    (void)hid_consumer_input_handle;
-    (void)hid_mouse_input_handle;
-    (void)hid_gamepad_input_handle;
 }
 
 // ---- HID Device sub-API implementations ----
@@ -520,7 +532,7 @@ static bool hid_device_is_connected(struct Device* device) {
     return hid_ctx != nullptr && hid_ctx->hid_conn_handle.load() != BLE_HS_CONN_HANDLE_NONE;
 }
 
-const BtHidDeviceApi nimble_hid_device_api = {
+extern const BtHidDeviceApi nimble_hid_device_api = {
     .start         = hid_device_start,
     .stop          = hid_device_stop,
     .send_key      = hid_device_send_key,
@@ -529,6 +541,28 @@ const BtHidDeviceApi nimble_hid_device_api = {
     .send_mouse    = hid_device_send_mouse,
     .send_gamepad  = hid_device_send_gamepad,
     .is_connected  = hid_device_is_connected,
+};
+
+// ---- HID device child driver lifecycle ----
+
+static error_t esp32_ble_hid_device_stop_device(struct Device* device) {
+    // Safety cleanup: free any BleHidDeviceCtx that was not deleted by hid_device_stop()
+    // (e.g. if the BLE device is stopped while HID is still connected).
+    BleHidDeviceCtx* hid_ctx = (BleHidDeviceCtx*)device_get_driver_data(device);
+    delete hid_ctx; // safe even if nullptr
+    device_set_driver_data(device, nullptr);
+    return ERROR_NONE;
+}
+
+Driver esp32_ble_hid_device_driver = {
+    .name         = "esp32-ble-hid-device",
+    .compatible   = nullptr,
+    .start_device = nullptr,
+    .stop_device  = esp32_ble_hid_device_stop_device,
+    .api          = &nimble_hid_device_api,
+    .device_type  = &BLUETOOTH_HID_DEVICE_TYPE,
+    .owner        = nullptr,
+    .internal     = nullptr,
 };
 
 #pragma GCC diagnostic pop

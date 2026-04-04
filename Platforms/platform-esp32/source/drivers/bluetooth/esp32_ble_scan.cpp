@@ -15,50 +15,27 @@
 #define TAG "esp32_ble_scan"
 #include <tactility/log.h>
 
-// ---- Module-static scan data ----
-// Scan results and their associated state are owned entirely by this module.
-// esp32_ble.cpp clears them via ble_scan_clear_results() before each new scan.
-
-#define BLE_SCAN_MAX 64
-
-static SemaphoreHandle_t s_scan_mutex   = nullptr;
-static BtPeerRecord      s_scan_results[BLE_SCAN_MAX];
-static ble_addr_t        s_scan_addrs[BLE_SCAN_MAX]; // full ble_addr_t (type+val) for connections
-static size_t            s_scan_count   = 0;
-
-// Module-static device pointer used only by the name-resolution GAP/GATT callbacks
-// whose void* arg is already occupied by the peer index (uintptr_t).
+// ---- Module-static scan context ----
 // Set at the start of ble_resolve_next_unnamed_peer; valid for the duration of
 // the sequential resolution chain (single-device, single-scan at a time).
-static struct Device* s_scan_device = nullptr;
+// Using BleCtx* (not Device*) so we avoid keeping a static Device reference.
+static BleCtx* s_scan_ctx = nullptr;
 
-// ---- Scan data lifecycle ----
+// ---- Scan data helpers ----
 
-void ble_scan_init() {
-    s_scan_mutex = xSemaphoreCreateMutex();
-    s_scan_count = 0;
-    memset(s_scan_results, 0, sizeof(s_scan_results));
-}
-
-void ble_scan_deinit() {
-    if (s_scan_mutex != nullptr) {
-        vSemaphoreDelete(s_scan_mutex);
-        s_scan_mutex = nullptr;
-    }
-    s_scan_count = 0;
-}
-
-void ble_scan_clear_results() {
-    xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
-    s_scan_count = 0;
-    memset(s_scan_results, 0, sizeof(s_scan_results));
-    xSemaphoreGive(s_scan_mutex);
+void ble_scan_clear_results(struct Device* device) {
+    BleCtx* ctx = ble_get_ctx(device);
+    xSemaphoreTake(ctx->scan_mutex, portMAX_DELAY);
+    ctx->scan_count = 0;
+    memset(ctx->scan_results, 0, sizeof(ctx->scan_results));
+    xSemaphoreGive(ctx->scan_mutex);
 }
 
 // ---- GAP scan callback ----
 
 int ble_gap_disc_event_handler(struct ble_gap_event* event, void* arg) {
     struct Device* device = (struct Device*)arg;
+    BleCtx* ctx = ble_get_ctx(device);
 
     switch (event->type) {
         case BLE_GAP_EVENT_DISC: {
@@ -81,25 +58,25 @@ int ble_gap_disc_event_handler(struct ble_gap_event* event, void* arg) {
             }
 
             {
-                xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
+                xSemaphoreTake(ctx->scan_mutex, portMAX_DELAY);
                 bool found = false;
-                for (size_t i = 0; i < s_scan_count; ++i) {
-                    if (memcmp(s_scan_results[i].addr, record.addr, BT_ADDR_LEN) == 0) {
+                for (size_t i = 0; i < ctx->scan_count; ++i) {
+                    if (memcmp(ctx->scan_results[i].addr, record.addr, BT_ADDR_LEN) == 0) {
                         // Deduplicate: merge name from SCAN_RSP without clobbering ADV_IND name
                         if (record.name[0] != '\0') {
-                            memcpy(s_scan_results[i].name, record.name, BT_NAME_MAX + 1);
+                            memcpy(ctx->scan_results[i].name, record.name, BT_NAME_MAX + 1);
                         }
-                        s_scan_results[i].rssi = record.rssi;
+                        ctx->scan_results[i].rssi = record.rssi;
                         found = true;
                         break;
                     }
                 }
-                if (!found && s_scan_count < BLE_SCAN_MAX) {
-                    s_scan_results[s_scan_count] = record;
-                    s_scan_addrs[s_scan_count]   = disc.addr; // full addr (type+val)
-                    s_scan_count++;
+                if (!found && ctx->scan_count < 64) {
+                    ctx->scan_results[ctx->scan_count] = record;
+                    ctx->scan_addrs[ctx->scan_count]   = disc.addr; // full addr (type+val)
+                    ctx->scan_count++;
                 }
-                xSemaphoreGive(s_scan_mutex);
+                xSemaphoreGive(ctx->scan_mutex);
             }
 
             struct BtEvent e = {};
@@ -133,7 +110,7 @@ int ble_gap_disc_event_handler(struct ble_gap_event* event, void* arg) {
 
 static int name_read_callback(uint16_t conn_handle, const struct ble_gatt_error* error,
                               struct ble_gatt_attr* attr, void* arg) {
-    struct Device* device = s_scan_device;
+    BleCtx* ctx = s_scan_ctx;
 
     if (error->status == 0 && attr != nullptr) {
         size_t idx = (size_t)(uintptr_t)arg;
@@ -142,19 +119,19 @@ static int name_read_callback(uint16_t conn_handle, const struct ble_gatt_error*
             char name_buf[BT_NAME_MAX + 1] = {};
             os_mbuf_copydata(attr->om, 0, len, name_buf);
             {
-                xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
-                if (idx < s_scan_count && s_scan_results[idx].name[0] == '\0') {
-                    memcpy(s_scan_results[idx].name, name_buf, len);
-                    s_scan_results[idx].name[len] = '\0';
+                xSemaphoreTake(ctx->scan_mutex, portMAX_DELAY);
+                if (idx < ctx->scan_count && ctx->scan_results[idx].name[0] == '\0') {
+                    memcpy(ctx->scan_results[idx].name, name_buf, len);
+                    ctx->scan_results[idx].name[len] = '\0';
                     LOG_I(TAG, "Name resolved (idx=%u): %s", (unsigned)idx, name_buf);
                 }
-                BtPeerRecord record = (idx < s_scan_count) ? s_scan_results[idx] : BtPeerRecord{};
-                xSemaphoreGive(s_scan_mutex);
+                BtPeerRecord record = (idx < ctx->scan_count) ? ctx->scan_results[idx] : BtPeerRecord{};
+                xSemaphoreGive(ctx->scan_mutex);
 
                 struct BtEvent e = {};
                 e.type = BT_EVENT_PEER_FOUND;
                 e.peer  = record;
-                ble_publish_event(device, e);
+                ble_publish_event(ctx->device, e);
             }
         }
         return 0; // wait for BLE_HS_EDONE
@@ -167,7 +144,7 @@ static int name_read_callback(uint16_t conn_handle, const struct ble_gatt_error*
 
 static int name_res_gap_callback(struct ble_gap_event* event, void* arg) {
     size_t idx = (size_t)(uintptr_t)arg;
-    struct Device* device = s_scan_device;
+    BleCtx* ctx = s_scan_ctx;
 
     switch (event->type) {
         case BLE_GAP_EVENT_CONNECT:
@@ -184,13 +161,13 @@ static int name_res_gap_callback(struct ble_gap_event* event, void* arg) {
                 }
             } else {
                 LOG_I(TAG, "Name resolution: connect failed (idx=%u status=%d)", (unsigned)idx, event->connect.status);
-                ble_resolve_next_unnamed_peer(device, idx + 1);
+                ble_resolve_next_unnamed_peer(ctx->device, idx + 1);
             }
             break;
 
         case BLE_GAP_EVENT_DISCONNECT:
             LOG_I(TAG, "Name resolution: disconnected (idx=%u)", (unsigned)idx);
-            ble_resolve_next_unnamed_peer(device, idx + 1);
+            ble_resolve_next_unnamed_peer(ctx->device, idx + 1);
             break;
 
         default:
@@ -200,7 +177,8 @@ static int name_res_gap_callback(struct ble_gap_event* event, void* arg) {
 }
 
 void ble_resolve_next_unnamed_peer(struct Device* device, size_t start_idx) {
-    s_scan_device = device;
+    BleCtx* ctx = ble_get_ctx(device);
+    s_scan_ctx = ctx;
 
     // Skip if a profile server or HID host connection attempt is active —
     // initiating a central connection simultaneously would fail (BLE_HS_EALREADY).
@@ -219,16 +197,16 @@ void ble_resolve_next_unnamed_peer(struct Device* device, size_t start_idx) {
         ble_addr_t addr  = {};
         bool       found = false;
         {
-            xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
-            while (i < s_scan_count) {
-                if (s_scan_results[i].name[0] == '\0') {
-                    addr  = s_scan_addrs[i];
+            xSemaphoreTake(ctx->scan_mutex, portMAX_DELAY);
+            while (i < ctx->scan_count) {
+                if (ctx->scan_results[i].name[0] == '\0') {
+                    addr  = ctx->scan_addrs[i];
                     found = true;
                     break;
                 }
                 ++i;
             }
-            xSemaphoreGive(s_scan_mutex);
+            xSemaphoreGive(ctx->scan_mutex);
         }
 
         if (!found) {

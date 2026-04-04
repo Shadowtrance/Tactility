@@ -89,35 +89,6 @@ void hidHostDisconnect();
 /** @return true when a BLE HID peripheral is fully subscribed and acting as LVGL input device */
 bool hidHostIsConnected();
 
-// ---- BLE HID Device ----
-
-/**
- * @brief Start advertising as a BLE HID device.
- * @param[in] appearance BLE GAP Appearance value:
- *   0x03C0=Generic HID, 0x03C1=Keyboard (default), 0x03C2=Mouse, 0x03C4=Gamepad
- * @return true on success
- */
-bool hidDeviceStart(uint16_t appearance = 0x03C1);
-
-/** @brief Stop the HID device server and close any active connection. */
-void hidDeviceStop();
-
-// ---- BLE SPP (Nordic UART Service) ----
-
-/** @brief Start advertising as a NUS (Nordic UART Service) server. @return true on success */
-bool sppStart();
-
-/** @brief Stop the SPP server and close any active connection. */
-void sppStop();
-
-// ---- BLE MIDI ----
-
-/** @brief Start advertising as a BLE MIDI device. @return true on success */
-bool midiStart();
-
-/** @brief Stop the MIDI server and close any active connection. */
-void midiStop();
-
 /**
  * @brief Initialize the Bluetooth bridge layer and optionally enable the radio.
  * Called once from Tactility startup (after kernel drivers are ready).

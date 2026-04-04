@@ -8,13 +8,25 @@
 
 #include <algorithm>
 #include <cstring>
+#include <deque>
+#include <vector>
 #include <host/ble_gap.h>
 #include <host/ble_gatt.h>
 #include <host/ble_hs_mbuf.h>
 
 #define TAG "esp32_ble_spp"
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <tactility/device.h>
+#include <tactility/driver.h>
 #include <tactility/log.h>
+
+// ---- SPP device context (stored as driver data of the serial child device) ----
+
+struct BleSppCtx {
+    SemaphoreHandle_t                rx_mutex;
+    std::deque<std::vector<uint8_t>> rx_queue;
+};
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
@@ -93,21 +105,21 @@ void ble_spp_init_gatt_handles(struct Device* serial_child) {
 
 // ---- SPP field accessor implementations ----
 
+static BleCtx* spp_root_ctx(struct Device* device) {
+    return ble_get_ctx(device);
+}
+
 bool ble_spp_get_active(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx && ctx->spp_active.load();
+    return spp_root_ctx(device)->spp_active.load();
 }
 void ble_spp_set_active(struct Device* device, bool v) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->spp_active.store(v);
+    spp_root_ctx(device)->spp_active.store(v);
 }
 uint16_t ble_spp_get_conn_handle(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx ? ctx->spp_conn_handle.load() : (uint16_t)BLE_HS_CONN_HANDLE_NONE;
+    return spp_root_ctx(device)->spp_conn_handle.load();
 }
 void ble_spp_set_conn_handle(struct Device* device, uint16_t h) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->spp_conn_handle.store(h);
+    spp_root_ctx(device)->spp_conn_handle.store(h);
 }
 
 // ---- SPP sub-API implementations ----
@@ -184,12 +196,42 @@ static bool spp_is_connected(struct Device* device) {
     return ble_spp_get_conn_handle(device) != BLE_HS_CONN_HANDLE_NONE;
 }
 
-const BtSerialApi nimble_serial_api = {
+extern const BtSerialApi nimble_serial_api = {
     .start        = spp_start,
     .stop         = spp_stop,
     .write        = spp_write,
     .read         = spp_read,
     .is_connected = spp_is_connected,
+};
+
+// ---- Serial child driver lifecycle ----
+
+static error_t esp32_ble_serial_start_device(struct Device* device) {
+    BleSppCtx* sctx = new BleSppCtx();
+    sctx->rx_mutex = xSemaphoreCreateMutex();
+    device_set_driver_data(device, sctx);
+    return ERROR_NONE;
+}
+
+static error_t esp32_ble_serial_stop_device(struct Device* device) {
+    BleSppCtx* sctx = (BleSppCtx*)device_get_driver_data(device);
+    if (sctx != nullptr) {
+        vSemaphoreDelete(sctx->rx_mutex);
+        delete sctx;
+        device_set_driver_data(device, nullptr);
+    }
+    return ERROR_NONE;
+}
+
+Driver esp32_ble_serial_driver = {
+    .name         = "esp32-ble-serial",
+    .compatible   = nullptr,
+    .start_device = esp32_ble_serial_start_device,
+    .stop_device  = esp32_ble_serial_stop_device,
+    .api          = &nimble_serial_api,
+    .device_type  = &BLUETOOTH_SERIAL_TYPE,
+    .owner        = nullptr,
+    .internal     = nullptr,
 };
 
 #pragma GCC diagnostic pop

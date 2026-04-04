@@ -8,14 +8,26 @@
 
 #include <algorithm>
 #include <cstring>
+#include <deque>
+#include <vector>
 #include <host/ble_gap.h>
 #include <host/ble_gatt.h>
 #include <host/ble_hs_mbuf.h>
 
 #define TAG "esp32_ble_midi"
 #include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <tactility/device.h>
+#include <tactility/driver.h>
 #include <tactility/log.h>
+
+// ---- MIDI device context (stored as driver data of the MIDI child device) ----
+
+struct BleMidiCtx {
+    SemaphoreHandle_t                rx_mutex;
+    std::deque<std::vector<uint8_t>> rx_queue;
+};
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
@@ -38,34 +50,31 @@ uint16_t midi_io_handle;
 
 // ---- MIDI field accessor implementations ----
 
+static BleCtx* midi_root_ctx(struct Device* device) {
+    return ble_get_ctx(device);
+}
+
 bool ble_midi_get_active(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx && ctx->midi_active.load();
+    return midi_root_ctx(device)->midi_active.load();
 }
 void ble_midi_set_active(struct Device* device, bool v) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->midi_active.store(v);
+    midi_root_ctx(device)->midi_active.store(v);
 }
 uint16_t ble_midi_get_conn_handle(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx ? ctx->midi_conn_handle.load() : (uint16_t)BLE_HS_CONN_HANDLE_NONE;
+    return midi_root_ctx(device)->midi_conn_handle.load();
 }
 void ble_midi_set_conn_handle(struct Device* device, uint16_t h) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->midi_conn_handle.store(h);
+    midi_root_ctx(device)->midi_conn_handle.store(h);
 }
 bool ble_midi_get_use_indicate(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    return ctx && ctx->midi_use_indicate.load();
+    return midi_root_ctx(device)->midi_use_indicate.load();
 }
 void ble_midi_set_use_indicate(struct Device* device, bool v) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx) ctx->midi_use_indicate.store(v);
+    midi_root_ctx(device)->midi_use_indicate.store(v);
 }
 
 error_t ble_midi_ensure_keepalive(struct Device* device, esp_timer_cb_t cb, uint64_t period_us) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (!ctx) return ERROR_INVALID_STATE;
+    BleCtx* ctx = midi_root_ctx(device);
     if (ctx->midi_keepalive_timer == nullptr) {
         esp_timer_create_args_t args = {};
         args.callback        = cb;
@@ -87,8 +96,8 @@ error_t ble_midi_ensure_keepalive(struct Device* device, esp_timer_cb_t cb, uint
 }
 
 void ble_midi_stop_keepalive(struct Device* device) {
-    BleCtx* ctx = ble_get_ctx(device);
-    if (ctx && ctx->midi_keepalive_timer != nullptr) {
+    BleCtx* ctx = midi_root_ctx(device);
+    if (ctx->midi_keepalive_timer != nullptr) {
         esp_timer_stop(ctx->midi_keepalive_timer);
     }
 }
@@ -210,11 +219,41 @@ static bool midi_is_connected(struct Device* device) {
     return ble_midi_get_conn_handle(device) != BLE_HS_CONN_HANDLE_NONE;
 }
 
-const BtMidiApi nimble_midi_api = {
+extern const BtMidiApi nimble_midi_api = {
     .start        = midi_start,
     .stop         = midi_stop,
     .send         = midi_send,
     .is_connected = midi_is_connected,
+};
+
+// ---- MIDI child driver lifecycle ----
+
+static error_t esp32_ble_midi_start_device(struct Device* device) {
+    BleMidiCtx* mctx = new BleMidiCtx();
+    mctx->rx_mutex = xSemaphoreCreateMutex();
+    device_set_driver_data(device, mctx);
+    return ERROR_NONE;
+}
+
+static error_t esp32_ble_midi_stop_device(struct Device* device) {
+    BleMidiCtx* mctx = (BleMidiCtx*)device_get_driver_data(device);
+    if (mctx != nullptr) {
+        vSemaphoreDelete(mctx->rx_mutex);
+        delete mctx;
+        device_set_driver_data(device, nullptr);
+    }
+    return ERROR_NONE;
+}
+
+Driver esp32_ble_midi_driver = {
+    .name         = "esp32-ble-midi",
+    .compatible   = nullptr,
+    .start_device = esp32_ble_midi_start_device,
+    .stop_device  = esp32_ble_midi_stop_device,
+    .api          = &nimble_midi_api,
+    .device_type  = &BLUETOOTH_MIDI_TYPE,
+    .owner        = nullptr,
+    .internal     = nullptr,
 };
 
 #pragma GCC diagnostic pop

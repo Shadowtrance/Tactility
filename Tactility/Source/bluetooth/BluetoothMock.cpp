@@ -37,15 +37,6 @@ void hidHostConnect(const std::array<uint8_t, 6>& /*addr*/) {}
 void hidHostDisconnect()                      {}
 bool hidHostIsConnected()                     { return false; }
 
-bool hidDeviceStart(uint16_t /*appearance*/)  { return false; }
-void hidDeviceStop()                          {}
-
-bool sppStart()  { return false; }
-void sppStop()   {}
-
-bool midiStart() { return false; }
-void midiStop()  {}
-
 void systemStart() {}
 
 } // namespace tt::bluetooth

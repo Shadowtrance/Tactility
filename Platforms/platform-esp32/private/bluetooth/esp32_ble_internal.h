@@ -23,8 +23,6 @@
 #include <freertos/semphr.h>
 
 #include <atomic>
-#include <deque>
-#include <vector>
 
 // ---- Per-module headers (structs, accessors, sub-API externs) ----
 
@@ -74,6 +72,12 @@ struct BleCtx {
     // BLE device name (set before or after radio enable; applied in dispatch_enable)
     char device_name[BLE_DEVICE_NAME_MAX + 1];
 
+    // Scan data (guarded by scan_mutex)
+    SemaphoreHandle_t scan_mutex;
+    BtPeerRecord      scan_results[64];
+    ble_addr_t        scan_addrs[64];
+    size_t            scan_count;
+
     // Device reference (passed to BtEventCallback)
     struct Device* device;
 
@@ -96,9 +100,7 @@ bool ble_get_scan_active(struct Device* device);
 void ble_set_scan_active(struct Device* device, bool v);
 
 // ---- Scan data management (defined in esp32_ble_scan.cpp) ----
-void ble_scan_init();
-void ble_scan_deinit();
-void ble_scan_clear_results();
+void ble_scan_clear_results(struct Device* device);
 
 // ---- Event publishing ----
 void ble_publish_event(struct Device* device, struct BtEvent event);
@@ -111,6 +113,11 @@ void ble_schedule_adv_restart(struct Device* device, uint64_t delay_us);
 // ---- GAP scan callback (defined in esp32_ble_scan.cpp) ----
 int  ble_gap_disc_event_handler(struct ble_gap_event* event, void* arg);
 void ble_resolve_next_unnamed_peer(struct Device* device, size_t start_idx);
+
+// ---- Child driver definitions (one per profile sub-module) ----
+extern struct Driver esp32_ble_serial_driver;
+extern struct Driver esp32_ble_midi_driver;
+extern struct Driver esp32_ble_hid_device_driver;
 
 // ---- SPP GATT (defined in esp32_ble_spp.cpp) ----
 // device must be the serial child Device*.

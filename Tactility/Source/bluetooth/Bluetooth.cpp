@@ -15,6 +15,9 @@
 #include <tactility/check.h>
 #include <tactility/device.h>
 #include <tactility/drivers/bluetooth.h>
+#include <tactility/drivers/bluetooth_hid_device.h>
+#include <tactility/drivers/bluetooth_midi.h>
+#include <tactility/drivers/bluetooth_serial.h>
 
 #include <array>
 #include <cstring>
@@ -128,10 +131,14 @@ static void bt_event_bridge(struct Device* /*device*/, void* /*context*/, struct
                             }
                         } else if (settings::shouldSppAutoStart()) {
                             LOGGER.info("Auto-starting SPP server");
-                            sppStart();
+                            if (struct Device* dev = bluetooth_serial_get_device()) {
+                                bluetooth_serial_start(dev);
+                            }
                         } else if (settings::shouldMidiAutoStart()) {
                             LOGGER.info("Auto-starting MIDI server");
-                            midiStart();
+                            if (struct Device* dev = bluetooth_midi_get_device()) {
+                                bluetooth_midi_start(dev);
+                            }
                         }
                     });
                     break;
@@ -342,11 +349,19 @@ void connect(const std::array<uint8_t, 6>& addr, int profileId) {
     if (profileId == BT_PROFILE_HID_HOST) {
         hidHostConnect(addr);
     } else if (profileId == BT_PROFILE_HID_DEVICE) {
-        hidDeviceStart();
+        if (struct Device* dev = bluetooth_hid_device_get_device()) {
+            bluetooth_hid_device_start(dev, BT_HID_DEVICE_MODE_KEYBOARD);
+        }
     } else if (profileId == BT_PROFILE_SPP) {
-        sppStart();
+        if (struct Device* dev = bluetooth_serial_get_device()) {
+            bluetooth_serial_start(dev);
+            settings::setSppAutoStart(true);
+        }
     } else if (profileId == BT_PROFILE_MIDI) {
-        midiStart();
+        if (struct Device* dev = bluetooth_midi_get_device()) {
+            bluetooth_midi_start(dev);
+            settings::setMidiAutoStart(true);
+        }
     }
 }
 
@@ -355,7 +370,9 @@ void disconnect(const std::array<uint8_t, 6>& addr, int profileId) {
     if (profileId == BT_PROFILE_HID_HOST) {
         hidHostDisconnect();
     } else if (profileId == BT_PROFILE_HID_DEVICE) {
-        hidDeviceStop();
+        if (struct Device* dev = bluetooth_hid_device_get_device()) {
+            bluetooth_hid_device_stop(dev);
+        }
     } else {
         struct Device* dev = findFirstDevice();
         if (dev == nullptr) return;
