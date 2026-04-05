@@ -334,6 +334,11 @@ def write_bluetooth_variables(output_file, device_properties: ConfigParser):
         # GAP/GATT event processing + C++ frames push the default over the limit,
         # causing stack-protection faults on events like BLE_GAP_EVENT_SUBSCRIBE.
         output_file.write("CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192\n")
+        # Persist bond/CCCD data to NVS so that bonds survive BLE disable+re-enable
+        # cycles (nimble_port_deinit clears RAM-only state). Without this, bonded peers
+        # (e.g. Windows HID host) lose their LTK match on re-enable and enter a
+        # rapid connect/disconnect/re-pair loop.
+        output_file.write("CONFIG_BT_NIMBLE_NVS_PERSIST=y\n")
 
 def write_custom_sdkconfig(output_file, device_properties: ConfigParser):
     if "sdkconfig" in device_properties.sections():

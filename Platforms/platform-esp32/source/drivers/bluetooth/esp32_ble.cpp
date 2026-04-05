@@ -429,10 +429,17 @@ static void on_sync() {
     e.radio_state = BT_RADIO_STATE_ON;
     ble_publish_event(ctx->device, e);
 
-    // The Tactility bridge handles auto-start (SPP/MIDI) in response to
-    // BT_EVENT_RADIO_STATE_CHANGED(ON). We just start name-only advertising
-    // so the device is visible immediately.
-    ble_start_advertising(ctx->device, nullptr);
+    // The Tactility bridge handles auto-start (SPP/MIDI/HID) in response to
+    // BT_EVENT_RADIO_STATE_CHANGED(ON), dispatched to the main task above.
+    // On a multi-core ESP32 the main task can preempt the NimBLE host task
+    // between ble_publish_event() and here, call hid/spp/midi_device_start(),
+    // set hid/spp/midi_active, and already start profile-specific advertising.
+    // Only start name-only advertising if no profile has been activated yet;
+    // otherwise we would overwrite the correct profile advertising with name-only,
+    // causing Windows to connect without seeing the HID/SPP/MIDI service UUID.
+    if (!ctx->hid_active.load() && !ctx->spp_active.load() && !ctx->midi_active.load()) {
+        ble_start_advertising(ctx->device, nullptr);
+    }
 }
 
 static void dispatch_disable_timer_cb(void* arg) {
@@ -654,6 +661,33 @@ static void dispatch_enable(BleCtx* ctx) {
     ble_hs_cfg.store_read_cb   = ble_store_config_read;
     ble_hs_cfg.store_write_cb  = ble_store_config_write;
     ble_hs_cfg.store_delete_cb = ble_store_config_delete;
+
+    // Clear any stale "value_changed" flags left in NVS CCCD records.
+    // Old firmware called ble_svc_gatt_changed(0, 0xFFFF) from switchGattProfile(),
+    // which sets value_changed=1 in NVS for all bonded-but-disconnected peers.
+    // On reconnect NimBLE sends a Service Changed indication; Windows disconnects
+    // without ACKing (it re-discovers instead), so NimBLE never clears the flag,
+    // causing an infinite reconnect loop. Purge all value_changed flags on every
+    // enable so the first reconnect after re-enable always succeeds.
+    {
+        // Zero-initialize: peer_addr={0} matches any peer (== BLE_ADDR_ANY),
+        // chr_val_handle=0 matches any handle — both are wildcards per the
+        // ble_store_config_find_cccd() implementation.
+        struct ble_store_key_cccd cccd_key = {};
+        struct ble_store_value_cccd cccd_val = {};
+        int n_cleared = 0;
+        while (ble_store_read_cccd(&cccd_key, &cccd_val) == 0) {
+            if (cccd_val.value_changed) {
+                cccd_val.value_changed = 0;
+                ble_store_write_cccd(&cccd_val);
+                n_cleared++;
+            }
+            cccd_key.idx++;
+        }
+        if (n_cleared > 0) {
+            LOG_I(TAG, "Cleared %d stale CCCD value_changed flag(s) from NVS", n_cleared);
+        }
+    }
 
     ble_svc_gap_init();
     ble_svc_gatt_init();

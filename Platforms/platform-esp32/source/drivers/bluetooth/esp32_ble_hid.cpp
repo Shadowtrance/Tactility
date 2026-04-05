@@ -388,7 +388,15 @@ void ble_hid_switch_profile(struct Device* device, BleHidProfile profile) {
 
     ble_svc_gap_device_name_set(CONFIG_TT_DEVICE_NAME);
     ble_att_set_preferred_mtu(BLE_ATT_MTU_MAX);
-    ble_svc_gatt_changed(0, 0xFFFF);
+    // Do NOT call ble_svc_gatt_changed(0, 0xFFFF) here.
+    // switchGattProfile() is always called while disconnected (ble_gatts_mutable()
+    // requires no active connection). ble_gatts_chr_updated() would persist a
+    // "value_changed=1" flag in NVS for every bonded-but-disconnected peer.
+    // When a bonded peer (e.g. Windows HID host) reconnects, NimBLE immediately
+    // sends a Service Changed indication; Windows disconnects to re-discover GATT
+    // without ACKing the indication; NimBLE re-sends on the next reconnect → loop.
+    // GATT handles are deterministic (same registration order each time), so
+    // bonded peers can reuse their cached handles and no indication is needed.
 
     current_hid_profile = profile;
 }
@@ -413,6 +421,10 @@ void ble_hid_init_gatt() {
 // stored as its driver data.
 
 static error_t hid_device_start(struct Device* device, enum BtHidDeviceMode mode) {
+    // Clean up any leftover context from a previous session (e.g. BLE was disabled
+    // while connected: dispatch_disable() skips the normal hid_device_stop cleanup).
+    BleHidDeviceCtx* old_ctx = (BleHidDeviceCtx*)device_get_driver_data(device);
+    delete old_ctx; // no-op if nullptr
     // Create driver data for this HID session.
     BleHidDeviceCtx* hid_ctx = new BleHidDeviceCtx();
     hid_ctx->hid_conn_handle.store(BLE_HS_CONN_HANDLE_NONE);

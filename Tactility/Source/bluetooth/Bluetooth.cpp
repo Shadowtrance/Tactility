@@ -117,17 +117,22 @@ static void bt_event_bridge(struct Device* /*device*/, void* /*context*/, struct
                 case BT_RADIO_STATE_ON:
                     getMainDispatcher().dispatch([] {
                         auto peers = settings::loadAll();
-                        bool has_hid_auto = false;
+                        bool has_hid_host_auto   = false;
+                        bool has_hid_device_auto = false;
                         for (const auto& p : peers) {
-                            if (p.autoConnect && p.profileId == BT_PROFILE_HID_HOST) {
-                                has_hid_auto = true;
-                                break;
-                            }
+                            if (!p.autoConnect) continue;
+                            if (p.profileId == BT_PROFILE_HID_HOST)   has_hid_host_auto   = true;
+                            if (p.profileId == BT_PROFILE_HID_DEVICE) has_hid_device_auto = true;
                         }
-                        if (has_hid_auto) {
+                        if (has_hid_host_auto) {
                             LOGGER.info("HID host auto-connect peer found — starting scan");
                             if (struct Device* dev = findFirstDevice()) {
                                 bluetooth_scan_start(dev);
+                            }
+                        } else if (has_hid_device_auto) {
+                            LOGGER.info("HID device auto-start (bonded peer found)");
+                            if (struct Device* dev = bluetooth_hid_device_get_device()) {
+                                bluetooth_hid_device_start(dev, BT_HID_DEVICE_MODE_KEYBOARD);
                             }
                         } else if (settings::shouldSppAutoStart()) {
                             LOGGER.info("Auto-starting SPP server");
