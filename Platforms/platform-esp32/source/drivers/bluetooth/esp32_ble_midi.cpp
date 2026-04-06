@@ -246,7 +246,7 @@ static error_t esp32_ble_midi_stop_device(struct Device* device) {
 }
 
 Driver esp32_ble_midi_driver = {
-    .name         = "esp32-ble-midi",
+    .name         = "esp32_ble_midi",
     .compatible   = nullptr,
     .start_device = esp32_ble_midi_start_device,
     .stop_device  = esp32_ble_midi_stop_device,

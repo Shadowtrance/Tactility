@@ -14,7 +14,7 @@
 	model = "LilyGO T-Deck";
 
 	ble0 {
-		compatible = "esp32,ble";
+		compatible = "espressif,esp32-ble";
 	};
 
 	gpio0 {

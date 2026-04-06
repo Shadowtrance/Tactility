@@ -1048,9 +1048,9 @@ static error_t esp32_ble_start_device(struct Device* device) {
     // Create child devices for the serial, MIDI and HID device profiles.
     // device_start() on each child will invoke start_device (for serial/midi)
     // which initialises their driver data (BleSppCtx / BleMidiCtx).
-    create_child_device(device, "ble-serial",     &esp32_ble_serial_driver,     ctx->serial_child);
-    create_child_device(device, "ble-midi",       &esp32_ble_midi_driver,       ctx->midi_child);
-    create_child_device(device, "ble-hid-device", &esp32_ble_hid_device_driver, ctx->hid_device_child);
+    create_child_device(device, "ble_serial",     &esp32_ble_serial_driver,     ctx->serial_child);
+    create_child_device(device, "ble_midi",       &esp32_ble_midi_driver,       ctx->midi_child);
+    create_child_device(device, "ble_hid_device", &esp32_ble_hid_device_driver, ctx->hid_device_child);
 
     return ERROR_NONE;
 }
@@ -1089,11 +1089,9 @@ static error_t esp32_ble_stop_device(struct Device* device) {
 
 // ---- Driver registration ----
 
-static const char* esp32_bt_compatible[] = { "esp32,ble", nullptr };
-
 Driver esp32_bluetooth_driver = {
-    .name         = "esp32-bluetooth",
-    .compatible   = esp32_bt_compatible,
+    .name         = "esp32_bluetooth",
+    .compatible   = (const char*[]) { "espressif,esp32-ble", nullptr },
     .start_device = esp32_ble_start_device,
     .stop_device  = esp32_ble_stop_device,
     .api          = &nimble_bluetooth_api,

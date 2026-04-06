@@ -567,7 +567,7 @@ static error_t esp32_ble_hid_device_stop_device(struct Device* device) {
 }
 
 Driver esp32_ble_hid_device_driver = {
-    .name         = "esp32-ble-hid-device",
+    .name         = "esp32_ble_hid_device",
     .compatible   = nullptr,
     .start_device = nullptr,
     .stop_device  = esp32_ble_hid_device_stop_device,

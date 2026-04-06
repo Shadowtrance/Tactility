@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-DEFINE_DEVICETREE(ble, struct Esp32BleConfig)
+DEFINE_DEVICETREE(esp32_ble, struct Esp32BleConfig)
 
 #ifdef __cplusplus
 }

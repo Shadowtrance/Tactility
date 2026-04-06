@@ -15,7 +15,7 @@
 	model = "Tab5";
 
 	ble0 {
-		compatible = "esp32,ble";
+		compatible = "espressif,esp32-ble";
 	};
 
 	gpio0 {

@@ -224,7 +224,7 @@ static error_t esp32_ble_serial_stop_device(struct Device* device) {
 }
 
 Driver esp32_ble_serial_driver = {
-    .name         = "esp32-ble-serial",
+    .name         = "esp32_ble_serial",
     .compatible   = nullptr,
     .start_device = esp32_ble_serial_start_device,
     .stop_device  = esp32_ble_serial_stop_device,
