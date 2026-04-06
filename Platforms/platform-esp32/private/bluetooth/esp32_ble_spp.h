@@ -7,7 +7,11 @@
 #if defined(CONFIG_BT_NIMBLE_ENABLED)
 
 #include <tactility/drivers/bluetooth_serial.h>
-#include <cstdint>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 struct Device;
 
@@ -16,5 +20,8 @@ void     ble_spp_set_active(struct Device* device, bool v);
 uint16_t ble_spp_get_conn_handle(struct Device* device);
 void     ble_spp_set_conn_handle(struct Device* device, uint16_t h);
 
+#ifdef __cplusplus
+}
+#endif
 
 #endif // CONFIG_BT_NIMBLE_ENABLED

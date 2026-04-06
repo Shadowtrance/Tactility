@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 /** No device-tree configuration required for the NimBLE BLE driver. */
-struct Esp32BleNimbleConfig {
+struct Esp32BleConfig {
     int _unused; /**< Placeholder — driver reads all config from NimBLE Kconfig. */
 };
 

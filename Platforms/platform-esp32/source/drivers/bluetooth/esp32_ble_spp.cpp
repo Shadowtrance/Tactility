@@ -14,7 +14,7 @@
 #include <host/ble_gatt.h>
 #include <host/ble_hs_mbuf.h>
 
-#define TAG "esp32_ble_spp"
+constexpr auto* TAG = "esp32_ble_spp";
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <tactility/device.h>

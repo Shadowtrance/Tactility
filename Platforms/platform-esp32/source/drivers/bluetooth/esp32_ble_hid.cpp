@@ -14,7 +14,7 @@
 
 #include <cstring>
 
-#define TAG "esp32_ble_hid"
+constexpr auto* TAG = "esp32_ble_hid";
 #include <tactility/device.h>
 #include <tactility/driver.h>
 #include <tactility/log.h>

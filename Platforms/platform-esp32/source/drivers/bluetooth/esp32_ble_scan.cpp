@@ -12,7 +12,7 @@
 #include <algorithm>
 #include <cstring>
 
-#define TAG "esp32_ble_scan"
+constexpr auto* TAG = "esp32_ble_scan";
 #include <tactility/log.h>
 
 // ---- Module-static scan context ----

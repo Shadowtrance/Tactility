@@ -4,4 +4,12 @@
 #include <tactility/bindings/bindings.h>
 #include <tactility/drivers/esp32_ble.h>
 
-DEFINE_DEVICETREE(ble, struct Esp32BleNimbleConfig)
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+DEFINE_DEVICETREE(ble, struct Esp32BleConfig)
+
+#ifdef __cplusplus
+}
+#endif

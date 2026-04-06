@@ -14,7 +14,7 @@
 #include <host/ble_gatt.h>
 #include <host/ble_hs_mbuf.h>
 
-#define TAG "esp32_ble_midi"
+constexpr auto* TAG = "esp32_ble_midi";
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>

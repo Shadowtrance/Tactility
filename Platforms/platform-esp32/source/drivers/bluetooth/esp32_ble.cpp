@@ -25,7 +25,7 @@
 #include <atomic>
 #include <cstring>
 
-#define TAG "esp32_ble"
+constexpr auto* TAG = "esp32_ble";
 #include <tactility/log.h>
 #include <esp_timer.h>
 
