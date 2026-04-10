@@ -698,6 +698,9 @@ static void dispatch_enable(BleCtx* ctx) {
     ble_svc_gap_device_name_set(ctx->device_name);
     ble_att_set_preferred_mtu(BLE_ATT_MTU_MAX);
 
+#if defined(CONFIG_ESP_HOSTED_ENABLED)
+    ble_hci_gate_set_active(true);  // Open gate: NimBLE transport pool is ready
+#endif
     // Start NimBLE host task (on_sync will fire when ready)
     nimble_port_freertos_init(host_task);
 }
@@ -721,7 +724,20 @@ static void dispatch_disable(BleCtx* ctx) {
     // Blocking: waits for nimble_port_run() to exit.
     // Do NOT call ble_gap_adv_stop()/disc_cancel() before — if controller is
     // unresponsive they generate more HCI timeouts before the stop takes effect.
+    // The HCI gate must stay OPEN here: nimble_port_stop() → ble_hs_stop() sends
+    // HCI commands and needs to receive the command-complete events back from the
+    // controller. Closing the gate before this point starves NimBLE of those events,
+    // causing HCI timeouts and a cascade of resets that crash in ble_hs_timer_sched.
     nimble_port_stop();
+#if defined(CONFIG_ESP_HOSTED_ENABLED)
+    // Close the gate NOW — after nimble_port_stop() returns the NimBLE host task has
+    // exited and nimble_port_deinit() is about to zero npl_funcs. Any HCI packet
+    // arriving after this point must not reach ble_transport_alloc_evt().
+    ble_hci_gate_set_active(false);
+    if (!ble_hci_gate_wait_idle(20)) {
+        LOG_W(TAG, "HCI gate drain timed out");
+    }
+#endif
     nimble_port_deinit();
 
     ctx->spp_conn_handle.store(BLE_HS_CONN_HANDLE_NONE);

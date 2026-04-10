@@ -458,6 +458,9 @@ const struct ModuleSymbol lvgl_module_symbols[] = {
     // lv_draw_line
     DEFINE_MODULE_SYMBOL(lv_draw_line),
     DEFINE_MODULE_SYMBOL(lv_draw_line_dsc_init),
+    // lv_draw_rect
+    DEFINE_MODULE_SYMBOL(lv_draw_fill),
+    DEFINE_MODULE_SYMBOL(lv_draw_fill_dsc_init),
     // lv_area
     DEFINE_MODULE_SYMBOL(lv_area_get_width),
     DEFINE_MODULE_SYMBOL(lv_area_get_height),
