@@ -9,6 +9,8 @@
 #include <tactility/bindings/esp32_uart.h>
 #include <tactility/bindings/esp32_usbhost.h>
 #include <bindings/bmi270.h>
+#include <bindings/es7210.h>
+#include <bindings/es8388.h>
 #include <bindings/ina226.h>
 #include <bindings/pi4ioe5v6408.h>
 #include <bindings/rx8130ce.h>
@@ -24,6 +26,17 @@
 	gpio0 {
 		compatible = "espressif,esp32-gpio";
 		gpio-count = <57>;
+	};
+
+	// Declared before i2c0 so it starts before the es8388/es7210 codecs that reference it
+	i2s0 {
+		compatible = "espressif,esp32-i2s";
+		port = <I2S_NUM_0>;
+		pin-bclk = <&gpio0 27 GPIO_FLAG_NONE>;
+		pin-ws = <&gpio0 29 GPIO_FLAG_NONE>;
+		pin-data-out = <&gpio0 26 GPIO_FLAG_NONE>;
+		pin-data-in = <&gpio0 28 GPIO_FLAG_NONE>;
+		pin-mclk = <&gpio0 30 GPIO_FLAG_NONE>;
 	};
 
 	i2c_internal: i2c0 {
@@ -46,6 +59,18 @@
 		bmi270 {
 			compatible = "bosch,bmi270";
 			reg = <0x68>;
+		};
+
+		es8388 {
+			compatible = "everest,es8388";
+			reg = <0x10>;
+			i2s = "i2s0";
+		};
+
+		es7210 {
+			compatible = "everest,es7210";
+			reg = <0x40>;
+			i2s = "i2s0";
 		};
 
 		rx8130ce {
@@ -74,17 +99,6 @@
 		pin-mosi = <&gpio0 44 GPIO_FLAG_NONE>;
 		pin-miso = <&gpio0 39 GPIO_FLAG_NONE>;
 		pin-sclk = <&gpio0 43 GPIO_FLAG_NONE>;
-	};
-
-	// ES8388 and ES7210
-	i2s0 {
-		compatible = "espressif,esp32-i2s";
-		port = <I2S_NUM_0>;
-		pin-bclk = <&gpio0 27 GPIO_FLAG_NONE>;
-		pin-ws = <&gpio0 29 GPIO_FLAG_NONE>;
-		pin-data-out = <&gpio0 26 GPIO_FLAG_NONE>;
-		pin-data-in = <&gpio0 28 GPIO_FLAG_NONE>;
-		pin-mclk = <&gpio0 30 GPIO_FLAG_NONE>;
 	};
 
 	uart_port_a: uart1 {

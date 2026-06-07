@@ -24,6 +24,7 @@
 #include <Tactility/network/NtpPrivate.h>
 #include <Tactility/service/ServiceManifest.h>
 #include <Tactility/service/ServiceRegistration.h>
+#include <Tactility/service/audio/Audio.h>
 #include <Tactility/settings/TimePrivate.h>
 
 #include <tactility/concurrent/thread.h>
@@ -50,6 +51,7 @@ static Dispatcher mainDispatcher;
 // region Default services
 namespace service {
     // Primary
+    namespace audio { extern const ServiceManifest manifest; }
     namespace gps { extern const ServiceManifest manifest; }
     namespace wifi { extern const ServiceManifest manifest; }
 #ifdef ESP_PLATFORM
@@ -88,6 +90,7 @@ namespace app {
     namespace appdetails { extern const AppManifest manifest; }
     namespace applist { extern const AppManifest manifest; }
     namespace appsettings { extern const AppManifest manifest; }
+    namespace audiosettings { extern const AppManifest manifest; }
     namespace boot { extern const AppManifest manifest; }
     namespace development { extern const AppManifest manifest; }
     namespace display { extern const AppManifest manifest; }
@@ -145,6 +148,9 @@ static void registerInternalApps() {
     addAppManifest(app::apphubdetails::manifest);
     addAppManifest(app::applist::manifest);
     addAppManifest(app::appsettings::manifest);
+    if (service::audio::isAvailable()) {
+        addAppManifest(app::audiosettings::manifest);
+    }
     addAppManifest(app::display::manifest);
     addAppManifest(app::files::manifest);
     addAppManifest(app::fileselection::manifest);
@@ -272,6 +278,7 @@ static void registerAndStartSecondaryServices() {
 
 static void registerAndStartPrimaryServices() {
     LOGGER.info("Registering and starting primary system services");
+    addService(service::audio::manifest);
     addService(service::gps::manifest);
     addService(service::wifi::manifest);
 #ifdef ESP_PLATFORM
