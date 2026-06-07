@@ -83,6 +83,7 @@ const struct ModuleSymbol KERNEL_SYMBOLS[] = {
     DEFINE_MODULE_SYMBOL(audio_codec_set_mute),
     DEFINE_MODULE_SYMBOL(audio_codec_get_mute),
     DEFINE_MODULE_SYMBOL(audio_codec_get_native_sample_rate),
+    DEFINE_MODULE_SYMBOL(audio_codec_get_native_channels),
     DEFINE_MODULE_SYMBOL(audio_codec_get_capabilities),
     DEFINE_MODULE_SYMBOL(AUDIO_CODEC_TYPE),
     // drivers/audio_stream

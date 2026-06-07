@@ -200,6 +200,15 @@ error_t getMute(Device* device, enum AudioCodecDirection direction, bool* muted)
     return ERROR_NOT_SUPPORTED;
 }
 
+error_t getNativeChannels(Device* device, enum AudioCodecDirection direction, uint8_t* channels) {
+    (void) device;
+    if ((direction != AUDIO_CODEC_DIR_INPUT && direction != AUDIO_CODEC_DIR_OUTPUT) || channels == nullptr) {
+        return ERROR_NOT_SUPPORTED;
+    }
+    *channels = 2;
+    return ERROR_NONE;
+}
+
 error_t getNativeSampleRate(Device* device, enum AudioCodecDirection direction, uint32_t* rateHz) {
     (void) device;
     (void) direction;
@@ -229,6 +238,7 @@ const struct AudioCodecApi API = {
     .set_mute = setMute,
     .get_mute = getMute,
     .get_native_sample_rate = getNativeSampleRate,
+    .get_native_channels = getNativeChannels,
     .get_capabilities = getCapabilities,
 };
 

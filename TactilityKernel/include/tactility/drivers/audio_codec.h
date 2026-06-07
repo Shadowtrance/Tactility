@@ -134,6 +134,21 @@ struct AudioCodecApi {
     error_t (*get_native_sample_rate)(struct Device* device, enum AudioCodecDirection direction, uint32_t* rate_hz);
 
     /**
+     * @brief Gets the number of channels the codec hardware natively expects/produces for the
+     * given direction (e.g. a 4-slot TDM microphone ADC reports 4 here even if an app only
+     * wants 1). Callers that need a different channel count must downmix/upmix themselves --
+     * opening the codec with a channel count that doesn't match its native layout can produce
+     * corrupted audio (e.g. ES7210 in TDM mode silently halves its configured bit depth when
+     * asked for <= 2 channels).
+     * @param[in] device the audio codec device
+     * @param[in] direction AUDIO_CODEC_DIR_INPUT or AUDIO_CODEC_DIR_OUTPUT
+     * @param[out] channels the native channel count
+     * @retval ERROR_NONE on success
+     * @retval ERROR_NOT_SUPPORTED if the direction is not supported by this codec
+     */
+    error_t (*get_native_channels)(struct Device* device, enum AudioCodecDirection direction, uint8_t* channels);
+
+    /**
      * @brief Gets the directions supported by this codec.
      * @param[in] device the audio codec device
      * @param[out] supported_directions AUDIO_CODEC_DIR_INPUT, AUDIO_CODEC_DIR_OUTPUT, or AUDIO_CODEC_DIR_BOTH
@@ -168,6 +183,9 @@ error_t audio_codec_get_mute(struct Device* device, enum AudioCodecDirection dir
 
 /** @brief See AudioCodecApi::get_native_sample_rate */
 error_t audio_codec_get_native_sample_rate(struct Device* device, enum AudioCodecDirection direction, uint32_t* rate_hz);
+
+/** @brief See AudioCodecApi::get_native_channels */
+error_t audio_codec_get_native_channels(struct Device* device, enum AudioCodecDirection direction, uint8_t* channels);
 
 /** @brief See AudioCodecApi::get_capabilities */
 error_t audio_codec_get_capabilities(struct Device* device, enum AudioCodecDirection* supported_directions);

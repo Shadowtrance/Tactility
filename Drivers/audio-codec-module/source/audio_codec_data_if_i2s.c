@@ -5,7 +5,12 @@
 
 #include <stdlib.h>
 
-#define I2S_TIMEOUT_TICKS pdMS_TO_TICKS(1000)
+// esp_codec_dev_read/write may issue several of these chunked I2S transfers per call and
+// gives us no way to forward the caller's audio_stream timeout through. Keep this short so
+// a stalled/underrunning I2S link returns promptly -- callers retry on failure, and a long
+// per-chunk timeout here is what made AudioStreamTest's loopback task unkillable (it blocked
+// far longer than its read/write timeout and the 2s drain wait in stopLoopback()).
+#define I2S_TIMEOUT_TICKS pdMS_TO_TICKS(200)
 
 struct I2sDataContext {
     audio_codec_data_if_t base;

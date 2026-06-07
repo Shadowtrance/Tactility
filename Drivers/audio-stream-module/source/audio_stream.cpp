@@ -55,12 +55,51 @@ size_t resampleS16(const int16_t* in, size_t inFrames, uint8_t channels,
     return outFrames;
 }
 
+// Converts between interleaved S16 PCM with different channel counts.
+// - channelsOut < channelsIn: downmix by averaging the first `channelsOut` source channels
+//   plus folding any extra source channels into them round-robin (e.g. 4 -> 1 averages all 4;
+//   4 -> 2 averages {0,2} into channel 0 and {1,3} into channel 1).
+// - channelsOut > channelsIn: upmix by repeating source channels round-robin (e.g. mono -> stereo
+//   duplicates the single channel into both output channels).
+// - equal: copies through.
+void convertChannelsS16(const int16_t* in, size_t frames, uint8_t channelsIn,
+                        int16_t* out, uint8_t channelsOut) {
+    if (channelsIn == channelsOut) {
+        std::memcpy(out, in, frames * channelsIn * sizeof(int16_t));
+        return;
+    }
+
+    for (size_t frame = 0; frame < frames; frame++) {
+        const int16_t* inFrame = in + frame * channelsIn;
+        int16_t* outFrame = out + frame * channelsOut;
+
+        if (channelsOut < channelsIn) {
+            for (uint8_t outCh = 0; outCh < channelsOut; outCh++) {
+                int32_t sum = 0;
+                uint8_t count = 0;
+                for (uint8_t inCh = outCh; inCh < channelsIn; inCh += channelsOut) {
+                    sum += inFrame[inCh];
+                    count++;
+                }
+                outFrame[outCh] = (int16_t) (sum / (int32_t) count);
+            }
+        } else {
+            for (uint8_t outCh = 0; outCh < channelsOut; outCh++) {
+                outFrame[outCh] = inFrame[outCh % channelsIn];
+            }
+        }
+    }
+}
+
 struct AudioStreamHandleImpl : AudioStreamHandleData {
     enum AudioCodecDirection direction = AUDIO_CODEC_DIR_BOTH;
     struct AudioStreamConfig config = {};
     uint32_t codecRate = 0;
-    uint8_t bytesPerFrame = 0;
-    std::vector<uint8_t> codecBuffer; // raw codec-rate PCM, scratch for resampling
+    uint8_t codecChannels = 0;
+    uint8_t bytesPerFrame = 0;     // app-side frame size (config.channels)
+    uint8_t codecBytesPerFrame = 0; // codec-side frame size (codecChannels)
+    std::vector<uint8_t> codecBuffer;    // raw codec-rate/codec-channel PCM, scratch
+    std::vector<uint8_t> convertBuffer;  // intermediate scratch for the second conversion stage
 
     // Lifetime guard: closeStream() can be triggered from a different task than the one
     // doing read()/write() (e.g. the Settings UI disabling output while SfxEngine's audio
@@ -78,6 +117,16 @@ struct AudioStreamData {
     Device* outputCodec = nullptr;
     bool inputEnabled = true;
     bool outputEnabled = true;
+
+    // Codecs reject volume/mute/gain calls until their chip is initialized, which only
+    // happens when a stream of that direction is first opened (audio_codec_open ->
+    // esp_codec_dev_open -> chip's open()/enable()). A Settings UI must be able to set
+    // these regardless of whether anything is currently streaming, so we cache the desired
+    // values here, apply them best-effort immediately, and replay them once the codec opens.
+    float inputVolume = 100.0f;
+    float outputVolume = 100.0f;
+    bool inputMuted = false;
+    bool outputMuted = false;
     AudioStreamHandleImpl* openInput = nullptr;
     AudioStreamHandleImpl* openOutput = nullptr;
     // Guards openInput/openOutput and the closing/busyCount fields of any handle reachable
@@ -89,7 +138,8 @@ struct AudioStreamData {
 
 struct CodecSearchContext {
     enum AudioCodecDirection wantedDirection;
-    Device* found = nullptr;
+    Device* exactMatch = nullptr;
+    Device* fallbackMatch = nullptr;
 };
 
 bool findCodecByDirection(Device* device, void* contextPtr) {
@@ -103,9 +153,21 @@ bool findCodecByDirection(Device* device, void* contextPtr) {
         return true;
     }
 
-    if ((capabilities & context->wantedDirection) == context->wantedDirection) {
-        context->found = device;
-        return false; // stop searching
+    if (capabilities == context->wantedDirection) {
+        // Dedicated codec for exactly this direction (e.g. an input-only mic ADC) --
+        // prefer it over a wider-capability codec and stop looking.
+        context->exactMatch = device;
+        return false;
+    }
+
+    if ((capabilities & context->wantedDirection) == context->wantedDirection
+        && context->fallbackMatch == nullptr) {
+        // Supports the wanted direction as part of a wider capability set (e.g. a
+        // BOTH-capable codec asked for INPUT). Remember it but keep looking -- boards
+        // commonly pair a BOTH-capable output codec with a separate dedicated input
+        // ADC, and binding the wrong one makes both directions fight over the same
+        // physical esp_codec_dev handle (reopen for input reconfigures/breaks output).
+        context->fallbackMatch = device;
     }
 
     return true;
@@ -114,7 +176,7 @@ bool findCodecByDirection(Device* device, void* contextPtr) {
 Device* findFirstCodecSupporting(enum AudioCodecDirection direction) {
     CodecSearchContext context = { .wantedDirection = direction };
     device_for_each_of_type(&AUDIO_CODEC_TYPE, &context, findCodecByDirection);
-    return context.found;
+    return (context.exactMatch != nullptr) ? context.exactMatch : context.fallbackMatch;
 }
 
 // The audio-stream device is constructed while modules start, which happens before the
@@ -130,6 +192,31 @@ Device* codecForDirection(AudioStreamData* data, enum AudioCodecDirection direct
         }
     }
     return *slot;
+}
+
+// Marks an I/O operation as in-flight on `handle`, preventing closeStream() from freeing it
+// underneath us. Returns false (and does nothing further) if the handle is closing/closed --
+// callers must bail out with an error in that case. Must be paired with ioEnd().
+bool ioBegin(AudioStreamData* data, AudioStreamHandleImpl* handle) {
+    xSemaphoreTake(data->mutex, portMAX_DELAY);
+    bool isInput = (handle->direction == AUDIO_CODEC_DIR_INPUT);
+    AudioStreamHandleImpl* slotValue = isInput ? data->openInput : data->openOutput;
+    if (slotValue != handle || handle->closing) {
+        xSemaphoreGive(data->mutex);
+        return false;
+    }
+    handle->busyCount++;
+    xSemaphoreGive(data->mutex);
+    return true;
+}
+
+void ioEnd(AudioStreamData* data, AudioStreamHandleImpl* handle) {
+    xSemaphoreTake(data->mutex, portMAX_DELAY);
+    handle->busyCount--;
+    if (handle->closing && handle->busyCount == 0) {
+        xSemaphoreGive(handle->drainSemaphore);
+    }
+    xSemaphoreGive(data->mutex);
 }
 
 // region AudioStreamApi
@@ -171,19 +258,45 @@ error_t openStream(Device* device, const struct AudioStreamConfig* config, enum 
 
     uint32_t codecRate = 0;
     if (audio_codec_get_native_sample_rate(codec, direction, &codecRate) != ERROR_NONE || codecRate == 0) {
+        xSemaphoreTake(data->mutex, portMAX_DELAY);
+        if (*slot == reservation) { *slot = nullptr; }
+        xSemaphoreGive(data->mutex);
         return ERROR_RESOURCE;
+    }
+
+    // The codec must be opened with its native channel layout (e.g. 4 for a 4-slot TDM mic
+    // ADC) -- opening it with the app's requested channel count can silently corrupt the
+    // stream (ES7210 in TDM mode halves its configured bit depth for <= 2 channels). We
+    // convert between the codec's layout and the app's requested channel count ourselves.
+    uint8_t codecChannels = config->channels;
+    if (audio_codec_get_native_channels(codec, direction, &codecChannels) != ERROR_NONE || codecChannels == 0) {
+        codecChannels = config->channels;
     }
 
     struct AudioCodecStreamConfig codecConfig = {
         .sample_rate = codecRate,
         .bits_per_sample = config->bits_per_sample,
-        .channels = config->channels,
+        .channels = codecChannels,
         .direction = direction,
     };
 
     if (audio_codec_open(codec, &codecConfig) != ERROR_NONE) {
         LOG_E(TAG, "Failed to open codec for %s", isInput ? "input" : "output");
+        xSemaphoreTake(data->mutex, portMAX_DELAY);
+        if (*slot == reservation) { *slot = nullptr; }
+        xSemaphoreGive(data->mutex);
         return ERROR_RESOURCE;
+    }
+
+    // The chip is initialized now -- replay any volume/mute settings that were requested
+    // before this stream existed (set_volume/set_mute cache them but the chip rejects them
+    // until opened).
+    if (isInput) {
+        audio_codec_set_volume(codec, AUDIO_CODEC_DIR_INPUT, data->inputVolume);
+        audio_codec_set_mute(codec, AUDIO_CODEC_DIR_INPUT, data->inputMuted);
+    } else {
+        audio_codec_set_volume(codec, AUDIO_CODEC_DIR_OUTPUT, data->outputVolume);
+        audio_codec_set_mute(codec, AUDIO_CODEC_DIR_OUTPUT, data->outputMuted);
     }
 
     auto* handle = new AudioStreamHandleImpl();
@@ -191,9 +304,15 @@ error_t openStream(Device* device, const struct AudioStreamConfig* config, enum 
     handle->direction = direction;
     handle->config = *config;
     handle->codecRate = codecRate;
+    handle->codecChannels = codecChannels;
     handle->bytesPerFrame = (uint8_t) ((config->bits_per_sample / 8) * config->channels);
+    handle->codecBytesPerFrame = (uint8_t) ((config->bits_per_sample / 8) * codecChannels);
+    handle->drainSemaphore = xSemaphoreCreateBinary();
 
+    xSemaphoreTake(data->mutex, portMAX_DELAY);
     *slot = handle;
+    xSemaphoreGive(data->mutex);
+
     *outHandle = handle;
     return ERROR_NONE;
 }
@@ -225,38 +344,61 @@ error_t readStream(AudioStreamHandle handleBase, void* outData, size_t dataSize,
         return ERROR_NONE;
     }
 
-    if (handle->codecRate == handle->config.sample_rate) {
+    if (!ioBegin(data, handle)) {
+        return ERROR_INVALID_STATE;
+    }
+
+    bool sameRate = (handle->codecRate == handle->config.sample_rate);
+    bool sameChannels = (handle->codecChannels == handle->config.channels);
+
+    error_t result;
+    if (sameRate && sameChannels) {
         size_t codecBytesRead = 0;
-        error_t error = audio_codec_read(data->inputCodec, outData, dataSize, &codecBytesRead, timeout);
+        result = audio_codec_read(data->inputCodec, outData, dataSize, &codecBytesRead, timeout);
         if (bytesRead != nullptr) {
             *bytesRead = codecBytesRead;
         }
-        return error;
+    } else {
+        // Read enough codec-rate frames to produce the requested number of output-rate frames.
+        size_t codecFrames = (size_t) ((double) requestedFrames * ((double) handle->codecRate / (double) handle->config.sample_rate)) + 2;
+        size_t codecBytesNeeded = codecFrames * handle->codecBytesPerFrame;
+        if (handle->codecBuffer.size() < codecBytesNeeded) {
+            handle->codecBuffer.resize(codecBytesNeeded);
+        }
+
+        size_t codecBytesRead = 0;
+        result = audio_codec_read(data->inputCodec, handle->codecBuffer.data(), codecBytesNeeded, &codecBytesRead, timeout);
+        if (result == ERROR_NONE) {
+            size_t codecFramesRead = codecBytesRead / handle->codecBytesPerFrame;
+            const int16_t* rateInput = reinterpret_cast<const int16_t*>(handle->codecBuffer.data());
+            uint8_t rateInputChannels = handle->codecChannels;
+            size_t rateInputFrames = codecFramesRead;
+
+            // Downmix first (while still at the codec's higher rate -- cheaper) if needed.
+            if (!sameChannels) {
+                size_t convertBytesNeeded = codecFramesRead * handle->bytesPerFrame;
+                if (handle->convertBuffer.size() < convertBytesNeeded) {
+                    handle->convertBuffer.resize(convertBytesNeeded);
+                }
+                convertChannelsS16(rateInput, codecFramesRead, handle->codecChannels,
+                                   reinterpret_cast<int16_t*>(handle->convertBuffer.data()), handle->config.channels);
+                rateInput = reinterpret_cast<const int16_t*>(handle->convertBuffer.data());
+                rateInputChannels = handle->config.channels;
+            }
+
+            size_t outFrames = resampleS16(
+                rateInput, rateInputFrames, rateInputChannels,
+                handle->codecRate, handle->config.sample_rate,
+                reinterpret_cast<int16_t*>(outData), requestedFrames);
+
+            if (bytesRead != nullptr) {
+                *bytesRead = outFrames * handle->bytesPerFrame;
+            }
+        }
     }
 
-    // Read enough codec-rate frames to produce the requested number of output-rate frames.
-    size_t codecFrames = (size_t) ((double) requestedFrames * ((double) handle->codecRate / (double) handle->config.sample_rate)) + 2;
-    size_t codecBytesNeeded = codecFrames * handle->bytesPerFrame;
-    if (handle->codecBuffer.size() < codecBytesNeeded) {
-        handle->codecBuffer.resize(codecBytesNeeded);
-    }
-
-    size_t codecBytesRead = 0;
-    error_t error = audio_codec_read(data->inputCodec, handle->codecBuffer.data(), codecBytesNeeded, &codecBytesRead, timeout);
-    if (error != ERROR_NONE) {
-        return error;
-    }
-
-    size_t codecFramesRead = codecBytesRead / handle->bytesPerFrame;
-    size_t outFrames = resampleS16(
-        reinterpret_cast<const int16_t*>(handle->codecBuffer.data()), codecFramesRead, handle->config.channels,
-        handle->codecRate, handle->config.sample_rate,
-        reinterpret_cast<int16_t*>(outData), requestedFrames);
-
-    if (bytesRead != nullptr) {
-        *bytesRead = outFrames * handle->bytesPerFrame;
-    }
-    return ERROR_NONE;
+    ioEnd(data, handle);
+    return result;
 }
 
 error_t writeStream(AudioStreamHandle handleBase, const void* inData, size_t dataSize, size_t* bytesWritten, TickType_t timeout) {
@@ -278,39 +420,66 @@ error_t writeStream(AudioStreamHandle handleBase, const void* inData, size_t dat
         return ERROR_NONE;
     }
 
-    if (handle->codecRate == handle->config.sample_rate) {
+    if (!ioBegin(data, handle)) {
+        return ERROR_INVALID_STATE;
+    }
+
+    bool sameRate = (handle->codecRate == handle->config.sample_rate);
+    bool sameChannels = (handle->codecChannels == handle->config.channels);
+
+    error_t result;
+    if (sameRate && sameChannels) {
         size_t codecBytesWritten = 0;
-        error_t error = audio_codec_write(data->outputCodec, inData, dataSize, &codecBytesWritten, timeout);
+        result = audio_codec_write(data->outputCodec, inData, dataSize, &codecBytesWritten, timeout);
         if (bytesWritten != nullptr) {
             // Report in terms of input bytes consumed, matching codecBytesWritten 1:1 here.
             *bytesWritten = codecBytesWritten;
         }
-        return error;
+    } else {
+        const int16_t* rateInput = reinterpret_cast<const int16_t*>(inData);
+        uint8_t rateInputChannels = handle->config.channels;
+        size_t rateInputFrames = inFrames;
+
+        // Upmix/downmix first (while still at the app's rate -- cheaper if downmixing) if needed.
+        if (!sameChannels) {
+            size_t convertBytesNeeded = inFrames * handle->codecBytesPerFrame;
+            if (handle->convertBuffer.size() < convertBytesNeeded) {
+                handle->convertBuffer.resize(convertBytesNeeded);
+            }
+            convertChannelsS16(rateInput, inFrames, handle->config.channels,
+                               reinterpret_cast<int16_t*>(handle->convertBuffer.data()), handle->codecChannels);
+            rateInput = reinterpret_cast<const int16_t*>(handle->convertBuffer.data());
+            rateInputChannels = handle->codecChannels;
+        }
+
+        size_t codecFrameCapacity = (size_t) ((double) rateInputFrames * ((double) handle->codecRate / (double) handle->config.sample_rate)) + 2;
+        size_t codecBytesCapacity = codecFrameCapacity * handle->codecBytesPerFrame;
+        if (handle->codecBuffer.size() < codecBytesCapacity) {
+            handle->codecBuffer.resize(codecBytesCapacity);
+        }
+
+        size_t codecFrames;
+        if (sameRate) {
+            codecFrames = rateInputFrames;
+            std::memcpy(handle->codecBuffer.data(), rateInput, rateInputFrames * handle->codecBytesPerFrame);
+        } else {
+            codecFrames = resampleS16(
+                rateInput, rateInputFrames, rateInputChannels,
+                handle->config.sample_rate, handle->codecRate,
+                reinterpret_cast<int16_t*>(handle->codecBuffer.data()), codecFrameCapacity);
+        }
+
+        size_t codecBytesToWrite = codecFrames * handle->codecBytesPerFrame;
+        size_t codecBytesWritten = 0;
+        result = audio_codec_write(data->outputCodec, handle->codecBuffer.data(), codecBytesToWrite, &codecBytesWritten, timeout);
+        if (result == ERROR_NONE && bytesWritten != nullptr) {
+            // The caller provided `dataSize` worth of input; we consumed all of it (resampled/converted).
+            *bytesWritten = dataSize;
+        }
     }
 
-    size_t codecFrameCapacity = (size_t) ((double) inFrames * ((double) handle->codecRate / (double) handle->config.sample_rate)) + 2;
-    size_t codecBytesCapacity = codecFrameCapacity * handle->bytesPerFrame;
-    if (handle->codecBuffer.size() < codecBytesCapacity) {
-        handle->codecBuffer.resize(codecBytesCapacity);
-    }
-
-    size_t codecFrames = resampleS16(
-        reinterpret_cast<const int16_t*>(inData), inFrames, handle->config.channels,
-        handle->config.sample_rate, handle->codecRate,
-        reinterpret_cast<int16_t*>(handle->codecBuffer.data()), codecFrameCapacity);
-
-    size_t codecBytesToWrite = codecFrames * handle->bytesPerFrame;
-    size_t codecBytesWritten = 0;
-    error_t error = audio_codec_write(data->outputCodec, handle->codecBuffer.data(), codecBytesToWrite, &codecBytesWritten, timeout);
-    if (error != ERROR_NONE) {
-        return error;
-    }
-
-    if (bytesWritten != nullptr) {
-        // The caller provided `dataSize` worth of input; we consumed all of it (resampled).
-        *bytesWritten = dataSize;
-    }
-    return ERROR_NONE;
+    ioEnd(data, handle);
+    return result;
 }
 
 error_t closeStream(AudioStreamHandle handleBase) {
@@ -324,12 +493,29 @@ error_t closeStream(AudioStreamHandle handleBase) {
     Device* codec = isInput ? data->inputCodec : data->outputCodec;
     AudioStreamHandleImpl** slot = isInput ? &data->openInput : &data->openOutput;
 
+    xSemaphoreTake(data->mutex, portMAX_DELAY);
+    if (handle->closing) {
+        // Already being closed by another caller (e.g. concurrent setEnabled + app close).
+        xSemaphoreGive(data->mutex);
+        return ERROR_NONE;
+    }
+    handle->closing = true;
+    if (*slot == handle) {
+        *slot = nullptr;
+    }
+    bool mustDrain = (handle->busyCount > 0);
+    xSemaphoreGive(data->mutex);
+
+    if (mustDrain) {
+        xSemaphoreTake(handle->drainSemaphore, portMAX_DELAY);
+    }
+
     if (codec != nullptr) {
         audio_codec_close(codec);
     }
 
-    if (*slot == handle) {
-        *slot = nullptr;
+    if (handle->drainSemaphore != nullptr) {
+        vSemaphoreDelete(handle->drainSemaphore);
     }
 
     delete handle;
@@ -345,19 +531,33 @@ error_t setVolume(Device* device, enum AudioCodecDirection direction, float volu
     if (codec == nullptr) {
         return ERROR_NOT_SUPPORTED;
     }
-    return audio_codec_set_volume(codec, direction, volumePercent);
+
+    bool isInput = (direction == AUDIO_CODEC_DIR_INPUT);
+    if (isInput) { data->inputVolume = volumePercent; } else { data->outputVolume = volumePercent; }
+
+    // The chip rejects this until it's been opened by a stream of this direction; that's
+    // fine -- the cached value above gets replayed in openStream() once it is.
+    audio_codec_set_volume(codec, direction, volumePercent);
+    return ERROR_NONE;
 }
 
 error_t getVolume(Device* device, enum AudioCodecDirection direction, float* volumePercent) {
     auto* data = GET_DATA(device);
-    if (data == nullptr) {
+    if (data == nullptr || volumePercent == nullptr) {
         return ERROR_RESOURCE;
     }
     Device* codec = codecForDirection(data, direction);
     if (codec == nullptr) {
         return ERROR_NOT_SUPPORTED;
     }
-    return audio_codec_get_volume(codec, direction, volumePercent);
+
+    if (audio_codec_get_volume(codec, direction, volumePercent) == ERROR_NONE) {
+        return ERROR_NONE;
+    }
+
+    // Codec not open yet -- report the cached/desired value instead.
+    *volumePercent = (direction == AUDIO_CODEC_DIR_INPUT) ? data->inputVolume : data->outputVolume;
+    return ERROR_NONE;
 }
 
 error_t setMute(Device* device, enum AudioCodecDirection direction, bool muted) {
@@ -369,19 +569,32 @@ error_t setMute(Device* device, enum AudioCodecDirection direction, bool muted) 
     if (codec == nullptr) {
         return ERROR_NOT_SUPPORTED;
     }
-    return audio_codec_set_mute(codec, direction, muted);
+
+    bool isInput = (direction == AUDIO_CODEC_DIR_INPUT);
+    if (isInput) { data->inputMuted = muted; } else { data->outputMuted = muted; }
+
+    // As with volume, the chip may reject this until opened; cached value is replayed
+    // in openStream().
+    audio_codec_set_mute(codec, direction, muted);
+    return ERROR_NONE;
 }
 
 error_t getMute(Device* device, enum AudioCodecDirection direction, bool* muted) {
     auto* data = GET_DATA(device);
-    if (data == nullptr) {
+    if (data == nullptr || muted == nullptr) {
         return ERROR_RESOURCE;
     }
     Device* codec = codecForDirection(data, direction);
     if (codec == nullptr) {
         return ERROR_NOT_SUPPORTED;
     }
-    return audio_codec_get_mute(codec, direction, muted);
+
+    if (audio_codec_get_mute(codec, direction, muted) == ERROR_NONE) {
+        return ERROR_NONE;
+    }
+
+    *muted = (direction == AUDIO_CODEC_DIR_INPUT) ? data->inputMuted : data->outputMuted;
+    return ERROR_NONE;
 }
 
 error_t setEnabled(Device* device, enum AudioCodecDirection direction, bool enabled) {

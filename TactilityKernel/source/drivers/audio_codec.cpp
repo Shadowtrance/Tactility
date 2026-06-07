@@ -52,6 +52,11 @@ error_t audio_codec_get_native_sample_rate(Device* device, enum AudioCodecDirect
     return AUDIO_CODEC_DRIVER_API(driver)->get_native_sample_rate(device, direction, rateHz);
 }
 
+error_t audio_codec_get_native_channels(Device* device, enum AudioCodecDirection direction, uint8_t* channels) {
+    const auto* driver = device_get_driver(device);
+    return AUDIO_CODEC_DRIVER_API(driver)->get_native_channels(device, direction, channels);
+}
+
 error_t audio_codec_get_capabilities(Device* device, enum AudioCodecDirection* supportedDirections) {
     const auto* driver = device_get_driver(device);
     return AUDIO_CODEC_DRIVER_API(driver)->get_capabilities(device, supportedDirections);

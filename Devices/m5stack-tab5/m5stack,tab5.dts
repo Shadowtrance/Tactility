@@ -71,6 +71,11 @@
 			compatible = "everest,es7210";
 			reg = <0x40>;
 			i2s = "i2s0";
+			// Only TDM slots 0 and 2 (MIC1, MIC3) carry real signal on this board's
+			// 2-mic array; slots 1/3 are unconnected. Selecting just the wired mics
+			// keeps get_native_channels()/downmix proportional (see MicTest's
+			// empirical "Slot peaks" finding -- s0/s2 carry signal, s1/s3 don't).
+			mic-mask = <5>;
 		};
 
 		rx8130ce {

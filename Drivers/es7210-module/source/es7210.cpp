@@ -12,6 +12,9 @@
 #include <esp_codec_dev.h>
 #include <esp_codec_dev_defaults.h>
 
+#include <cstring>
+#include <vector>
+
 #define TAG "ES7210"
 
 namespace {
@@ -24,6 +27,11 @@ struct Es7210Data {
     const audio_codec_if_t* codecIf = nullptr;
     esp_codec_dev_handle_t codecDevice = nullptr;
     bool isOpen = false;
+    uint8_t micCount = 4;
+    uint8_t micMask = 0x0F;
+    uint8_t tdmSlotCount = 4;
+    uint8_t openBitsPerSample = 16;
+    std::vector<uint8_t> rawBuffer;
 };
 
 #define GET_CONFIG(device) (static_cast<const Es7210Config*>((device)->config))
@@ -46,9 +54,15 @@ error_t open_(Device* device, const struct AudioCodecStreamConfig* config) {
         return ERROR_NONE;
     }
 
+    // Always configure the hardware with the full TDM slot count, never the (possibly
+    // smaller) active mic count: es7210_set_fs() silently halves the configured bit depth
+    // when asked for <= 2 channels in TDM mode (channel_mask == 0), corrupting audio.
+    // We demux down to the active mic slots ourselves in read_().
+    uint8_t hwChannels = data->tdmSlotCount;
+
     esp_codec_dev_sample_info_t sampleInfo = {
         .bits_per_sample = config->bits_per_sample,
-        .channel = config->channels,
+        .channel = hwChannels,
         .channel_mask = 0,
         .sample_rate = config->sample_rate,
         .mclk_multiple = 0,
@@ -59,6 +73,7 @@ error_t open_(Device* device, const struct AudioCodecStreamConfig* config) {
         return ERROR_RESOURCE;
     }
 
+    data->openBitsPerSample = config->bits_per_sample;
     data->isOpen = true;
     return ERROR_NONE;
 }
@@ -84,16 +99,66 @@ error_t read_(Device* device, void* buffer, size_t size, size_t* bytesRead, Tick
         return ERROR_RESOURCE;
     }
 
-    // esp_codec_dev_read returns the number of bytes read (>= 0) on success, or a negative
-    // ESP_CODEC_DEV_* error code on failure -- it does NOT return ESP_CODEC_DEV_OK (0) for
-    // a successful nonzero-length read.
-    int result = esp_codec_dev_read(data->codecDevice, buffer, (int) size);
+    // The hardware always runs at tdmSlotCount channels (see open_ for why); demux down
+    // to just the active mic slots here so callers see exactly micCount channels of real
+    // signal -- never diluted by silent/AEC-reference TDM slots.
+    if (data->micCount == data->tdmSlotCount) {
+        int result = esp_codec_dev_read(data->codecDevice, buffer, (int) size);
+        if (result < 0) {
+            return ERROR_RESOURCE;
+        }
+        if (bytesRead != nullptr) {
+            *bytesRead = (size_t) result;
+        }
+        return ERROR_NONE;
+    }
+
+    uint8_t bytesPerSample = (uint8_t) (data->openBitsPerSample / 8);
+    size_t outFrameBytes = (size_t) data->micCount * bytesPerSample;
+    size_t requestedFrames = (outFrameBytes != 0) ? (size / outFrameBytes) : 0;
+    if (requestedFrames == 0) {
+        if (bytesRead != nullptr) {
+            *bytesRead = 0;
+        }
+        return ERROR_NONE;
+    }
+
+    size_t rawFrameBytes = (size_t) data->tdmSlotCount * bytesPerSample;
+    size_t rawBytesNeeded = requestedFrames * rawFrameBytes;
+    if (data->rawBuffer.size() < rawBytesNeeded) {
+        data->rawBuffer.resize(rawBytesNeeded);
+    }
+
+    int result = esp_codec_dev_read(data->codecDevice, data->rawBuffer.data(), (int) rawBytesNeeded);
     if (result < 0) {
         return ERROR_RESOURCE;
     }
 
+    size_t rawBytesRead = (size_t) result;
+    size_t framesRead = rawBytesRead / rawFrameBytes;
+
+    // Demux: pick the bytesPerSample-wide slot for each set bit in micMask, in ascending
+    // slot order, e.g. micMask = MIC1|MIC3 -> slots 0 and 2.
+    uint8_t slotIndices[8];
+    uint8_t slotCount = 0;
+    for (uint8_t slot = 0; slot < data->tdmSlotCount && slotCount < sizeof(slotIndices); slot++) {
+        if ((data->micMask & (uint8_t) (1u << slot)) != 0) {
+            slotIndices[slotCount++] = slot;
+        }
+    }
+
+    auto* out = static_cast<uint8_t*>(buffer);
+    const uint8_t* raw = data->rawBuffer.data();
+    for (size_t frame = 0; frame < framesRead; frame++) {
+        const uint8_t* rawFrame = raw + frame * rawFrameBytes;
+        uint8_t* outFrame = out + frame * outFrameBytes;
+        for (uint8_t ch = 0; ch < slotCount && ch < data->micCount; ch++) {
+            std::memcpy(outFrame + (size_t) ch * bytesPerSample, rawFrame + (size_t) slotIndices[ch] * bytesPerSample, bytesPerSample);
+        }
+    }
+
     if (bytesRead != nullptr) {
-        *bytesRead = (size_t) result;
+        *bytesRead = framesRead * outFrameBytes;
     }
     return ERROR_NONE;
 }
@@ -150,6 +215,15 @@ error_t getMute(Device* device, enum AudioCodecDirection direction, bool* muted)
     return (esp_codec_dev_get_in_mute(data->codecDevice, muted) == ESP_CODEC_DEV_OK) ? ERROR_NONE : ERROR_RESOURCE;
 }
 
+error_t getNativeChannels(Device* device, enum AudioCodecDirection direction, uint8_t* channels) {
+    auto* data = GET_DATA(device);
+    if (data == nullptr || direction != AUDIO_CODEC_DIR_INPUT || channels == nullptr) {
+        return ERROR_NOT_SUPPORTED;
+    }
+    *channels = data->micCount;
+    return ERROR_NONE;
+}
+
 error_t getNativeSampleRate(Device* device, enum AudioCodecDirection direction, uint32_t* rateHz) {
     (void) device;
     if (direction != AUDIO_CODEC_DIR_INPUT || rateHz == nullptr) {
@@ -178,6 +252,7 @@ const struct AudioCodecApi API = {
     .set_mute = setMute,
     .get_mute = getMute,
     .get_native_sample_rate = getNativeSampleRate,
+    .get_native_channels = getNativeChannels,
     .get_capabilities = getCapabilities,
 };
 
@@ -202,6 +277,13 @@ error_t startDevice(Device* device) {
 
     auto* data = new Es7210Data();
 
+    uint8_t micMask = (config->mic_selected_mask != 0)
+        ? config->mic_selected_mask
+        : (uint8_t) (ES7210_SEL_MIC1 | ES7210_SEL_MIC2 | ES7210_SEL_MIC3 | ES7210_SEL_MIC4);
+    data->micMask = micMask;
+    data->micCount = (uint8_t) __builtin_popcount(micMask);
+    data->tdmSlotCount = 4;
+
     data->ctrlIf = audio_codec_adapter_new_i2c_ctrl(i2cController, config->address);
     data->dataIf = audio_codec_adapter_new_i2s_data(i2sController);
     if (data->ctrlIf == nullptr || data->dataIf == nullptr) {
@@ -225,9 +307,7 @@ error_t startDevice(Device* device) {
     es7210_codec_cfg_t codecConfig = {};
     codecConfig.ctrl_if = data->ctrlIf;
     codecConfig.master_mode = false;
-    codecConfig.mic_selected = (config->mic_selected_mask != 0)
-        ? config->mic_selected_mask
-        : (uint8_t) (ES7210_SEL_MIC1 | ES7210_SEL_MIC2 | ES7210_SEL_MIC3 | ES7210_SEL_MIC4);
+    codecConfig.mic_selected = micMask;
     codecConfig.mclk_src = ES7210_MCLK_FROM_PAD;
     codecConfig.mclk_div = 0;
 
