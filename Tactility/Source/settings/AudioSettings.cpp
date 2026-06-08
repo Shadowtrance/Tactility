@@ -60,8 +60,8 @@ bool load(AudioSettings& settings) {
     settings.outputEnabled = toBool(map, SETTINGS_KEY_OUTPUT_ENABLED, true);
     settings.inputMuted = toBool(map, SETTINGS_KEY_INPUT_MUTED, false);
     settings.outputMuted = toBool(map, SETTINGS_KEY_OUTPUT_MUTED, false);
-    settings.inputVolume = toFloat(map, SETTINGS_KEY_INPUT_VOLUME, 20.0f);
-    settings.outputVolume = toFloat(map, SETTINGS_KEY_OUTPUT_VOLUME, 20.0f);
+    settings.inputVolume = toFloat(map, SETTINGS_KEY_INPUT_VOLUME, 90.0f);
+    settings.outputVolume = toFloat(map, SETTINGS_KEY_OUTPUT_VOLUME, 50.0f);
 
     return true;
 }
@@ -72,8 +72,8 @@ AudioSettings getDefault() {
         .outputEnabled = true,
         .inputMuted = false,
         .outputMuted = false,
-        .inputVolume = 20.0f,
-        .outputVolume = 20.0f
+        .inputVolume = 90.0f,
+        .outputVolume = 50.0f
     };
 }
 
