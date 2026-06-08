@@ -2,6 +2,8 @@
 
 #include <Tactility/file/PropertiesFile.h>
 
+#include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <string>
@@ -29,7 +31,11 @@ static float toFloat(const std::map<std::string, std::string>& map, const char* 
     if (entry == map.end()) {
         return defaultValue;
     }
-    return std::strtof(entry->second.c_str(), nullptr);
+    // Volume is documented/consumed as a 0..100 percentage (audio_stream_set_volume); clamp
+    // here so a hand-edited or corrupted properties file can't push out-of-range values
+    // through to the codec.
+    float value = std::strtof(entry->second.c_str(), nullptr);
+    return std::clamp(value, 0.0f, 100.0f);
 }
 
 static std::string toString(bool value) {
@@ -37,7 +43,11 @@ static std::string toString(bool value) {
 }
 
 static std::string toString(float value) {
-    return std::to_string(value);
+    // std::to_string always emits 6 decimals (e.g. "20.000000"); volume is a 0..100
+    // percentage where whole-number precision is all that's meaningful here.
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%.1f", (double) value);
+    return std::string(buffer);
 }
 
 bool load(AudioSettings& settings) {

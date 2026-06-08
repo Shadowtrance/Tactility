@@ -76,6 +76,14 @@ const audio_codec_gpio_if_t* audio_codec_adapter_new_gpio(const struct GpioPinSp
         return NULL;
     }
 
+    // esp_codec_dev's gpio_if_t has no per-call user context -- only a single global instance
+    // is supported (see g_context usage in acquire_descriptor()/gpio_setup/etc). A second
+    // call would silently replace it underneath whatever codec already holds the first
+    // pointer, so refuse rather than corrupt that codec's GPIO access.
+    if (g_context != NULL) {
+        return NULL;
+    }
+
     struct GpioAdapterContext* context = (struct GpioAdapterContext*) calloc(1, sizeof(struct GpioAdapterContext));
     if (context == NULL) {
         return NULL;
@@ -93,7 +101,6 @@ const audio_codec_gpio_if_t* audio_codec_adapter_new_gpio(const struct GpioPinSp
     context->base.set = gpio_set;
     context->base.get = gpio_get;
 
-    // esp_codec_dev's gpio_if_t has no per-call user context, only a global default instance is expected.
     g_context = context;
 
     return &context->base;

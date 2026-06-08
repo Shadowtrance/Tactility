@@ -267,52 +267,72 @@ error_t startDevice(Device* device) {
     data->dataIf = audio_codec_adapter_new_i2s_data(i2sController);
     if (data->ctrlIf == nullptr || data->dataIf == nullptr) {
         LOG_E(TAG, "Failed to create adapters");
-        delete data;
-        return ERROR_RESOURCE;
+        goto cleanup;
     }
 
     if (data->ctrlIf->open(data->ctrlIf, nullptr, 0) != ESP_CODEC_DEV_OK) {
         LOG_E(TAG, "Failed to open control interface");
-        delete data;
-        return ERROR_RESOURCE;
+        goto cleanup;
     }
 
     if (data->dataIf->open(data->dataIf, nullptr, 0) != ESP_CODEC_DEV_OK) {
         LOG_E(TAG, "Failed to open data interface");
-        delete data;
-        return ERROR_RESOURCE;
+        goto cleanup;
     }
 
-    es8388_codec_cfg_t codecConfig = {};
-    codecConfig.ctrl_if = data->ctrlIf;
-    codecConfig.gpio_if = nullptr;
-    codecConfig.codec_mode = ESP_CODEC_DEV_WORK_MODE_BOTH;
-    codecConfig.master_mode = false;
-    codecConfig.pa_pin = -1;
-    codecConfig.pa_reverted = false;
+    {
+        es8388_codec_cfg_t codecConfig = {};
+        codecConfig.ctrl_if = data->ctrlIf;
+        codecConfig.gpio_if = nullptr;
+        codecConfig.codec_mode = ESP_CODEC_DEV_WORK_MODE_BOTH;
+        codecConfig.master_mode = false;
+        codecConfig.pa_pin = -1;
+        codecConfig.pa_reverted = false;
 
-    data->codecIf = es8388_codec_new(&codecConfig);
-    if (data->codecIf == nullptr) {
-        LOG_E(TAG, "Failed to create ES8388 codec interface");
-        delete data;
-        return ERROR_RESOURCE;
+        data->codecIf = es8388_codec_new(&codecConfig);
+        if (data->codecIf == nullptr) {
+            LOG_E(TAG, "Failed to create ES8388 codec interface");
+            goto cleanup;
+        }
     }
 
-    esp_codec_dev_cfg_t devConfig = {
-        .dev_type = ESP_CODEC_DEV_TYPE_IN_OUT,
-        .codec_if = data->codecIf,
-        .data_if = data->dataIf,
-    };
+    {
+        esp_codec_dev_cfg_t devConfig = {
+            .dev_type = ESP_CODEC_DEV_TYPE_IN_OUT,
+            .codec_if = data->codecIf,
+            .data_if = data->dataIf,
+        };
 
-    data->codecDevice = esp_codec_dev_new(&devConfig);
-    if (data->codecDevice == nullptr) {
-        LOG_E(TAG, "Failed to create codec device");
-        delete data;
-        return ERROR_RESOURCE;
+        data->codecDevice = esp_codec_dev_new(&devConfig);
+        if (data->codecDevice == nullptr) {
+            LOG_E(TAG, "Failed to create codec device");
+            goto cleanup;
+        }
     }
 
     device_set_driver_data(device, data);
     return ERROR_NONE;
+
+cleanup:
+    // Mirrors stopDevice's teardown order -- delete_*_if() routines close their interface
+    // first, so we don't need separate ->close() calls here.
+    if (data->codecDevice != nullptr) {
+        esp_codec_dev_delete(data->codecDevice);
+    }
+    if (data->codecIf != nullptr) {
+        audio_codec_delete_codec_if(data->codecIf);
+    }
+    if (data->gpioIf != nullptr) {
+        audio_codec_adapter_delete_gpio(data->gpioIf);
+    }
+    if (data->dataIf != nullptr) {
+        audio_codec_delete_data_if(data->dataIf);
+    }
+    if (data->ctrlIf != nullptr) {
+        audio_codec_delete_ctrl_if(data->ctrlIf);
+    }
+    delete data;
+    return ERROR_RESOURCE;
 }
 
 error_t stopDevice(Device* device) {

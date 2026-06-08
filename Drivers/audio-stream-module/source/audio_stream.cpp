@@ -185,13 +185,28 @@ Device* findFirstCodecSupporting(enum AudioCodecDirection direction) {
 // point the device tree has finished starting.
 Device* codecForDirection(AudioStreamData* data, enum AudioCodecDirection direction) {
     Device** slot = (direction == AUDIO_CODEC_DIR_INPUT) ? &data->inputCodec : &data->outputCodec;
+
+    // Fast path: already resolved (the common case after first use).
+    Device* existing = *slot;
+    if (existing != nullptr) {
+        return existing;
+    }
+
+    // Slow path: resolve outside the lock (device_for_each_of_type can be costly), then
+    // re-check under the mutex before committing -- avoids two threads racing to write
+    // *slot (and double-logging "Bound ... codec").
+    Device* found = findFirstCodecSupporting(direction);
+
+    xSemaphoreTake(data->mutex, portMAX_DELAY);
     if (*slot == nullptr) {
-        *slot = findFirstCodecSupporting(direction);
-        if (*slot != nullptr) {
-            LOG_I(TAG, "Bound %s codec: %s", (direction == AUDIO_CODEC_DIR_INPUT) ? "input" : "output", (*slot)->name);
+        *slot = found;
+        if (found != nullptr) {
+            LOG_I(TAG, "Bound %s codec: %s", (direction == AUDIO_CODEC_DIR_INPUT) ? "input" : "output", found->name);
         }
     }
-    return *slot;
+    Device* result = *slot;
+    xSemaphoreGive(data->mutex);
+    return result;
 }
 
 // Marks an I/O operation as in-flight on `handle`, preventing closeStream() from freeing it
@@ -223,6 +238,17 @@ void ioEnd(AudioStreamData* data, AudioStreamHandleImpl* handle) {
 
 error_t openStream(Device* device, const struct AudioStreamConfig* config, enum AudioCodecDirection direction, AudioStreamHandle* outHandle) {
     if (config == nullptr || outHandle == nullptr) {
+        return ERROR_INVALID_ARGUMENT;
+    }
+
+    if (config->bits_per_sample != 8 && config->bits_per_sample != 16
+        && config->bits_per_sample != 24 && config->bits_per_sample != 32) {
+        // bytesPerFrame/codecBytesPerFrame below assume a whole number of bytes per sample;
+        // anything else corrupts every frame-size calculation in read/writeStream.
+        return ERROR_INVALID_ARGUMENT;
+    }
+
+    if (config->channels == 0) {
         return ERROR_INVALID_ARGUMENT;
     }
 
@@ -308,6 +334,15 @@ error_t openStream(Device* device, const struct AudioStreamConfig* config, enum 
     handle->bytesPerFrame = (uint8_t) ((config->bits_per_sample / 8) * config->channels);
     handle->codecBytesPerFrame = (uint8_t) ((config->bits_per_sample / 8) * codecChannels);
     handle->drainSemaphore = xSemaphoreCreateBinary();
+    if (handle->drainSemaphore == nullptr) {
+        LOG_E(TAG, "Failed to create drain semaphore");
+        delete handle;
+        audio_codec_close(codec);
+        xSemaphoreTake(data->mutex, portMAX_DELAY);
+        if (*slot == reservation) { *slot = nullptr; }
+        xSemaphoreGive(data->mutex);
+        return ERROR_OUT_OF_MEMORY;
+    }
 
     xSemaphoreTake(data->mutex, portMAX_DELAY);
     *slot = handle;
@@ -506,7 +541,7 @@ error_t closeStream(AudioStreamHandle handleBase) {
     bool mustDrain = (handle->busyCount > 0);
     xSemaphoreGive(data->mutex);
 
-    if (mustDrain) {
+    if (mustDrain && handle->drainSemaphore != nullptr) {
         xSemaphoreTake(handle->drainSemaphore, portMAX_DELAY);
     }
 
@@ -533,7 +568,9 @@ error_t setVolume(Device* device, enum AudioCodecDirection direction, float volu
     }
 
     bool isInput = (direction == AUDIO_CODEC_DIR_INPUT);
+    xSemaphoreTake(data->mutex, portMAX_DELAY);
     if (isInput) { data->inputVolume = volumePercent; } else { data->outputVolume = volumePercent; }
+    xSemaphoreGive(data->mutex);
 
     // The chip rejects this until it's been opened by a stream of this direction; that's
     // fine -- the cached value above gets replayed in openStream() once it is.
@@ -556,7 +593,9 @@ error_t getVolume(Device* device, enum AudioCodecDirection direction, float* vol
     }
 
     // Codec not open yet -- report the cached/desired value instead.
+    xSemaphoreTake(data->mutex, portMAX_DELAY);
     *volumePercent = (direction == AUDIO_CODEC_DIR_INPUT) ? data->inputVolume : data->outputVolume;
+    xSemaphoreGive(data->mutex);
     return ERROR_NONE;
 }
 
@@ -571,7 +610,9 @@ error_t setMute(Device* device, enum AudioCodecDirection direction, bool muted) 
     }
 
     bool isInput = (direction == AUDIO_CODEC_DIR_INPUT);
+    xSemaphoreTake(data->mutex, portMAX_DELAY);
     if (isInput) { data->inputMuted = muted; } else { data->outputMuted = muted; }
+    xSemaphoreGive(data->mutex);
 
     // As with volume, the chip may reject this until opened; cached value is replayed
     // in openStream().
@@ -593,7 +634,9 @@ error_t getMute(Device* device, enum AudioCodecDirection direction, bool* muted)
         return ERROR_NONE;
     }
 
+    xSemaphoreTake(data->mutex, portMAX_DELAY);
     *muted = (direction == AUDIO_CODEC_DIR_INPUT) ? data->inputMuted : data->outputMuted;
+    xSemaphoreGive(data->mutex);
     return ERROR_NONE;
 }
 
@@ -609,17 +652,25 @@ error_t setEnabled(Device* device, enum AudioCodecDirection direction, bool enab
         return ERROR_NOT_SUPPORTED;
     }
 
+    xSemaphoreTake(data->mutex, portMAX_DELAY);
     if (isInput) {
         data->inputEnabled = enabled;
     } else {
         data->outputEnabled = enabled;
     }
 
+    // Capture and clear the slot under the lock so we hand closeStream() a pointer that
+    // can't simultaneously be torn down by a racing close from the owning app (closeStream
+    // re-checks `*slot == handle` and no-ops if it's already been cleared/replaced).
+    AudioStreamHandleImpl* toClose = nullptr;
     if (!enabled) {
         AudioStreamHandleImpl** slot = isInput ? &data->openInput : &data->openOutput;
-        if (*slot != nullptr) {
-            closeStream(*slot);
-        }
+        toClose = *slot;
+    }
+    xSemaphoreGive(data->mutex);
+
+    if (toClose != nullptr) {
+        closeStream(toClose);
     }
 
     return ERROR_NONE;
@@ -634,7 +685,9 @@ error_t getEnabled(Device* device, enum AudioCodecDirection direction, bool* ena
     if (codec == nullptr) {
         return ERROR_NOT_SUPPORTED;
     }
+    xSemaphoreTake(data->mutex, portMAX_DELAY);
     *enabled = (direction == AUDIO_CODEC_DIR_INPUT) ? data->inputEnabled : data->outputEnabled;
+    xSemaphoreGive(data->mutex);
     return ERROR_NONE;
 }
 

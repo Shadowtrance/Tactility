@@ -1,7 +1,5 @@
 #pragma once
 
-#include <cstdint>
-
 namespace tt::settings::audio {
 
 struct AudioSettings {

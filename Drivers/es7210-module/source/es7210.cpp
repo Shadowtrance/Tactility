@@ -20,6 +20,7 @@
 namespace {
 
 constexpr uint32_t NATIVE_SAMPLE_RATE = 16000;
+constexpr float MAX_INPUT_GAIN_DB = 37.5f; // ES7210 mic gain range is roughly 0..37.5 dB
 
 struct Es7210Data {
     const audio_codec_ctrl_if_t* ctrlIf = nullptr;
@@ -178,8 +179,8 @@ error_t setVolume(Device* device, enum AudioCodecDirection direction, float volu
         return ERROR_NOT_SUPPORTED;
     }
 
-    // ES7210 mic gain range is roughly 0..37.5 dB; map 0..100% linearly onto it.
-    float db = (volumePercent / 100.0f) * 37.5f;
+    // Map 0..100% linearly onto the gain range.
+    float db = (volumePercent / 100.0f) * MAX_INPUT_GAIN_DB;
     return (esp_codec_dev_set_in_gain(data->codecDevice, db) == ESP_CODEC_DEV_OK) ? ERROR_NONE : ERROR_RESOURCE;
 }
 
@@ -193,7 +194,7 @@ error_t getVolume(Device* device, enum AudioCodecDirection direction, float* vol
     if (esp_codec_dev_get_in_gain(data->codecDevice, &db) != ESP_CODEC_DEV_OK) {
         return ERROR_RESOURCE;
     }
-    *volumePercent = (db / 37.5f) * 100.0f;
+    *volumePercent = (db / MAX_INPUT_GAIN_DB) * 100.0f;
     return ERROR_NONE;
 }
 
@@ -288,51 +289,68 @@ error_t startDevice(Device* device) {
     data->dataIf = audio_codec_adapter_new_i2s_data(i2sController);
     if (data->ctrlIf == nullptr || data->dataIf == nullptr) {
         LOG_E(TAG, "Failed to create adapters");
-        delete data;
-        return ERROR_RESOURCE;
+        goto cleanup;
     }
 
     if (data->ctrlIf->open(data->ctrlIf, nullptr, 0) != ESP_CODEC_DEV_OK) {
         LOG_E(TAG, "Failed to open control interface");
-        delete data;
-        return ERROR_RESOURCE;
+        goto cleanup;
     }
 
     if (data->dataIf->open(data->dataIf, nullptr, 0) != ESP_CODEC_DEV_OK) {
         LOG_E(TAG, "Failed to open data interface");
-        delete data;
-        return ERROR_RESOURCE;
+        goto cleanup;
     }
 
-    es7210_codec_cfg_t codecConfig = {};
-    codecConfig.ctrl_if = data->ctrlIf;
-    codecConfig.master_mode = false;
-    codecConfig.mic_selected = micMask;
-    codecConfig.mclk_src = ES7210_MCLK_FROM_PAD;
-    codecConfig.mclk_div = 0;
+    {
+        es7210_codec_cfg_t codecConfig = {};
+        codecConfig.ctrl_if = data->ctrlIf;
+        codecConfig.master_mode = false;
+        codecConfig.mic_selected = micMask;
+        codecConfig.mclk_src = ES7210_MCLK_FROM_PAD;
+        codecConfig.mclk_div = 0;
 
-    data->codecIf = es7210_codec_new(&codecConfig);
-    if (data->codecIf == nullptr) {
-        LOG_E(TAG, "Failed to create ES7210 codec interface");
-        delete data;
-        return ERROR_RESOURCE;
+        data->codecIf = es7210_codec_new(&codecConfig);
+        if (data->codecIf == nullptr) {
+            LOG_E(TAG, "Failed to create ES7210 codec interface");
+            goto cleanup;
+        }
     }
 
-    esp_codec_dev_cfg_t devConfig = {
-        .dev_type = ESP_CODEC_DEV_TYPE_IN,
-        .codec_if = data->codecIf,
-        .data_if = data->dataIf,
-    };
+    {
+        esp_codec_dev_cfg_t devConfig = {
+            .dev_type = ESP_CODEC_DEV_TYPE_IN,
+            .codec_if = data->codecIf,
+            .data_if = data->dataIf,
+        };
 
-    data->codecDevice = esp_codec_dev_new(&devConfig);
-    if (data->codecDevice == nullptr) {
-        LOG_E(TAG, "Failed to create codec device");
-        delete data;
-        return ERROR_RESOURCE;
+        data->codecDevice = esp_codec_dev_new(&devConfig);
+        if (data->codecDevice == nullptr) {
+            LOG_E(TAG, "Failed to create codec device");
+            goto cleanup;
+        }
     }
 
     device_set_driver_data(device, data);
     return ERROR_NONE;
+
+cleanup:
+    // Mirrors stopDevice's teardown order -- delete_*_if() routines close their interface
+    // first, so we don't need separate ->close() calls here.
+    if (data->codecDevice != nullptr) {
+        esp_codec_dev_delete(data->codecDevice);
+    }
+    if (data->codecIf != nullptr) {
+        audio_codec_delete_codec_if(data->codecIf);
+    }
+    if (data->dataIf != nullptr) {
+        audio_codec_delete_data_if(data->dataIf);
+    }
+    if (data->ctrlIf != nullptr) {
+        audio_codec_delete_ctrl_if(data->ctrlIf);
+    }
+    delete data;
+    return ERROR_RESOURCE;
 }
 
 error_t stopDevice(Device* device) {

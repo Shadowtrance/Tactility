@@ -68,7 +68,10 @@ static int data_set_fmt(const audio_codec_data_if_t* handle, esp_codec_dev_type_
             .slot_bit_width = 0,
         };
         error_t error = i2s_controller_set_rx_tdm_config(context->i2s_controller, &tdm_config);
-        if (error != ERROR_NONE && error != ERROR_NOT_SUPPORTED) {
+        if (error != ERROR_NONE) {
+            // Including ERROR_NOT_SUPPORTED: silently continuing would leave the I2S
+            // controller configured for stereo while the codec expects TDM with
+            // fs->channel slots, corrupting/misaligning every frame.
             return ESP_CODEC_DEV_DRV_ERR;
         }
     }
