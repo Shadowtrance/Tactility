@@ -24,6 +24,17 @@ class AudioSettingsApp final : public App {
     lv_obj_t* outputMuteSwitch = nullptr;
     lv_obj_t* outputVolumeSlider = nullptr;
 
+    static int32_t snapSliderValue(lv_obj_t* slider, int32_t step) {
+        int32_t raw = lv_slider_get_value(slider);
+        int32_t snapped = ((raw + step / 2) / step) * step;
+
+        if (snapped != raw) {
+            lv_slider_set_value(slider, snapped, LV_ANIM_OFF);
+        }
+
+        return snapped;
+    }
+
     static void onInputEnabledSwitch(lv_event_t* event) {
         auto* sw = static_cast<lv_obj_t*>(lv_event_get_target(event));
         bool enabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
@@ -50,13 +61,13 @@ class AudioSettingsApp final : public App {
 
     static void onInputVolumeSlider(lv_event_t* event) {
         auto* slider = static_cast<lv_obj_t*>(lv_event_get_target(event));
-        float percent = static_cast<float>(lv_slider_get_value(slider));
+        float percent = static_cast<float>(snapSliderValue(slider, 10));
         service::audio::setInputVolume(percent);
     }
 
     static void onOutputVolumeSlider(lv_event_t* event) {
         auto* slider = static_cast<lv_obj_t*>(lv_event_get_target(event));
-        float percent = static_cast<float>(lv_slider_get_value(slider));
+        float percent = static_cast<float>(snapSliderValue(slider, 10));
         service::audio::setOutputVolume(percent);
     }
 
