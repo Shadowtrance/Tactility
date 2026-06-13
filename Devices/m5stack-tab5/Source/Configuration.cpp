@@ -10,6 +10,7 @@
 #include <Tactility/hal/i2c/I2c.h>
 #include <Tactility/hal/keyboard/KeyboardDevice.h>
 #include <Tactility/kernel/SystemEvents.h>
+#include <Tactility/lvgl/LvglSync.h>
 #include <Tactility/settings/DisplaySettings.h>
 
 using namespace tt::hal;
@@ -293,7 +294,10 @@ static bool initBoot() {
 
         displaySettings = tt::settings::display::getDefault();
         displaySettings.orientation = tt::settings::display::Orientation::Landscape;
-        lv_display_set_rotation(lv_display_get_default(), tt::settings::display::toLvglDisplayRotation(displaySettings.orientation));
+        if (tt::lvgl::lock()) {
+            lv_display_set_rotation(lv_display_get_default(), tt::settings::display::toLvglDisplayRotation(displaySettings.orientation));
+            tt::lvgl::unlock();
+        }
         tt::settings::display::save(displaySettings);
         LOG_I(TAG, "Keyboard attached: defaulting display orientation to landscape");
     });

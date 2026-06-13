@@ -26,6 +26,11 @@ static uint32_t getButtonPadding(UiDensity density, uint32_t buttonSize) {
     }
 }
 
+static int32_t computeButtonMargin(int32_t available_span, int32_t total_button_size) {
+    const int32_t usable = std::max<int32_t>(0, available_span - (3 * total_button_size));
+    return std::min<int32_t>(usable / 16, total_button_size / 2);
+}
+
 class LauncherApp final : public App {
 
     static lv_obj_t* createAppButton(lv_obj_t* parent, UiDensity uiDensity, const char* imageFile, const char* appId, int32_t itemMargin, bool isLandscape) {
@@ -116,14 +121,9 @@ class LauncherApp final : public App {
 
         lv_obj_set_flex_flow(buttons_wrapper, is_landscape_display ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_COLUMN);
 
-        int32_t margin;
-        if (is_landscape_display) {
-            const int32_t available_width = std::max<int32_t>(0, horizontal_px - (3 * total_button_size));
-            margin = std::min<int32_t>(available_width / 16, total_button_size / 2);
-        } else {
-            const int32_t available_height = std::max<int32_t>(0, vertical_px - (3 * total_button_size));
-            margin = std::min<int32_t>(available_height / 16, total_button_size / 2);
-        }
+        const int32_t margin = is_landscape_display
+            ? computeButtonMargin(horizontal_px, total_button_size)
+            : computeButtonMargin(vertical_px, total_button_size);
 
         const uint32_t child_count = lv_obj_get_child_count(buttons_wrapper);
         for (uint32_t i = 0; i < child_count; i++) {
@@ -182,14 +182,9 @@ public:
             lv_obj_set_flex_flow(buttons_wrapper, LV_FLEX_FLOW_COLUMN);
         }
 
-        int32_t margin;
-        if (is_landscape_display) {
-            const int32_t available_width = std::max<int32_t>(0, lv_display_get_horizontal_resolution(display) - (3 * total_button_size));
-            margin = std::min<int32_t>(available_width / 16, total_button_size / 2);
-        } else {
-            const int32_t available_height = std::max<int32_t>(0, lv_display_get_vertical_resolution(display) - (3 * total_button_size));
-            margin = std::min<int32_t>(available_height / 16, total_button_size / 2);
-        }
+        const int32_t margin = is_landscape_display
+            ? computeButtonMargin(lv_display_get_horizontal_resolution(display), total_button_size)
+            : computeButtonMargin(lv_display_get_vertical_resolution(display), total_button_size);
 
         createAppButton(buttons_wrapper, ui_density, LVGL_ICON_LAUNCHER_APPS, "AppList", margin, is_landscape_display);
         createAppButton(buttons_wrapper, ui_density, LVGL_ICON_LAUNCHER_FOLDER, "Files", margin, is_landscape_display);
