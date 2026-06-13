@@ -99,7 +99,7 @@ bool St7123Display::createPanelHandle(esp_lcd_panel_io_handle_t ioHandle, const 
         .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
         .dpi_clock_freq_mhz = 70,
         .pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565,
-        .num_fbs = 1,
+        .num_fbs = 2,
         .video_timing = {
             .h_size = 720,
             .v_size = 1280,

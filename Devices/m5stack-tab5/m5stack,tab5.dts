@@ -6,7 +6,7 @@
 #include <tactility/bindings/esp32_i2c.h>
 #include <tactility/bindings/esp32_i2c_master.h>
 #include <tactility/bindings/esp32_i2s.h>
-#include <tactility/bindings/esp32_spi.h>
+#include <tactility/bindings/esp32_sdmmc.h>
 #include <tactility/bindings/esp32_uart.h>
 #include <tactility/bindings/esp32_usbhost.h>
 #include <bindings/bmi270.h>
@@ -78,12 +78,18 @@
 		pin-scl = <&gpio0 1 GPIO_FLAG_PULL_UP>;
 	};
 
-	sdcard_spi: spi0 {
-		compatible = "espressif,esp32-spi";
-		host = <SPI2_HOST>;
-		pin-mosi = <&gpio0 44 GPIO_FLAG_NONE>;
-		pin-miso = <&gpio0 39 GPIO_FLAG_NONE>;
-		pin-sclk = <&gpio0 43 GPIO_FLAG_NONE>;
+	sdmmc0 {
+		compatible = "espressif,esp32-sdmmc";
+		pin-clk = <&gpio0 43 GPIO_FLAG_NONE>;
+		pin-cmd = <&gpio0 44 GPIO_FLAG_NONE>;
+		pin-d0 = <&gpio0 39 GPIO_FLAG_NONE>;
+		pin-d1 = <&gpio0 40 GPIO_FLAG_NONE>;
+		pin-d2 = <&gpio0 41 GPIO_FLAG_NONE>;
+		pin-d3 = <&gpio0 42 GPIO_FLAG_NONE>;
+		bus-width = <4>;
+		slot = <SDMMC_HOST_SLOT_0>;
+		max-freq-khz = <SDMMC_FREQ_HIGHSPEED>;
+		on-chip-ldo-chan = <4>;
 	};
 
 	// ES8388 and ES7210

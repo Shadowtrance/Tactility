@@ -102,7 +102,7 @@ bool Ili9881cDisplay::createPanelHandle(esp_lcd_panel_io_handle_t ioHandle, cons
         .pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565,
         .in_color_format = LCD_COLOR_FMT_RGB565,
         .out_color_format = LCD_COLOR_FMT_RGB565,
-        .num_fbs = 1, // TODO: 2?
+        .num_fbs = 2,
         .video_timing =
             {
                 .h_size = 720,

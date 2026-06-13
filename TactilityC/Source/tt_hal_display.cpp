@@ -85,4 +85,9 @@ void tt_hal_display_driver_draw_bitmap(DisplayDriverHandle handle, int xStart, i
     wrapper->driver->drawBitmap(xStart, yStart, xEnd, yEnd, pixelData);
 }
 
+uint8_t tt_hal_display_driver_get_frame_buffers(DisplayDriverHandle handle, void* outBuffers[2]) {
+    auto wrapper = static_cast<DriverWrapper*>(handle);
+    return wrapper->driver->getFrameBuffers(outBuffers);
+}
+
 }
