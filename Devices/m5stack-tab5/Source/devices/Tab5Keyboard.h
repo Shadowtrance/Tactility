@@ -72,4 +72,10 @@ public:
     bool stopLvgl() override;
     bool isAttached() const override;
     lv_indev_t* getLvglIndev() override { return kbHandle; }
+
+    // Starts LVGL input handling and registers the hardware keyboard indev for a device
+    // that wasn't attached at boot (so startLvgl() was never called from Lvgl.cpp's
+    // attachDevices()). Called from the device module's attach-detection timer once the
+    // keyboard is first detected post-boot. No-op if LVGL input is already started.
+    bool lateStart();
 };
