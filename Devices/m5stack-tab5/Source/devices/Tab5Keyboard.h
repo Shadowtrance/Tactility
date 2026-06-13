@@ -29,6 +29,12 @@ class Tab5Keyboard final : public tt::hal::keyboard::KeyboardDevice {
     volatile bool irqPending = false;
     bool irqConfigured = false;
 
+    // Hot-plug attach-state polling (piggybacks on the 20ms inputTimer)
+    bool wasAttached = false;
+    uint32_t attachCheckTickCounter = 0;
+    lv_display_rotation_t savedRotation = LV_DISPLAY_ROTATION_0;
+    bool rotationOverrideActive = false;
+
     // Software key-repeat state (tracked by position to survive modifier changes)
     uint32_t repeatKey      = 0;
     uint8_t  repeatRow      = 0xFF;
@@ -43,6 +49,10 @@ class Tab5Keyboard final : public tt::hal::keyboard::KeyboardDevice {
     bool configureIrqPin();
     void removeIrqPin();
     static void IRAM_ATTR irqHandler(void* arg);
+
+    void reinitDevice();
+    void applyAutoRotation(bool keyboardAttached);
+    void checkAttachState();
 
     void drainEvents();
     void processKeyboard();

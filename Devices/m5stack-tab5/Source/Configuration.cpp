@@ -8,6 +8,9 @@
 
 #include <Tactility/hal/Configuration.h>
 #include <Tactility/hal/i2c/I2c.h>
+#include <Tactility/hal/keyboard/KeyboardDevice.h>
+#include <Tactility/kernel/SystemEvents.h>
+#include <Tactility/settings/DisplaySettings.h>
 
 using namespace tt::hal;
 
@@ -272,6 +275,28 @@ static bool initBoot() {
     if (error != ERROR_NONE) {
         LOG_E(TAG, "Failed to init ES7210");
     }
+
+    // If the keyboard is attached and no display orientation has been saved yet, default to
+    // landscape (the keyboard add-on is used with the device on its side). Runs at BootSplash,
+    // once LVGL and the keyboard's isAttached() state are both available, and only applies on
+    // first boot - an existing saved orientation (e.g. user preference) is left untouched.
+    tt::kernel::subscribeSystemEvent(tt::kernel::SystemEvent::BootSplash, [](tt::kernel::SystemEvent event) {
+        auto keyboard = findFirstDevice<keyboard::KeyboardDevice>(tt::hal::Device::Type::Keyboard);
+        if (keyboard == nullptr || !keyboard->isAttached()) {
+            return;
+        }
+
+        tt::settings::display::DisplaySettings displaySettings;
+        if (tt::settings::display::load(displaySettings)) {
+            return;
+        }
+
+        displaySettings = tt::settings::display::getDefault();
+        displaySettings.orientation = tt::settings::display::Orientation::Landscape;
+        lv_display_set_rotation(lv_display_get_default(), tt::settings::display::toLvglDisplayRotation(displaySettings.orientation));
+        tt::settings::display::save(displaySettings);
+        LOG_I(TAG, "Keyboard attached: defaulting display orientation to landscape");
+    });
 
     return true;
 }

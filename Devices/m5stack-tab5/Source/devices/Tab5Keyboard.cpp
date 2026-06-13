@@ -1,5 +1,6 @@
 #include "Tab5Keyboard.h"
 #include <Tactility/app/App.h>
+#include <Tactility/lvgl/LvglSync.h>
 #include <tactility/drivers/i2c_controller.h>
 #include <tactility/log.h>
 #include <esp_timer.h>
@@ -329,6 +330,66 @@ void Tab5Keyboard::processKeyboard() {
             }
         }
     }
+
+    checkAttachState();
+}
+
+// ---------------------------------------------------------------------------
+// applyAutoRotation - on attach, switches to landscape if not already (saving
+// the prior rotation); on detach, restores the saved rotation if we were the
+// ones who changed it. Only affects the live LVGL rotation, never persisted
+// display settings.
+// ---------------------------------------------------------------------------
+void Tab5Keyboard::applyAutoRotation(bool keyboardAttached) {
+    auto* display = lv_indev_get_display(kbHandle);
+    if (display == nullptr) {
+        return;
+    }
+
+    if (!tt::lvgl::lock(pdMS_TO_TICKS(100))) {
+        return; // try again on the next attach-state check
+    }
+
+    if (keyboardAttached) {
+        if (lv_display_get_rotation(display) != LV_DISPLAY_ROTATION_90) {
+            savedRotation = lv_display_get_rotation(display);
+            rotationOverrideActive = true;
+            lv_display_set_rotation(display, LV_DISPLAY_ROTATION_90);
+        }
+    } else {
+        // Only restore if rotation is still what we set it to - if the user manually
+        // changed it since attaching, respect their choice instead.
+        if (rotationOverrideActive && lv_display_get_rotation(display) == LV_DISPLAY_ROTATION_90) {
+            lv_display_set_rotation(display, savedRotation);
+        }
+        rotationOverrideActive = false;
+    }
+
+    tt::lvgl::unlock();
+}
+
+// ---------------------------------------------------------------------------
+// checkAttachState - throttled (~1s) hot-plug detection. Reapplies device
+// register configuration and auto-rotation on detach/attach transitions.
+// ---------------------------------------------------------------------------
+void Tab5Keyboard::checkAttachState() {
+    static constexpr uint32_t ATTACH_CHECK_TICKS = 50; // ~1s at 20ms/tick
+
+    if (++attachCheckTickCounter < ATTACH_CHECK_TICKS) {
+        return;
+    }
+    attachCheckTickCounter = 0;
+
+    const bool attached = isAttached();
+    if (attached == wasAttached) {
+        return;
+    }
+    wasAttached = attached;
+
+    if (attached) {
+        reinitDevice();
+    }
+    applyAutoRotation(attached);
 }
 
 // ---------------------------------------------------------------------------
@@ -356,6 +417,25 @@ Tab5Keyboard::~Tab5Keyboard() {
     if (queue) {
         vQueueDelete(queue);
         queue = nullptr;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// reinitDevice - (re)applies the device register configuration. Used at
+// startLvgl() and again on hot-plug reattach, since the device's RGB mode and
+// interrupt configuration are volatile and reset to power-on defaults when
+// the keyboard is unplugged and reconnected.
+// ---------------------------------------------------------------------------
+void Tab5Keyboard::reinitDevice() {
+    writeReg(REG_KEYBOARD_MODE, 0x00); // Normal mode
+    writeReg(REG_EVENT_NUM, 0x00);     // flush event queue
+    writeReg(REG_INT_STAT, 0x00);      // clear pending INT
+    writeReg(REG_RGB_MODE, 0x01);      // Custom RGB mode (manual LED control)
+    writeReg(REG_BRIGHTNESS, 50);      // 50% brightness
+    updateLeds();                      // restore current LED state
+
+    if (irqConfigured) {
+        writeReg(REG_INT_CFG, 0x01);   // re-enable Normal-mode interrupt (bit 0)
     }
 }
 
@@ -398,6 +478,9 @@ bool Tab5Keyboard::startLvgl(lv_display_t* display) {
     lv_indev_set_user_data(kbHandle, this);
 
     configureIrqPin();  // best-effort; falls back to polling if it fails
+
+    wasAttached = isAttached();
+    rotationOverrideActive = false;
 
     assert(inputTimer == nullptr);
     inputTimer = std::make_unique<tt::Timer>(tt::Timer::Type::Periodic, pdMS_TO_TICKS(20), [this] {
