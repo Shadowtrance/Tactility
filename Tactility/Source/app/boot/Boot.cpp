@@ -16,6 +16,8 @@
 
 #include <lvgl.h>
 
+#include <atomic>
+
 #ifdef ESP_PLATFORM
 #include "Tactility/app/crashdiagnostics/CrashDiagnostics.h"
 #include <Tactility/kernel/PanicHandler.h>
@@ -35,6 +37,11 @@ static std::shared_ptr<hal::display::DisplayDevice> getHalDisplay() {
 }
 
 class BootApp : public App {
+
+    // Snapshot of hal::usb::isUsbBootMode(), taken before the boot thread starts and
+    // potentially clears the underlying flag via setupUsbBootMode()/resetUsbBootMode().
+    // onShow() reads this instead of the live flag to avoid a race between the two.
+    static std::atomic<bool> isUsbBootSplash;
 
     Thread thread = Thread(
         "boot",
@@ -174,6 +181,9 @@ class BootApp : public App {
 public:
 
     void onCreate(AppContext& app) override {
+        // Snapshot before the boot thread potentially clears the flag via setupUsbBootMode()
+        isUsbBootSplash = hal::usb::isUsbBootMode();
+
         // Just in case this app is somehow resumed
         if (thread.getState() == Thread::State::Stopped) {
             thread.start();
@@ -197,15 +207,17 @@ public:
         const char* logo;
         // TODO: Replace with automatic asset buckets like on Android
         if (getSmallestDimension() < 150) { // e.g. Cardputer
-            logo = hal::usb::isUsbBootMode() ? "logo_usb.png" : "logo_small.png";
+            logo = isUsbBootSplash ? "logo_usb.png" : "logo_small.png";
         } else {
-            logo = hal::usb::isUsbBootMode() ? "logo_usb.png" : "logo.png";
+            logo = isUsbBootSplash ? "logo_usb.png" : "logo.png";
         }
         const auto logo_path = lvgl::PATH_PREFIX + paths->getAssetsPath(logo);
         LOGGER.info("{}", logo_path);
         lv_image_set_src(image, logo_path.c_str());
     }
 };
+
+std::atomic<bool> BootApp::isUsbBootSplash = false;
 
 extern const AppManifest manifest = {
     .appId = "Boot",
