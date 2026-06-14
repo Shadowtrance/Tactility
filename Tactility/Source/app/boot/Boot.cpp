@@ -21,6 +21,7 @@
 #ifdef ESP_PLATFORM
 #include "Tactility/app/crashdiagnostics/CrashDiagnostics.h"
 #include <Tactility/kernel/PanicHandler.h>
+#include <esp_system.h>
 #include <sdkconfig.h>
 #else
 #define CONFIG_TT_SPLASH_DURATION 0
@@ -214,6 +215,19 @@ public:
         const auto logo_path = lvgl::PATH_PREFIX + paths->getAssetsPath(logo);
         LOGGER.info("{}", logo_path);
         lv_image_set_src(image, logo_path.c_str());
+
+#ifdef ESP_PLATFORM
+        if (isUsbBootSplash) {
+            auto* button = lv_button_create(parent);
+            lv_obj_align(button, LV_ALIGN_BOTTOM_MID, 0, -16);
+            auto* label = lv_label_create(button);
+            lv_label_set_text(label, "Return to OS");
+            lv_obj_add_event_cb(button, [](lv_event_t*) {
+                hal::usb::stop();
+                esp_restart();
+            }, LV_EVENT_SHORT_CLICKED, nullptr);
+        }
+#endif
     }
 };
 
