@@ -16,9 +16,12 @@
 
 #include <lvgl.h>
 
+#include <atomic>
+
 #ifdef ESP_PLATFORM
 #include "Tactility/app/crashdiagnostics/CrashDiagnostics.h"
 #include <Tactility/kernel/PanicHandler.h>
+#include <esp_system.h>
 #include <sdkconfig.h>
 #else
 #define CONFIG_TT_SPLASH_DURATION 0
@@ -35,6 +38,11 @@ static std::shared_ptr<hal::display::DisplayDevice> getHalDisplay() {
 }
 
 class BootApp : public App {
+
+    // Snapshot of hal::usb::isUsbBootMode(), taken before the boot thread starts and
+    // potentially clears the underlying flag via setupUsbBootMode()/resetUsbBootMode().
+    // onShow() reads this instead of the live flag to avoid a race between the two.
+    static std::atomic<bool> isUsbBootSplash;
 
     Thread thread = Thread(
         "boot",
@@ -76,12 +84,12 @@ class BootApp : public App {
         auto mode = hal::usb::getUsbBootMode();  // Get mode before reset
         hal::usb::resetUsbBootMode();
         if (mode == hal::usb::BootMode::Flash) {
-            if (!hal::usb::startMassStorageWithFlash()) {
+            if (!hal::usb::startMassStorageWithFlash(true)) {
                 LOGGER.error("Unable to start flash mass storage");
                 return false;
             }
         } else if (mode == hal::usb::BootMode::Sdmmc) {
-            if (!hal::usb::startMassStorageWithSdmmc()) {
+            if (!hal::usb::startMassStorageWithSdmmc(true)) {
                 LOGGER.error("Unable to start SD mass storage");
                 return false;
             }
@@ -174,6 +182,9 @@ class BootApp : public App {
 public:
 
     void onCreate(AppContext& app) override {
+        // Snapshot before the boot thread potentially clears the flag via setupUsbBootMode()
+        isUsbBootSplash = hal::usb::isUsbBootMode();
+
         // Just in case this app is somehow resumed
         if (thread.getState() == Thread::State::Stopped) {
             thread.start();
@@ -197,15 +208,30 @@ public:
         const char* logo;
         // TODO: Replace with automatic asset buckets like on Android
         if (getSmallestDimension() < 150) { // e.g. Cardputer
-            logo = hal::usb::isUsbBootMode() ? "logo_usb.png" : "logo_small.png";
+            logo = isUsbBootSplash ? "logo_usb.png" : "logo_small.png";
         } else {
-            logo = hal::usb::isUsbBootMode() ? "logo_usb.png" : "logo.png";
+            logo = isUsbBootSplash ? "logo_usb.png" : "logo.png";
         }
         const auto logo_path = lvgl::PATH_PREFIX + paths->getAssetsPath(logo);
         LOGGER.info("{}", logo_path);
         lv_image_set_src(image, logo_path.c_str());
+
+#ifdef ESP_PLATFORM
+        if (isUsbBootSplash) {
+            auto* button = lv_button_create(parent);
+            lv_obj_align(button, LV_ALIGN_BOTTOM_MID, 0, -16);
+            auto* label = lv_label_create(button);
+            lv_label_set_text(label, "Return to OS");
+            lv_obj_add_event_cb(button, [](lv_event_t*) {
+                hal::usb::stop();
+                esp_restart();
+            }, LV_EVENT_SHORT_CLICKED, nullptr);
+        }
+#endif
     }
 };
+
+std::atomic<bool> BootApp::isUsbBootSplash = false;
 
 extern const AppManifest manifest = {
     .appId = "Boot",

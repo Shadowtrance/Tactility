@@ -62,9 +62,15 @@
 #include <driver/i2s_std.h>
 #include <driver/gpio.h>
 
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+#include <driver/ppa.h>
+#include <esp_cache.h>
+#endif
+
 extern "C" {
 
 extern double __floatsidf(int x);
+extern void _esp_error_check_failed(esp_err_t rc, const char *file, int line, const char *function, const char *expression);
 
 const esp_elfsym main_symbols[] {
     // stdlib.h
@@ -77,11 +83,13 @@ const esp_elfsym main_symbols[] {
     ESP_ELFSYM_EXPORT(rand_r),
     ESP_ELFSYM_EXPORT(atoi),
     ESP_ELFSYM_EXPORT(atol),
+    ESP_ELFSYM_EXPORT(system),
     // esp random
     ESP_ELFSYM_EXPORT(esp_random),
     ESP_ELFSYM_EXPORT(esp_fill_random),
     // esp other
     ESP_ELFSYM_EXPORT(__floatsidf),
+    ESP_ELFSYM_EXPORT(_esp_error_check_failed),
     // unistd.h
     ESP_ELFSYM_EXPORT(usleep),
     ESP_ELFSYM_EXPORT(sleep),
@@ -205,6 +213,7 @@ const esp_elfsym main_symbols[] {
     ESP_ELFSYM_EXPORT(fwrite),
     ESP_ELFSYM_EXPORT(getc),
     ESP_ELFSYM_EXPORT(putc),
+    ESP_ELFSYM_EXPORT(putchar),
     ESP_ELFSYM_EXPORT(puts),
     ESP_ELFSYM_EXPORT(printf),
     ESP_ELFSYM_EXPORT(sscanf),
@@ -212,6 +221,7 @@ const esp_elfsym main_symbols[] {
     ESP_ELFSYM_EXPORT(sprintf),
     ESP_ELFSYM_EXPORT(vsprintf),
     ESP_ELFSYM_EXPORT(vsnprintf),
+    ESP_ELFSYM_EXPORT(vfprintf),
     // cstring
     ESP_ELFSYM_EXPORT(strlen),
     ESP_ELFSYM_EXPORT(strcmp),
@@ -236,6 +246,7 @@ const esp_elfsym main_symbols[] {
     ESP_ELFSYM_EXPORT(memcmp),
     ESP_ELFSYM_EXPORT(memchr),
     ESP_ELFSYM_EXPORT(memmove),
+    ESP_ELFSYM_EXPORT(strdup),
 
     // ctype
     ESP_ELFSYM_EXPORT(isalnum),
@@ -296,6 +307,7 @@ const esp_elfsym main_symbols[] {
     ESP_ELFSYM_EXPORT(tt_hal_display_driver_lock),
     ESP_ELFSYM_EXPORT(tt_hal_display_driver_unlock),
     ESP_ELFSYM_EXPORT(tt_hal_display_driver_supported),
+    ESP_ELFSYM_EXPORT(tt_hal_display_driver_get_frame_buffers),
     ESP_ELFSYM_EXPORT(tt_hal_touch_driver_supported),
     ESP_ELFSYM_EXPORT(tt_hal_touch_driver_alloc),
     ESP_ELFSYM_EXPORT(tt_hal_touch_driver_free),
@@ -363,6 +375,8 @@ const esp_elfsym main_symbols[] {
 
     // stdio.h
     ESP_ELFSYM_EXPORT(rename),
+    ESP_ELFSYM_EXPORT(rewind),
+    ESP_ELFSYM_EXPORT(remove),
     // dirent.h
     ESP_ELFSYM_EXPORT(opendir),
     ESP_ELFSYM_EXPORT(closedir),
@@ -439,6 +453,7 @@ const esp_elfsym main_symbols[] {
     ESP_ELFSYM_EXPORT(heap_caps_get_allocated_size),
     ESP_ELFSYM_EXPORT(heap_caps_get_free_size),
     ESP_ELFSYM_EXPORT(heap_caps_get_largest_free_block),
+    ESP_ELFSYM_EXPORT(heap_caps_aligned_alloc),
     ESP_ELFSYM_EXPORT(heap_caps_malloc),
     ESP_ELFSYM_EXPORT(heap_caps_calloc),
     ESP_ELFSYM_EXPORT(heap_caps_free),
@@ -449,6 +464,14 @@ const esp_elfsym main_symbols[] {
     ESP_ELFSYM_EXPORT(esp_timer_start_periodic),
     ESP_ELFSYM_EXPORT(esp_timer_start_once),
     ESP_ELFSYM_EXPORT(esp_timer_get_time),
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+    // driver/ppa.h
+    ESP_ELFSYM_EXPORT(ppa_register_client),
+    ESP_ELFSYM_EXPORT(ppa_unregister_client),
+    ESP_ELFSYM_EXPORT(ppa_do_scale_rotate_mirror),
+    // esp_cache.h
+    ESP_ELFSYM_EXPORT(esp_cache_msync),
+#endif
     // delimiter
     ESP_ELFSYM_END
 };

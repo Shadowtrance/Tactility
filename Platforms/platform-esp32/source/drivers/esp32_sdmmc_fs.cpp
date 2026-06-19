@@ -10,6 +10,8 @@
 
 #include <driver/sdmmc_host.h>
 #include <esp_vfs_fat.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <sdmmc_cmd.h>
 #include <string>
 
@@ -76,6 +78,8 @@ static error_t mount(void* data) {
     };
 
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.slot = config->slot;
+    host.max_freq_khz = config->max_freq_khz;
 
 #if SOC_SD_PWR_CTRL_SUPPORTED
     // Treat non-positive values as disabled to remain safe with zero-initialized configs.
@@ -89,6 +93,10 @@ static error_t mount(void* data) {
             return ERROR_NOT_SUPPORTED;
         }
         host.pwr_ctrl_handle = fs_data->pwr_ctrl_handle;
+
+        // On cold boot the SD card needs time for its supply rail to ramp up after the
+        // on-chip LDO is enabled, otherwise the initial ACMD41 (send_op_cond) times out.
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 #endif
 

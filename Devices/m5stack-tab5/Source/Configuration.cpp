@@ -1,5 +1,4 @@
 #include "devices/Display.h"
-#include "devices/SdCard.h"
 #include "devices/Power.h"
 #include "devices/Tab5Keyboard.h"
 
@@ -13,11 +12,11 @@ using namespace tt::hal;
 static constexpr auto* TAG = "Tab5";
 
 static DeviceVector createDevices() {
-    ::Device* i2c2 = device_find_by_name("i2c2");
+    auto* i2c2 = device_find_by_name("i2c2");
+    check(i2c2, "i2c2 not found");
     return {
         createPower(),
         createDisplay(),
-        createSdCard(),
         std::make_shared<Tab5Keyboard>(i2c2)
     };
 }

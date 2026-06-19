@@ -86,6 +86,15 @@ uint16_t tt_hal_display_driver_get_pixel_height(DisplayDriverHandle handle);
  */
 void tt_hal_display_driver_draw_bitmap(DisplayDriverHandle handle, int xStart, int yStart, int xEnd, int yEnd, const void* pixelData);
 
+/**
+ * Get direct pointers to the display's hardware frame buffer(s), if supported.
+ * Only available for panels with direct CPU-addressable frame buffers (e.g. MIPI-DSI/DPI).
+ * @param[in] handle the display driver handle
+ * @param[out] outBuffers receives up to 2 frame buffer pointers
+ * @return number of buffers written to outBuffers (0 if unsupported)
+ */
+uint8_t tt_hal_display_driver_get_frame_buffers(DisplayDriverHandle handle, void* outBuffers[2]);
+
 #ifdef __cplusplus
 }
 #endif

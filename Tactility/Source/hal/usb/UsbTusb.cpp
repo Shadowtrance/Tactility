@@ -8,6 +8,9 @@
 #if CONFIG_TINYUSB_MSC_ENABLED == 1
 
 #include <Tactility/Logger.h>
+#include <esp_system.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <tinyusb.h>
 #include <tusb_msc_storage.h>
 #include <wear_levelling.h>
@@ -25,6 +28,10 @@ static const auto LOGGER = tt::Logger("USB");
 namespace tt::hal::usb {
     extern sdmmc_card_t* getCard();
 }
+
+// Set when mass storage was started as part of the dedicated reboot-into-MSC boot flow.
+// Used to decide whether ejecting the volume should automatically reboot back to normal OS.
+static bool startedFromBootMode = false;
 
 enum {
     ITF_NUM_MSC = 0,
@@ -99,6 +106,15 @@ static uint8_t const msc_hs_configuration_desc[] = {
 static void storage_mount_changed_cb(tinyusb_msc_event_t* event) {
     if (event->mount_changed_data.is_mounted) {
         LOGGER.info("MSC Mounted");
+        // Storage is only (re)mounted into our own filesystem after the host sends a SCSI
+        // START STOP UNIT eject (see tud_msc_start_stop_cb() in tusb_msc_storage.c). Windows
+        // is known not to send this reliably, so this is a best-effort path for hosts that do
+        // (e.g. Linux/macOS) - the "Return to OS" button on the boot screen is the primary one.
+        // If we got here while booted into MSC mode, it's safe to reboot back into normal OS now.
+        if (startedFromBootMode) {
+            LOGGER.info("MSC ejected by host, rebooting into normal OS");
+            esp_restart();
+        }
     } else {
         LOGGER.info("MSC Unmounted");
     }
@@ -147,8 +163,11 @@ static bool ensureDriverInstalled() {
 
 bool tusbIsSupported() { return true; }
 
-bool tusbStartMassStorageWithSdmmc() {
-    ensureDriverInstalled();
+bool tusbStartMassStorageWithSdmmc(bool fromBootMode) {
+    if (!ensureDriverInstalled()) {
+        return false;
+    }
+    startedFromBootMode = fromBootMode;
 
     auto* card = tt::hal::usb::getCard();
     if (card == nullptr) {
@@ -179,9 +198,12 @@ bool tusbStartMassStorageWithSdmmc() {
     return result == ESP_OK;
 }
 
-bool tusbStartMassStorageWithFlash() {
+bool tusbStartMassStorageWithFlash(bool fromBootMode) {
     LOGGER.info("Starting flash MSC");
-    ensureDriverInstalled();
+    if (!ensureDriverInstalled()) {
+        return false;
+    }
+    startedFromBootMode = fromBootMode;
 
     wl_handle_t handle = tt::getDataPartitionWlHandle();
     if (handle == WL_INVALID_HANDLE) {
@@ -212,6 +234,12 @@ bool tusbStartMassStorageWithFlash() {
 }
 
 void tusbStop() {
+    // Actively signal a disconnect to the host before tearing down the peripheral, otherwise
+    // a subsequent esp_restart() resets the chip too fast for the host to notice the device
+    // went away, leaving it stuck showing the old MSC device until the cable is replugged.
+    tud_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(250));
+
     tinyusb_msc_storage_deinit();
 #if CONFIG_IDF_TARGET_ESP32P4
     usb_wrap_ll_phy_select(&USB_WRAP, 1);
@@ -225,8 +253,8 @@ bool tusbCanStartMassStorageWithFlash() {
 #else
 
 bool tusbIsSupported() { return false; }
-bool tusbStartMassStorageWithSdmmc() { return false; }
-bool tusbStartMassStorageWithFlash() { return false; }
+bool tusbStartMassStorageWithSdmmc(bool /*fromBootMode*/) { return false; }
+bool tusbStartMassStorageWithFlash(bool /*fromBootMode*/) { return false; }
 void tusbStop() {}
 bool tusbCanStartMassStorageWithFlash() { return false; }
 

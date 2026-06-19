@@ -286,6 +286,14 @@ static error_t stop(Device* device) {
     return ERROR_NONE;
 }
 
+i2c_master_bus_handle_t esp32_i2c_master_get_bus_handle(struct Device* device) {
+    return GET_DATA(device)->bus_handle;
+}
+
+uint32_t esp32_i2c_master_get_clock_frequency(struct Device* device) {
+    return GET_CONFIG(device)->clockFrequency;
+}
+
 static constexpr I2cControllerApi ESP32_I2C_MASTER_API = {
     .read = read,
     .write = write,
@@ -307,9 +315,5 @@ Driver esp32_i2c_master_driver = {
     .owner = &platform_esp32_module,
     .internal = nullptr
 };
-
-i2c_master_bus_handle_t esp32_i2c_master_get_bus_handle(Device* device) {
-    return GET_DATA(device)->bus_handle;
-}
 
 } // extern "C"

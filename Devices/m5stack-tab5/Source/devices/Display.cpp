@@ -38,8 +38,10 @@ static std::shared_ptr<tt::hal::touch::TouchDevice> createGt911Touch() {
 }
 
 static std::shared_ptr<tt::hal::touch::TouchDevice> createSt7123Touch() {
+    auto* i2c = device_find_by_name("i2c0");
+    check(i2c, "i2c0 not found");
     auto configuration = std::make_unique<St7123Touch::Configuration>(
-        I2C_NUM_0,
+        i2c,
         720,
         1280,
         false,       // swapXY

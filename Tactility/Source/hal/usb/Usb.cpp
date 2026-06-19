@@ -69,13 +69,13 @@ bool isSupported() {
     return tusbIsSupported();
 }
 
-bool startMassStorageWithSdmmc() {
+bool startMassStorageWithSdmmc(bool fromBootMode) {
     if (!canStartNewMode()) {
         LOGGER.error("Can't start");
         return false;
     }
 
-    if (tusbStartMassStorageWithSdmmc()) {
+    if (tusbStartMassStorageWithSdmmc(fromBootMode)) {
         currentMode = Mode::MassStorageSdmmc;
         return true;
     } else {
@@ -110,13 +110,13 @@ void rebootIntoMassStorageSdmmc() {
 }
 
 // NEW: Flash mass storage functions
-bool startMassStorageWithFlash() {
+bool startMassStorageWithFlash(bool fromBootMode) {
     if (!canStartNewMode()) {
         LOGGER.error("Can't start flash mass storage");
         return false;
     }
 
-    if (tusbStartMassStorageWithFlash()) {
+    if (tusbStartMassStorageWithFlash(fromBootMode)) {
         currentMode = Mode::MassStorageFlash;
         return true;
     } else {

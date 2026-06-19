@@ -29,6 +29,16 @@ class Tab5Keyboard final : public tt::hal::keyboard::KeyboardDevice {
     volatile bool irqPending = false;
     bool irqConfigured = false;
 
+    // Hot-plug attach-state polling (piggybacks on the 20ms inputTimer)
+    bool wasAttached = false;
+    uint32_t attachCheckTickCounter = 0;
+    // I2C probes can false-positive on a floating/half-connected bus (e.g. mid-unplug), so a
+    // state change is only acted on once it's seen on two consecutive ~1s checks in a row.
+    bool pendingAttachState = false;
+    uint8_t pendingAttachConfirmCount = 0;
+    lv_display_rotation_t savedRotation = LV_DISPLAY_ROTATION_0;
+    bool rotationOverrideActive = false;
+
     // Software key-repeat state (tracked by position to survive modifier changes)
     uint32_t repeatKey      = 0;
     uint8_t  repeatRow      = 0xFF;
@@ -43,6 +53,10 @@ class Tab5Keyboard final : public tt::hal::keyboard::KeyboardDevice {
     bool configureIrqPin();
     void removeIrqPin();
     static void IRAM_ATTR irqHandler(void* arg);
+
+    void reinitDevice();
+    bool applyAutoRotation(bool keyboardAttached);
+    void checkAttachState();
 
     void drainEvents();
     void processKeyboard();
@@ -62,4 +76,10 @@ public:
     bool stopLvgl() override;
     bool isAttached() const override;
     lv_indev_t* getLvglIndev() override { return kbHandle; }
+
+    // Starts LVGL input handling and registers the hardware keyboard indev for a device
+    // that wasn't attached at boot (so startLvgl() was never called from Lvgl.cpp's
+    // attachDevices()). Called from the device module's attach-detection timer once the
+    // keyboard is first detected post-boot. No-op if LVGL input is already started.
+    bool lateStart();
 };

@@ -1,5 +1,7 @@
 #include "Tab5Keyboard.h"
 #include <Tactility/app/App.h>
+#include <Tactility/lvgl/Keyboard.h>
+#include <Tactility/lvgl/LvglSync.h>
 #include <tactility/drivers/i2c_controller.h>
 #include <tactility/log.h>
 #include <esp_timer.h>
@@ -329,6 +331,113 @@ void Tab5Keyboard::processKeyboard() {
             }
         }
     }
+
+    checkAttachState();
+}
+
+// ---------------------------------------------------------------------------
+// applyAutoRotation - on attach, switches to landscape if not already (saving
+// the prior rotation); on detach, restores the saved rotation if we were the
+// ones who changed it. Only affects the live LVGL rotation, never persisted
+// display settings.
+// ---------------------------------------------------------------------------
+bool Tab5Keyboard::applyAutoRotation(bool keyboardAttached) {
+    auto* display = lv_indev_get_display(kbHandle);
+    if (display == nullptr) {
+        return false;
+    }
+
+    if (!tt::lvgl::lock(pdMS_TO_TICKS(100))) {
+        return false; // retry next poll
+    }
+
+    if (keyboardAttached) {
+        if (lv_display_get_rotation(display) != LV_DISPLAY_ROTATION_90) {
+            savedRotation = lv_display_get_rotation(display);
+            rotationOverrideActive = true;
+            lv_display_set_rotation(display, LV_DISPLAY_ROTATION_90);
+        }
+    } else {
+        // Only restore if rotation is still what we set it to - if the user manually
+        // changed it since attaching, respect their choice instead.
+        if (rotationOverrideActive && lv_display_get_rotation(display) == LV_DISPLAY_ROTATION_90) {
+            lv_display_set_rotation(display, savedRotation);
+        }
+        rotationOverrideActive = false;
+    }
+
+    tt::lvgl::unlock();
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// checkAttachState - throttled (~1s) hot-plug detection. Reapplies device
+// register configuration and auto-rotation on detach/attach transitions.
+// ---------------------------------------------------------------------------
+void Tab5Keyboard::checkAttachState() {
+    static constexpr uint32_t ATTACH_CHECK_TICKS = 50; // ~1s at 20ms/tick
+
+    if (++attachCheckTickCounter < ATTACH_CHECK_TICKS) {
+        return;
+    }
+    attachCheckTickCounter = 0;
+
+    const bool attached = isAttached();
+    if (attached == wasAttached) {
+        pendingAttachConfirmCount = 0;
+        return;
+    }
+
+    // Require the new state to be confirmed on a second consecutive check before acting -
+    // a single probe on a floating/half-connected bus (e.g. mid-unplug) can false-positive.
+    if (attached != pendingAttachState || pendingAttachConfirmCount == 0) {
+        pendingAttachState = attached;
+        pendingAttachConfirmCount = 1;
+        return;
+    }
+    pendingAttachConfirmCount = 0;
+
+    if (attached) {
+        reinitDevice();
+    }
+    if (!applyAutoRotation(attached)) {
+        return; // keep prior state so transition is retried
+    }
+    wasAttached = attached;
+}
+
+// ---------------------------------------------------------------------------
+// lateStart - see header comment. Brings up LVGL input handling for a keyboard
+// that wasn't attached at boot (startLvgl() wasn't called from attachDevices()).
+// ---------------------------------------------------------------------------
+bool Tab5Keyboard::lateStart() {
+    if (kbHandle != nullptr) {
+        return true; // already started
+    }
+
+    auto* display = lv_display_get_default();
+    if (display == nullptr) {
+        return false; // LVGL not ready yet
+    }
+
+    if (!tt::lvgl::lock(pdMS_TO_TICKS(100))) {
+        return false; // try again on the next attach-state check
+    }
+
+    bool started = startLvgl(display);
+    if (started) {
+        tt::lvgl::hardware_keyboard_set_indev(kbHandle);
+
+        // redraw() assigns every indev that exists at the time to the active screen's
+        // input group. This indev didn't exist yet at the last redraw(), so it has no
+        // group and won't deliver key events until the next app switch. Join the
+        // current default group now so input works immediately on the visible screen.
+        lv_indev_set_group(kbHandle, lv_group_get_default());
+    }
+
+    tt::lvgl::unlock();
+
+    return started;
 }
 
 // ---------------------------------------------------------------------------
@@ -359,21 +468,31 @@ Tab5Keyboard::~Tab5Keyboard() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// reinitDevice - (re)applies the device register configuration. Used at
+// startLvgl() and again on hot-plug reattach, since the device's RGB mode and
+// interrupt configuration are volatile and reset to power-on defaults when
+// the keyboard is unplugged and reconnected.
+// ---------------------------------------------------------------------------
+void Tab5Keyboard::reinitDevice() {
+    writeReg(REG_KEYBOARD_MODE, 0x00); // Normal mode
+    writeReg(REG_EVENT_NUM, 0x00);     // flush event queue
+    writeReg(REG_INT_STAT, 0x00);      // clear pending INT
+    writeReg(REG_RGB_MODE, 0x01);      // Custom RGB mode (manual LED control)
+    writeReg(REG_BRIGHTNESS, 50);      // 50% brightness
+    updateLeds();                      // restore current LED state
+
+    if (irqConfigured) {
+        writeReg(REG_INT_CFG, 0x01);   // re-enable Normal-mode interrupt (bit 0)
+    }
+}
+
 bool Tab5Keyboard::startLvgl(lv_display_t* display) {
     if (!queue) {
         LOG_E("Tab5Keyboard", "Input queue allocation failed — cannot start");
         return false;
     }
 
-    // Set Normal mode explicitly — device may power up in a different mode
-    if (!writeReg(REG_KEYBOARD_MODE, 0x00)) {
-        LOG_E("Tab5Keyboard", "Failed to set keyboard mode");
-        return false;
-    }
-    writeReg(REG_EVENT_NUM, 0x00);  // flush event queue
-    writeReg(REG_INT_STAT, 0x00);   // clear pending INT
-    writeReg(REG_RGB_MODE, 0x01);   // Custom RGB mode (manual LED control)
-    writeReg(REG_BRIGHTNESS, 50);   // 50% brightness
     symActive    = false;
     aaSticky     = false;
     aaHeld       = false;
@@ -383,13 +502,14 @@ bool Tab5Keyboard::startLvgl(lv_display_t* display) {
     repeatRow    = 0xFF;
     repeatCol    = 0xFF;
     repeatLastMs = 0;
-    updateLeds(); // both LEDs off initially
 
-    // Enable Normal-mode interrupt (bit 0)
-    if (!writeReg(REG_INT_CFG, 0x01)) {
-        LOG_E("Tab5Keyboard", "Failed to configure interrupt register");
-        return false;
-    }
+    configureIrqPin();  // best-effort; falls back to polling if it fails. Must run before
+                         // reinitDevice() so REG_INT_CFG is written if IRQ setup succeeded.
+
+    // Best-effort: if the keyboard isn't attached yet (e.g. started speculatively at
+    // boot so it can be detected later via hot-plug), these I2C writes fail silently
+    // and reinitDevice() runs again once attach is detected.
+    reinitDevice();
 
     kbHandle = lv_indev_create();
     lv_indev_set_type(kbHandle, LV_INDEV_TYPE_KEYPAD);
@@ -397,13 +517,18 @@ bool Tab5Keyboard::startLvgl(lv_display_t* display) {
     lv_indev_set_display(kbHandle, display);
     lv_indev_set_user_data(kbHandle, this);
 
-    configureIrqPin();  // best-effort; falls back to polling if it fails
+    wasAttached = isAttached();
+    rotationOverrideActive = false;
 
     assert(inputTimer == nullptr);
     inputTimer = std::make_unique<tt::Timer>(tt::Timer::Type::Periodic, pdMS_TO_TICKS(20), [this] {
         processKeyboard();
     });
     inputTimer->start();
+
+    if (wasAttached) {
+        applyAutoRotation(true);
+    }
 
     return true;
 }

@@ -26,6 +26,11 @@ static uint32_t getButtonPadding(UiDensity density, uint32_t buttonSize) {
     }
 }
 
+static int32_t computeButtonMargin(int32_t available_span, int32_t total_button_size) {
+    const int32_t usable = std::max<int32_t>(0, available_span - (3 * total_button_size));
+    return std::min<int32_t>(usable / 16, total_button_size / 2);
+}
+
 class LauncherApp final : public App {
 
     static lv_obj_t* createAppButton(lv_obj_t* parent, UiDensity uiDensity, const char* imageFile, const char* appId, int32_t itemMargin, bool isLandscape) {
@@ -84,6 +89,50 @@ class LauncherApp final : public App {
         }
     }
 
+    // The screen object outlives the launcher's views (it's recreated by GuiService::redraw()
+    // via lv_obj_clean() on every app switch), so the LV_EVENT_SIZE_CHANGED callback registered
+    // on it must be removed once buttons_wrapper is destroyed, to avoid a dangling user-data
+    // pointer on the next rotation while a different app is visible.
+    static void onButtonsWrapperDeleted(lv_event_t* e) {
+        auto* buttons_wrapper = lv_event_get_target_obj(e);
+        auto* screen = lv_obj_get_screen(buttons_wrapper);
+        lv_obj_remove_event_cb_with_user_data(screen, onButtonsWrapperResized, buttons_wrapper);
+    }
+
+    // Re-applies the flex direction and per-button margins when the display orientation
+    // changes while the launcher is the visible app (these are decided once at onShow()
+    // based on the resolution at that time, so a later rotation needs this to catch up).
+    static void onButtonsWrapperResized(lv_event_t* e) {
+        auto* buttons_wrapper = static_cast<lv_obj_t*>(lv_event_get_user_data(e));
+        const auto* display = lv_obj_get_display(buttons_wrapper);
+
+        const auto button_size = lvgl_get_launcher_icon_font_height();
+        const auto button_padding = getButtonPadding(lvgl_get_ui_density(), button_size);
+        const auto total_button_size = button_size + (button_padding * 2);
+
+        const auto horizontal_px = lv_display_get_horizontal_resolution(display);
+        const auto vertical_px = lv_display_get_vertical_resolution(display);
+        const bool is_landscape_display = horizontal_px >= vertical_px;
+        const auto current_flow = lv_obj_get_style_flex_flow(buttons_wrapper, LV_PART_MAIN);
+        const bool was_landscape = current_flow == LV_FLEX_FLOW_ROW;
+        if (is_landscape_display == was_landscape) {
+            return;
+        }
+
+        lv_obj_set_flex_flow(buttons_wrapper, is_landscape_display ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_COLUMN);
+
+        const int32_t margin = is_landscape_display
+            ? computeButtonMargin(horizontal_px, total_button_size)
+            : computeButtonMargin(vertical_px, total_button_size);
+
+        const uint32_t child_count = lv_obj_get_child_count(buttons_wrapper);
+        for (uint32_t i = 0; i < child_count; i++) {
+            auto* button = lv_obj_get_child(buttons_wrapper, i);
+            lv_obj_set_style_margin_hor(button, is_landscape_display ? margin : 0, LV_STATE_DEFAULT);
+            lv_obj_set_style_margin_ver(button, is_landscape_display ? 0 : margin, LV_STATE_DEFAULT);
+        }
+    }
+
 public:
 
     void onCreate(AppContext& app) override {
@@ -133,18 +182,19 @@ public:
             lv_obj_set_flex_flow(buttons_wrapper, LV_FLEX_FLOW_COLUMN);
         }
 
-        int32_t margin;
-        if (is_landscape_display) {
-            const int32_t available_width = std::max<int32_t>(0, lv_display_get_horizontal_resolution(display) - (3 * total_button_size));
-            margin = std::min<int32_t>(available_width / 16, total_button_size / 2);
-        } else {
-            const int32_t available_height = std::max<int32_t>(0, lv_display_get_vertical_resolution(display) - (3 * total_button_size));
-            margin = std::min<int32_t>(available_height / 16, total_button_size / 2);
-        }
+        const int32_t margin = is_landscape_display
+            ? computeButtonMargin(lv_display_get_horizontal_resolution(display), total_button_size)
+            : computeButtonMargin(lv_display_get_vertical_resolution(display), total_button_size);
 
         createAppButton(buttons_wrapper, ui_density, LVGL_ICON_LAUNCHER_APPS, "AppList", margin, is_landscape_display);
         createAppButton(buttons_wrapper, ui_density, LVGL_ICON_LAUNCHER_FOLDER, "Files", margin, is_landscape_display);
         createAppButton(buttons_wrapper, ui_density, LVGL_ICON_LAUNCHER_SETTINGS, "Settings", margin, is_landscape_display);
+
+        // The launcher's container is several levels below the screen, and LVGL only sends
+        // LV_EVENT_SIZE_CHANGED to the screen object itself on a resolution change - so the
+        // handler is attached there, with buttons_wrapper passed through as user data.
+        lv_obj_add_event_cb(lv_obj_get_screen(parent), onButtonsWrapperResized, LV_EVENT_SIZE_CHANGED, buttons_wrapper);
+        lv_obj_add_event_cb(buttons_wrapper, onButtonsWrapperDeleted, LV_EVENT_DELETE, nullptr);
 
         if (shouldShowPowerButton()) {
             auto* power_button = lv_button_create(parent);
