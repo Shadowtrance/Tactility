@@ -8,7 +8,6 @@
 
 #include <Tactility/Paths.h>
 #include <Tactility/Tactility.h>
-#include <Tactility/hal/sdcard/SdCardDevice.h>
 #include <dirent.h>
 #include <format>
 #include <map>

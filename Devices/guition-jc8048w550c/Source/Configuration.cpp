@@ -1,7 +1,5 @@
 #include "PwmBacklight.h"
 #include "devices/Display.h"
-#include "devices/SdCard.h"
-#include <driver/gpio.h>
 
 #include <Tactility/hal/Configuration.h>
 
@@ -14,7 +12,6 @@ static bool initBoot() {
 static DeviceVector createDevices() {
     return {
         createDisplay(),
-        createSdCard()
     };
 }
 

@@ -7,6 +7,7 @@
 #include <tactility/bindings/esp32_uart.h>
 #include <bindings/mpu6886.h>
 #include <bindings/bm8563.h>
+#include <tactility/bindings/display_placeholder.h>
 
 / {
 	compatible = "root";
@@ -46,8 +47,13 @@
 	spi0 {
 		compatible = "espressif,esp32-spi";
 		host = <SPI2_HOST>;
+		cs-gpios = <&gpio0 5 GPIO_FLAG_NONE>;
 		pin-mosi = <&gpio0 15 GPIO_FLAG_NONE>;
 		pin-sclk = <&gpio0 13 GPIO_FLAG_NONE>;
+	
+		display {
+			compatible = "display-placeholder";
+		};
 	};
 
 	uart_grove: uart1 {

@@ -2,7 +2,6 @@
 
 #include <Tactility/Logger.h>
 #include <Tactility/hal/touch/TouchDevice.h>
-#include <Tactility/lvgl/LvglSync.h>
 #include <Axs15231b/Axs15231bTouch.h>
 #include <EspLcdDisplayDriver.h>
 

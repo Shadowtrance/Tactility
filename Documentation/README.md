@@ -27,6 +27,12 @@ idf.py flash monitor            # flash and monitor
 
 Device IDs are the folder names under `Devices/` (e.g. `lilygo-tdeck`, `m5stack-cores3`, `cyd-2432s028r`).
 
+### Devicetree
+
+A device implementation has a `.dts` file.
+The parser at `Buildscripts/DevicetreeCompiler/` converts DTS into C code.
+It's called from the `Firmware/` build process.
+
 ### Tests
 
 Tests use Doctest and run on simulator (POSIX) target only:

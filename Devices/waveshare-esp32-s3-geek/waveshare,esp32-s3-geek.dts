@@ -7,6 +7,7 @@
 #include <tactility/bindings/esp32_sdmmc.h>
 #include <tactility/bindings/esp32_spi.h>
 #include <tactility/bindings/esp32_uart.h>
+#include <tactility/bindings/display_placeholder.h>
 
 / {
 	compatible = "root";
@@ -32,8 +33,13 @@
 	spi0 {
 		compatible = "espressif,esp32-spi";
 		host = <SPI2_HOST>;
+		cs-gpios = <&gpio0 10 GPIO_FLAG_NONE>;
 		pin-mosi = <&gpio0 11 GPIO_FLAG_NONE>;
 		pin-sclk = <&gpio0 12 GPIO_FLAG_NONE>;
+	
+		display {
+			compatible = "display-placeholder";
+		};
 	};
 
 	sdmmc0 {
@@ -44,6 +50,7 @@
 		pin-d1 = <&gpio0 33 GPIO_FLAG_NONE>;
 		pin-d2 = <&gpio0 38 GPIO_FLAG_NONE>;
 		pin-d3 = <&gpio0 34 GPIO_FLAG_NONE>;
+		slot = <SDMMC_HOST_SLOT_1>;
 		bus-width = <4>;
 	};
 

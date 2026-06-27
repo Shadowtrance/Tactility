@@ -27,6 +27,7 @@ bool Gt911Touch::createIoHandle(esp_lcd_panel_io_handle_t& outHandle) {
         return false;
     }
 
+    // Legacy I2C implementation
     auto* driver = device_get_driver(i2c);
     if (driver_is_compatible(driver, "espressif,esp32-i2c")) {
         auto port = static_cast<const Esp32I2cConfig*>(i2c->config)->port;
@@ -56,9 +57,9 @@ esp_lcd_touch_config_t Gt911Touch::createEspLcdTouchConfig() {
             .interrupt = configuration->pinInterruptLevel,
         },
         .flags = {
-            .swap_xy = configuration->swapXy,
-            .mirror_x = configuration->mirrorX,
-            .mirror_y = configuration->mirrorY,
+            .swap_xy = static_cast<unsigned int>(configuration->swapXy),
+            .mirror_x = static_cast<unsigned int>(configuration->mirrorX),
+            .mirror_y = static_cast<unsigned int>(configuration->mirrorY),
         },
         .process_coordinates = nullptr,
         .interrupt_callback = nullptr,

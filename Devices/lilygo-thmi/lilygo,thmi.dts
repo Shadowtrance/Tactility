@@ -6,6 +6,8 @@
 #include <tactility/bindings/esp32_i2c.h>
 #include <tactility/bindings/esp32_sdmmc.h>
 #include <tactility/bindings/esp32_spi.h>
+#include <tactility/bindings/display_placeholder.h>
+#include <tactility/bindings/touch_placeholder.h>
 
 / {
 	compatible = "root";
@@ -23,16 +25,28 @@
 	spi0 {
 		compatible = "espressif,esp32-spi";
 		host = <SPI2_HOST>;
+		cs-gpios = <&gpio0 6 GPIO_FLAG_NONE>, // Display
+		           <&gpio0 2 GPIO_FLAG_NONE>; // Touch
 		pin-mosi = <&gpio0 3 GPIO_FLAG_NONE>;
 		pin-miso = <&gpio0 4 GPIO_FLAG_NONE>;
 		pin-sclk = <&gpio0 1 GPIO_FLAG_NONE>;
+
+		display@0 {
+			compatible = "display-placeholder";
+		};
+
+		touch@1 {
+			compatible = "touch-placeholder";
+		};
 	};
 
 	sdmmc0 {
 		compatible = "espressif,esp32-sdmmc";
+		status = "disabled"; // Late-init is required, otherwise mounting fails
 		pin-clk = <&gpio0 12 GPIO_FLAG_NONE>;
 		pin-cmd = <&gpio0 11 GPIO_FLAG_NONE>;
 		pin-d0 = <&gpio0 13 GPIO_FLAG_NONE>;
+		slot = <SDMMC_HOST_SLOT_1>;
 		bus-width = <1>;
 		pullups;
 	};

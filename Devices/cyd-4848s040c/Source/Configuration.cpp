@@ -1,10 +1,6 @@
 #include "devices/St7701Display.h"
-#include "devices/SdCard.h"
-#include <driver/gpio.h>
 
 #include <Tactility/hal/Configuration.h>
-#include <Tactility/kernel/SystemEvents.h>
-#include <Tactility/lvgl/LvglSync.h>
 #include <PwmBacklight.h>
 
 using namespace tt::hal;
@@ -16,7 +12,6 @@ static bool initBoot() {
 static DeviceVector createDevices() {
     return {
         std::make_shared<St7701Display>(),
-        createSdCard()
     };
 }
 

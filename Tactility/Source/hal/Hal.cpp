@@ -5,7 +5,7 @@
 #include <tactility/hal/Device.h>
 
 #include <Tactility/hal/display/DisplayDevice.h>
-#include <Tactility/hal/sdcard/SdCardMounting.h>
+#include <Tactility/hal/SdCard.h>
 #include <Tactility/hal/touch/TouchDevice.h>
 #include <Tactility/kernel/SystemEvents.h>
 

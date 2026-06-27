@@ -1,7 +1,5 @@
 #include "devices/Display.h"
 #include "devices/Power.h"
-#include "devices/SdCard.h"
-#include <driver/gpio.h>
 
 #include <tactility/device.h>
 #include <tactility/drivers/i2c_controller.h>
@@ -243,7 +241,6 @@ static DeviceVector createDevices() {
         axp2101,
         std::make_shared<Axp2101Power>(axp2101),
         createPower(),
-        createSdCard(),
         createDisplay(),
     };
 }

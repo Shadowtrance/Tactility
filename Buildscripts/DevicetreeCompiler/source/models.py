@@ -8,6 +8,7 @@ class DtsVersion:
 class Device:
     node_name: str
     node_alias: str
+    node_address: str
     status: str
     properties: list
     devices: list
@@ -38,6 +39,7 @@ class BindingProperty:
     required: bool
     description: str
     default: object = None
+    element_type: str = None
 
 @dataclass
 class Binding:

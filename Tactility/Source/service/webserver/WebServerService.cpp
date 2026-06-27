@@ -16,7 +16,6 @@
 #include <Tactility/app/AppRegistration.h>
 #include <Tactility/app/AppManifest.h>
 #include <Tactility/app/App.h>
-#include <Tactility/hal/sdcard/SdCardDevice.h>
 #include <Tactility/service/wifi/Wifi.h>
 #include <esp_wifi_default.h>
 #include <Tactility/network/HttpdReq.h>

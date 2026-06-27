@@ -328,6 +328,10 @@ void device_for_each_child(Device* device, void* callbackContext, bool(*on_devic
     }
 }
 
+size_t device_get_child_count(Device* device) {
+    return device->internal->children.size();
+}
+
 void device_for_each_of_type(const DeviceType* type, void* callbackContext, bool(*on_device)(Device* device, void* context)) {
     ledger_lock();
     for (auto* device : ledger.devices) {

@@ -1,9 +1,7 @@
 #include "devices/Display.h"
-#include "devices/SdCard.h"
 #include "devices/CardputerEncoder.h"
 #include "devices/CardputerKeyboard.h"
 #include "devices/CardputerPower.h"
-#include <driver/gpio.h>
 
 #include <PwmBacklight.h>
 #include <Tactility/hal/Configuration.h>
@@ -16,7 +14,6 @@ static bool initBoot() {
 
 static DeviceVector createDevices() {
     return {
-        createSdCard(),
         createDisplay(),
         std::make_shared<CardputerKeyboard>(),
         std::make_shared<CardputerEncoder>(),

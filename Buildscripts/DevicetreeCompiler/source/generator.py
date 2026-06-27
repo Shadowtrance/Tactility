@@ -80,7 +80,7 @@ def property_to_string(property: DeviceProperty, devices: list[Device]) -> str:
         return "{ " + ",".join(value_list) + " }"
     elif type == "phandle":
         return find_phandle(devices, property.value)
-    elif type == "phandle-array":
+    elif type == "phandles":
         value_list = list()
         if isinstance(property.value, list):
             for item in property.value:
@@ -93,9 +93,25 @@ def property_to_string(property: DeviceProperty, devices: list[Device]) -> str:
             # If it's a string, assume it's a #define and show it as-is
             return property.value
         else:
-            raise Exception(f"Unsupported phandle-array type for {property.value}")
+            raise Exception(f"Unsupported phandles type for {property.name} with value {property.value} ")
     else:
         raise DevicetreeException(f"property_to_string() has an unsupported type: {type}")
+
+def resolve_phandle_array_entries(device_property, devices):
+    """Convert a phandle-array DTS property into a list of C initializer strings."""
+    entries = []
+    if device_property.type == "phandle-array":
+        items = device_property.value
+    elif device_property.type == "values":
+        items = [PropertyValue(type="values", value=device_property.value)]
+    else:
+        return []
+    for item in items:
+        if isinstance(item, PropertyValue):
+            entries.append(property_to_string(DeviceProperty(name="", type=item.type, value=item.value), devices))
+        else:
+            entries.append(str(item))
+    return entries
 
 def resolve_parameters_from_bindings(device: Device, bindings: list[Binding], devices: list[Device]) -> list:
     compatible_property = find_device_property(device, "compatible")
@@ -119,11 +135,32 @@ def resolve_parameters_from_bindings(device: Device, bindings: list[Binding], de
         if device_property.name not in binding_property_names:
             raise DevicetreeException(f"Device '{device.node_name}' has invalid property '{device_property.name}'")
 
-    # Allocate total expected configuration arguments
-    result = [0] * len(binding_properties)
-    for index, binding_property in enumerate(binding_properties):
+    node_name = get_device_node_name_safe(device)
+    result = []
+    phandle_arrays = []
+    for binding_property in binding_properties:
         device_property = find_device_property(device, binding_property.name)
-        # No property specified in DTS, use binding defaults
+
+        if binding_property.type == "phandle-array":
+            if binding_property.element_type is None:
+                raise DevicetreeException(f"phandle-array property '{binding_property.name}' requires 'element-type' in binding")
+            prop_safe = binding_property.name.replace("-", "_")
+            array_var = f"{node_name}_{prop_safe}"
+            if device_property is not None:
+                entries = resolve_phandle_array_entries(device_property, devices)
+                phandle_arrays.append((array_var, binding_property.element_type, entries))
+                result.append(f"({binding_property.element_type}*){array_var}")
+                result.append(str(len(entries)))
+            elif binding_property.default is not None:
+                result.append("NULL")
+                result.append("0")
+            elif binding_property.required:
+                raise DevicetreeException(f"device {device.node_name} doesn't have property '{binding_property.name}'")
+            else:
+                result.append("NULL")
+                result.append("0")
+            continue
+
         if device_property is None:
             if binding_property.default is not None:
                 temp_prop = DeviceProperty(
@@ -131,30 +168,38 @@ def resolve_parameters_from_bindings(device: Device, bindings: list[Binding], de
                     type=binding_property.type,
                     value=binding_property.default
                 )
-                result[index] = property_to_string(temp_prop, devices)
+                result.append(property_to_string(temp_prop, devices))
             elif binding_property.required:
                 raise DevicetreeException(f"device {device.node_name} doesn't have property '{binding_property.name}'")
             elif binding_property.type == "bool" or binding_property.type == "boolean":
                 if binding_property.default == "true" or binding_property.default == None:
-                    result[index] = "true"
-                else: # Explicit or implied false
-                    result[index] = "false"
+                    result.append("true")
+                else:
+                    result.append("false")
             else:
                 raise DevicetreeException(f"Device {device.node_name} doesn't have property '{binding_property.name}' and no default value is set")
         else:
-            result[index] = property_to_string(device_property, devices)
-    return result
+            result.append(property_to_string(device_property, devices))
+
+    return result, phandle_arrays
 
 def write_config(file, device: Device, bindings: list[Binding], devices: list[Device], type_name: str):
     node_name = get_device_node_name_safe(device)
     config_type = f"{type_name}_config_dt"
     config_variable_name = f"{node_name}_config"
+
+    config_params, phandle_arrays = resolve_parameters_from_bindings(device, bindings, devices)
+
+    # Write phandle-array variables before the config struct
+    for array_var, element_type, entries in phandle_arrays:
+        entries_str = ", ".join(entries)
+        file.write(f"static {element_type} {array_var}[] = {{ {entries_str} }};\n")
+
     file.write(f"static const {config_type} {config_variable_name}" " = {\n")
-    config_params = resolve_parameters_from_bindings(device, bindings, devices)
     # Indent all params
     for index, config_param in enumerate(config_params):
         config_params[index] = f"\t{config_param}"
-    # Join with command and newline
+    # Join with comma and newline
     if len(config_params) > 0:
         config_params_joined = ",\n".join(config_params)
         file.write(f"{config_params_joined}\n")
@@ -178,7 +223,9 @@ def write_device_structs(file, device: Device, parent_device: Device, bindings: 
     # Write config struct
     write_config(file, device, bindings, devices, type_name)
     # Write device struct
+    address_value = device.node_address if device.node_address is not None else "0"
     file.write(f"static struct Device {node_name}" " = {\n")
+    file.write(f"\t.address = {address_value},\n")
     file.write(f"\t.name = \"{device.node_name}\",\n") # Use original name
     file.write(f"\t.config = &{config_variable_name},\n")
     file.write(f"\t.parent = {parent_value},\n")

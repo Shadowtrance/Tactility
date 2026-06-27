@@ -3,11 +3,12 @@
 #include <soc/soc_caps.h>
 
 #include <Tactility/hal/usb/Usb.h>
-#include <Tactility/hal/sdcard/SpiSdCardDevice.h>
 #include <Tactility/hal/usb/UsbTusb.h>
 
 #include <Tactility/Logger.h>
-#include <tactility/drivers/esp32_sdmmc.h>
+#include <tactility/device.h>
+#include <tactility/driver.h>
+#include <tactility/drivers/esp32_sdcard.h>
 
 namespace tt::hal::usb {
 
@@ -24,41 +25,23 @@ static Mode currentMode = Mode::Default;
 static RTC_NOINIT_ATTR BootModeData bootModeData;
 
 sdmmc_card_t* getCard() {
-    sdmmc_card_t* sdcard = nullptr;
+    sdmmc_card_t* card = nullptr;
 
-    // Find old HAL SD card device:
-    auto sdcards = findDevices<sdcard::SpiSdCardDevice>(Device::Type::SdCard);
-    for (auto& device : sdcards) {
-        auto sdcard_device= std::static_pointer_cast<sdcard::SpiSdCardDevice>(device);
-        if (sdcard_device != nullptr && sdcard_device->isMounted() && sdcard_device->getCard() != nullptr) {
-            sdcard = sdcard_device->getCard();
-            break;
-        }
-    }
+    device_for_each(&card, [](auto* device, void* context) {
+        auto* driver = device_get_driver(device);
+        if (driver == nullptr) return true;
+        if (!driver_is_compatible(driver, "espressif,esp32-sdspi") &&
+            !driver_is_compatible(driver, "espressif,esp32-sdmmc")) return true;
+        auto** out = static_cast<sdmmc_card_t**>(context);
+        *out = esp32_sdcard_get_card(device);
+        return *out == nullptr;
+    });
 
-#if SOC_SDMMC_HOST_SUPPORTED
-    // Find ESP32 SDMMC device:
-    if (sdcard == nullptr) {
-        device_for_each(&sdcard, [](auto* device, void* context) {
-            if (device_is_ready(device) && device_is_compatible(device, "espressif,esp32-sdmmc")) {
-                auto** sdcard = static_cast<sdmmc_card_t**>(context);
-                auto* sdmmc_card = esp32_sdmmc_get_card(device);
-                if (sdmmc_card) {
-                    *sdcard = sdmmc_card;
-                    return false;
-                }
-                return true;
-            }
-            return true;
-        });
-    }
-#endif
-
-    if (sdcard == nullptr) {
+    if (card == nullptr) {
         LOGGER.warn("Couldn't find a mounted SD card");
     }
 
-    return sdcard;
+    return card;
 }
 
 static bool canStartNewMode() {

@@ -1,8 +1,6 @@
 #include "devices/Display.h"
-#include "devices/SdCard.h"
 #include "devices/CardputerKeyboard.h"
 #include "devices/CardputerPower.h"
-#include <driver/gpio.h>
 
 #include <tactility/device.h>
 #include <Tactility/hal/Configuration.h>
@@ -19,7 +17,6 @@ static bool initBoot() {
 static DeviceVector createDevices() {
     auto tca8418 = std::make_shared<Tca8418>(device_find_by_name("i2c_internal"));
     return {
-        createSdCard(),
         createDisplay(),
         tca8418,
         std::make_shared<CardputerKeyboard>(tca8418),

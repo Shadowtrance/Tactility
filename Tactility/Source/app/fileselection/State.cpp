@@ -1,7 +1,6 @@
 #include "Tactility/app/fileselection/State.h"
 
 #include <Tactility/file/File.h>
-#include "Tactility/hal/sdcard/SdCardDevice.h"
 #include <Tactility/Logger.h>
 #include <Tactility/MountPoints.h>
 #include <Tactility/kernel/Platform.h>

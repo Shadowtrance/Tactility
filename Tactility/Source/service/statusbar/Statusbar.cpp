@@ -2,10 +2,9 @@
 
 #include <Tactility/Logger.h>
 #include <Tactility/Mutex.h>
-#include <Tactility/Paths.h>
 #include <Tactility/Timer.h>
 #include <Tactility/hal/power/PowerDevice.h>
-#include <Tactility/hal/sdcard/SdCardDevice.h>
+#include <tactility/filesystem/file_system.h>
 #include <Tactility/lvgl/Lvgl.h>
 #include <Tactility/lvgl/LvglSync.h>
 #include <Tactility/service/ServiceContext.h>
@@ -239,11 +238,21 @@ class StatusbarService final : public Service {
     }
 
     void updateSdCardIcon() {
-        auto* sdcard_fs = findSdcardFileSystem(false);
-        // TODO: Support multiple SD cards
-        if (sdcard_fs != nullptr) {
-            auto mounted = file_system_is_mounted(sdcard_fs);
-            auto* desired_icon = getSdCardStatusIcon(mounted);
+        struct SdCardState { bool found; bool mounted; };
+        SdCardState state = { false, false };
+
+        file_system_for_each(&state, [](FileSystem* fs, void* context) {
+            auto* s = static_cast<SdCardState*>(context);
+            char path[64];
+            if (file_system_get_path(fs, path, sizeof(path)) != ERROR_NONE) return true;
+            if (strncmp(path, "/sdcard", 7) != 0) return true;
+            s->found = true;
+            s->mounted = file_system_is_mounted(fs);
+            return false;
+        });
+
+        if (state.found) {
+            auto* desired_icon = getSdCardStatusIcon(state.mounted);
             if (sdcard_last_icon != desired_icon) {
                 lvgl::statusbar_icon_set_image(sdcard_icon_id, desired_icon);
                 lvgl::statusbar_icon_set_visibility(sdcard_icon_id, true);

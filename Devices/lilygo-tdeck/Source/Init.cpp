@@ -11,7 +11,6 @@
 
 static const auto LOGGER = tt::Logger("T-Deck");
 
-// Power on
 constexpr auto TDECK_POWERON_GPIO = GPIO_NUM_10;
 
 static bool powerOn() {

@@ -1,7 +1,5 @@
 #include "devices/Display.h"
-#include "devices/SdCard.h"
 #include "devices/Power.h"
-#include <driver/gpio.h>
 
 #include <tactility/device.h>
 #include <tactility/drivers/i2c_controller.h>
@@ -104,7 +102,6 @@ static DeviceVector createDevices() {
         createPower(),
         ButtonControl::createTwoButtonControl(11, 12), // top button, side button
         createDisplay(),
-        createSdCard()
     };
 }
 

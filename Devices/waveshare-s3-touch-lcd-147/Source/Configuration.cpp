@@ -1,5 +1,4 @@
 #include "devices/Display.h"
-#include "devices/Sdcard.h"
 
 #include <Tactility/hal/Configuration.h>
 
@@ -10,7 +9,6 @@ using namespace tt::hal;
 static std::vector<std::shared_ptr<tt::hal::Device>> createDevices() {
     return {
         createDisplay(),
-        createSdCard()
     };
 }
 

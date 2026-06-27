@@ -1,20 +1,21 @@
 #include "PwmBacklight.h"
 #include "devices/Display.h"
-#include "devices/SdCard.h"
-#include <driver/gpio.h>
 
 #include <Tactility/hal/Configuration.h>
 
 using namespace tt::hal;
 
 static bool initBoot() {
-    return driver::pwmbacklight::init(GPIO_NUM_27);
+    driver::pwmbacklight::init(GPIO_NUM_27);
+    // Delay is required, or GUI will lock up.
+    // It's possibly related to the increased power draw when turning on the backlight.
+    vTaskDelay(100);
+    return true;
 }
 
 static DeviceVector createDevices() {
     return {
         createDisplay(),
-        createSdCard()
     };
 }
 

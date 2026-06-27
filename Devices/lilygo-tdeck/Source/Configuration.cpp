@@ -1,12 +1,10 @@
 #include "devices/Display.h"
 #include "devices/KeyboardBacklight.h"
 #include "devices/Power.h"
-#include "devices/Sdcard.h"
 #include "devices/TdeckKeyboard.h"
 #include "devices/TrackballDevice.h"
 
 #include <Tactility/hal/Configuration.h>
-#include <Tactility/lvgl/LvglSync.h>
 #include <tactility/check.h>
 #include <tactility/device.h>
 
@@ -23,7 +21,6 @@ static std::vector<std::shared_ptr<tt::hal::Device>> createDevices() {
         std::make_shared<TdeckKeyboard>(i2c_internal),
         std::make_shared<KeyboardBacklightDevice>(),
         std::make_shared<TrackballDevice>(),
-        createSdCard()
     };
 }
 

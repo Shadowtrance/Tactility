@@ -1,9 +1,7 @@
 #include "devices/Display.h"
-#include "devices/SdCard.h"
 #include "devices/TpagerEncoder.h"
 #include "devices/TpagerKeyboard.h"
 #include "devices/TpagerPower.h"
-#include <driver/gpio.h>
 #include <tactility/device.h>
 
 #include <Tactility/hal/Configuration.h>
@@ -28,7 +26,6 @@ static DeviceVector createDevices() {
         bq27220,
         std::make_shared<Drv2605>(i2c),
         power,
-        createTpagerSdCard(),
         createDisplay(),
         keyboard,
         std::make_shared<TpagerEncoder>()

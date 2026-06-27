@@ -26,6 +26,9 @@ struct DeviceType {
 
 /** Represents a piece of hardware */
 struct Device {
+    /** Device address. Can represent an index, a memory address, or some kind of offset */
+    int32_t address;
+
     /** The name of the device. Valid characters: a-z a-Z 0-9 - _ . */
     const char* name;
 
@@ -247,6 +250,13 @@ void device_for_each(void* callback_context, bool(*on_device)(struct Device* dev
  * @param[in] on_device the function to call for each filtered device. return true to continue iterating or false to stop.
  */
 void device_for_each_child(struct Device* device, void* callback_context, bool(*on_device)(struct Device* device, void* context));
+
+/**
+ * @brief Get the number of child devices.
+ * @param[in] device non-null device pointer
+ * @return the number of children
+ */
+size_t device_get_child_count(struct Device* device);
 
 /**
  * Iterate through all the known devices of a specific type

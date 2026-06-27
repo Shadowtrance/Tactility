@@ -1,10 +1,7 @@
-#include "devices/SdCard.h"
 #include "devices/Display.h"
 #include "devices/Power.h"
-#include <driver/gpio.h>
 
 #include <Tactility/hal/Configuration.h>
-#include <Tactility/lvgl/LvglSync.h>
 #include <PwmBacklight.h>
 
 using namespace tt::hal;
@@ -17,7 +14,6 @@ static tt::hal::DeviceVector createDevices() {
     return {
         createPower(),
         createDisplay(),
-        createSdCard()
     };
 }
 
