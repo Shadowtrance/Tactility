@@ -1,10 +1,12 @@
 #include <Tactility/Logger.h>
-#include <Tactility/MountPoints.h>
 #include <Tactility/Mutex.h>
+#include <Tactility/file/File.h>
 #include <Tactility/file/FileLock.h>
 #include <Tactility/file/PropertiesFile.h>
 #include <Tactility/settings/Language.h>
 #include <Tactility/settings/SystemSettings.h>
+
+#include "Tactility/Paths.h"
 
 #include <format>
 
@@ -17,12 +19,16 @@ constexpr auto* FILE_PATH_FORMAT = "{}/settings/system.properties";
 static bool cached = false;
 static SystemSettings cachedSettings;
 
+static bool hasSystemSettingsFile() {
+    auto file_path = std::format(FILE_PATH_FORMAT, getUserDataPath());
+    return file::isFile(file_path);
+}
+
 static bool loadSystemSettingsFromFile(SystemSettings& properties) {
-    auto file_path = std::format(FILE_PATH_FORMAT, file::MOUNT_POINT_DATA);
+    auto file_path = std::format(FILE_PATH_FORMAT, getUserDataPath());
     LOGGER.info("System settings loading from {}", file_path);
     std::map<std::string, std::string> map;
     if (!file::loadPropertiesFile(file_path, map)) {
-        LOGGER.error("Failed to load {}", file_path);
         return false;
     }
 
@@ -55,11 +61,12 @@ static bool loadSystemSettingsFromFile(SystemSettings& properties) {
 }
 
 bool loadSystemSettings(SystemSettings& properties) {
-    if (!cached) {
-        if (!loadSystemSettingsFromFile(cachedSettings)) {
-            return false;
+    if (!cached && hasSystemSettingsFile()) {
+        if (loadSystemSettingsFromFile(cachedSettings)) {
+            cached = true;
+        } else {
+            LOGGER.error("Failed to load");
         }
-        cached = true;
     }
 
     properties = cachedSettings;
@@ -67,7 +74,7 @@ bool loadSystemSettings(SystemSettings& properties) {
 }
 
 bool saveSystemSettings(const SystemSettings& properties) {
-    auto file_path = std::format(FILE_PATH_FORMAT, file::MOUNT_POINT_DATA);
+    auto file_path = std::format(FILE_PATH_FORMAT, getUserDataPath());
     std::map<std::string, std::string> map;
     map["language"] = toString(properties.language);
     map["timeFormat24h"] = properties.timeFormat24h ? "true" : "false";
