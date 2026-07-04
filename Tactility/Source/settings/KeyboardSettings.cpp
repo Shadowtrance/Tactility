@@ -1,4 +1,5 @@
 #include <Tactility/settings/KeyboardSettings.h>
+#include <Tactility/file/File.h>
 #include <Tactility/file/PropertiesFile.h>
 #include <Tactility/Paths.h>
 
@@ -17,8 +18,13 @@ constexpr auto* KEY_BACKLIGHT_TIMEOUT_ENABLED = "backlightTimeoutEnabled";
 constexpr auto* KEY_BACKLIGHT_TIMEOUT_MS = "backlightTimeoutMs";
 
 bool load(KeyboardSettings& settings) {
+    auto settings_path = getSettingsFilePath();
+    if (!file::isFile(settings_path)) {
+        return false;
+    }
+
     std::map<std::string, std::string> map;
-    if (!file::loadPropertiesFile(getSettingsFilePath(), map)) {
+    if (!file::loadPropertiesFile(settings_path, map)) {
         return false;
     }
 
@@ -58,7 +64,11 @@ bool save(const KeyboardSettings& settings) {
     map[KEY_BACKLIGHT_BRIGHTNESS] = std::to_string(settings.backlightBrightness);
     map[KEY_BACKLIGHT_TIMEOUT_ENABLED] = settings.backlightTimeoutEnabled ? "1" : "0";
     map[KEY_BACKLIGHT_TIMEOUT_MS] = std::to_string(settings.backlightTimeoutMs);
-    return file::savePropertiesFile(getSettingsFilePath(), map);
+    auto settings_path = getSettingsFilePath();
+    if (!file::findOrCreateParentDirectory(settings_path, 0755)) {
+        return false;
+    }
+    return file::savePropertiesFile(settings_path, map);
 }
 
 }

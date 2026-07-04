@@ -29,8 +29,13 @@ static BluetoothSettings cached;
 static bool cached_valid = false;
 
 static bool load(BluetoothSettings& out) {
+    auto settings_path = getSettingsPath();
+    if (!file::isFile(settings_path)) {
+        return false;
+    }
+
     std::map<std::string, std::string> map;
-    if (!file::loadPropertiesFile(getSettingsPath(), map)) {
+    if (!file::loadPropertiesFile(settings_path, map)) {
         return false;
     }
     auto it = map.find(KEY_ENABLE_ON_BOOT);
@@ -47,11 +52,18 @@ static bool load(BluetoothSettings& out) {
 
 static bool save(const BluetoothSettings& s) {
     std::map<std::string, std::string> map;
-    file::loadPropertiesFile(getSettingsPath(), map); // ignore failure — may not exist yet
+    if (file::isFile(getSettingsPath())) {
+        file::loadPropertiesFile(getSettingsPath(), map);
+    }
     map[KEY_ENABLE_ON_BOOT]  = s.enableOnBoot  ? "true" : "false";
     map[KEY_SPP_AUTO_START]  = s.sppAutoStart  ? "true" : "false";
     map[KEY_MIDI_AUTO_START] = s.midiAutoStart ? "true" : "false";
-    return file::savePropertiesFile(getSettingsPath(), map);
+    auto settings_path = getSettingsPath();
+    if (!file::findOrCreateParentDirectory(settings_path, 0755)) {
+        LOGGER.error("Failed to create parent dir for {}", settings_path);
+        return false;
+    }
+    return file::savePropertiesFile(settings_path, map);
 }
 
 static BluetoothSettings getCachedOrLoad() {

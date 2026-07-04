@@ -1,5 +1,6 @@
 #include <Tactility/settings/DisplaySettings.h>
 
+#include <Tactility/file/File.h>
 #include <Tactility/file/PropertiesFile.h>
 #include <Tactility/Paths.h>
 #include <tactility/hal/Device.h>
@@ -109,8 +110,13 @@ static bool fromString(const std::string& str, ScreensaverType& type) {
 }
 
 bool load(DisplaySettings& settings) {
+    auto settings_path = getSettingsFilePath();
+    if (!file::isFile(settings_path)) {
+        return false;
+    }
+
     std::map<std::string, std::string> map;
-    if (!file::loadPropertiesFile(getSettingsFilePath(), map)) {
+    if (!file::loadPropertiesFile(settings_path, map)) {
         return false;
     }
 
@@ -190,7 +196,11 @@ bool save(const DisplaySettings& settings) {
     map[SETTINGS_KEY_TIMEOUT_ENABLED] = settings.backlightTimeoutEnabled ? "1" : "0";
     map[SETTINGS_KEY_TIMEOUT_MS] = std::to_string(settings.backlightTimeoutMs);
     map[SETTINGS_KEY_SCREENSAVER_TYPE] = toString(settings.screensaverType);
-    return file::savePropertiesFile(getSettingsFilePath(), map);
+    auto settings_path = getSettingsFilePath();
+    if (!file::findOrCreateParentDirectory(settings_path, 0755)) {
+        return false;
+    }
+    return file::savePropertiesFile(settings_path, map);
 }
 
 lv_display_rotation_t toLvglDisplayRotation(Orientation orientation) {

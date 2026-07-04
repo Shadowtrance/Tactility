@@ -1,4 +1,5 @@
 #ifdef ESP_PLATFORM
+#include <Tactility/file/File.h>
 #include <Tactility/file/PropertiesFile.h>
 #include <Tactility/Logger.h>
 #include <Tactility/Paths.h>
@@ -21,8 +22,13 @@ struct DevelopmentSettings {
 };
 
 static bool load(DevelopmentSettings& settings) {
+    auto settings_path = getSettingsFilePath();
+    if (!file::isFile(settings_path)) {
+        return false;
+    }
+
     std::map<std::string, std::string> map;
-    if (!file::loadPropertiesFile(getSettingsFilePath(), map)) {
+    if (!file::loadPropertiesFile(settings_path, map)) {
         return false;
     }
 
@@ -38,7 +44,12 @@ static bool load(DevelopmentSettings& settings) {
 static bool save(const DevelopmentSettings& settings) {
     std::map<std::string, std::string> map;
     map[SETTINGS_KEY_ENABLE_ON_BOOT] = settings.enableOnBoot ? "true" : "false";
-    return file::savePropertiesFile(getSettingsFilePath(), map);
+    auto settings_path = getSettingsFilePath();
+    if (!file::findOrCreateParentDirectory(settings_path, 0755)) {
+        LOGGER.error("Failed to create parent dir for {}", settings_path);
+        return false;
+    }
+    return file::savePropertiesFile(settings_path, map);
 }
 
 void setEnableOnBoot(bool enable) {

@@ -60,8 +60,11 @@ bool hasFileForDevice(const std::string& addr_hex) {
 }
 
 bool load(const std::string& addr_hex, PairedDevice& device) {
+    auto file_path = getFilePath(addr_hex);
+    if (!file::isFile(file_path)) return false;
+
     std::map<std::string, std::string> map;
-    if (!file::loadPropertiesFile(getFilePath(addr_hex), map)) return false;
+    if (!file::loadPropertiesFile(file_path, map)) return false;
     if (!map.contains(KEY_ADDR)) return false;
     if (!hexToAddr(map[KEY_ADDR], device.addr)) return false;
 
@@ -83,7 +86,12 @@ bool save(const PairedDevice& device) {
     map[KEY_ADDR]         = addr_hex;
     map[KEY_AUTO_CONNECT] = device.autoConnect ? "true" : "false";
     map[KEY_PROFILE_ID]   = std::to_string(device.profileId);
-    return file::savePropertiesFile(getFilePath(addr_hex), map);
+    auto file_path = getFilePath(addr_hex);
+    if (!file::findOrCreateParentDirectory(file_path, 0755)) {
+        LOGGER.error("Failed to create parent dir for {}", file_path);
+        return false;
+    }
+    return file::savePropertiesFile(file_path, map);
 }
 
 bool remove(const std::string& addr_hex) {

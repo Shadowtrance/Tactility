@@ -1,12 +1,15 @@
+#include "tactility/lvgl_module.h"
+
+
+#include <Tactility/Logger.h>
+#include <Tactility/RecursiveMutex.h>
 #include <Tactility/app/AppManifest.h>
 #include <Tactility/app/timezone/TimeZone.h>
-#include <Tactility/Logger.h>
-#include <Tactility/lvgl/Toolbar.h>
 #include <Tactility/lvgl/LvglSync.h>
-#include <Tactility/RecursiveMutex.h>
+#include <Tactility/lvgl/Toolbar.h>
 #include <Tactility/service/loader/Loader.h>
-#include <Tactility/settings/Time.h>
 #include <Tactility/settings/SystemSettings.h>
+#include <Tactility/settings/Time.h>
 
 #include <lvgl.h>
 
@@ -23,6 +26,7 @@ class TimeDateSettingsApp final : public App {
     RecursiveMutex mutex;
     lv_obj_t* timeZoneLabel = nullptr;
     lv_obj_t* dateFormatDropdown = nullptr;
+    bool isShown = false;
 
     static void onTimeFormatChanged(lv_event_t* event) {
         auto* widget = lv_event_get_target_obj(event);
@@ -133,6 +137,12 @@ public:
         }
         lv_obj_center(timeZoneLabel);
         lv_label_set_text(timeZoneLabel, timeZoneName.c_str());
+
+        isShown = true;
+    }
+
+    void onHide(AppContext& app) override {
+        isShown = false;
     }
 
     void onResult(AppContext& app, LaunchId launchId, Result result, std::unique_ptr<Bundle> bundle) override {
@@ -141,11 +151,13 @@ public:
             const auto code = timezone::getResultCode(*bundle);
             LOGGER.info("Result name={} code={}", name, code);
 
-            if (!name.empty()) {
-                if (lvgl::lock(100 / portTICK_PERIOD_MS)) {
+            // onShow() may not have (re)created the widgets yet: onResult() runs synchronously
+            // on the loader thread and can race ahead of the async gui-task redraw.
+            if (!name.empty() && lvgl_try_lock(100 / portTICK_PERIOD_MS)) {
+                if (isShown) {
                     lv_label_set_text(timeZoneLabel, name.c_str());
-                    lvgl::unlock();
                 }
+                lvgl_unlock();
             }
         }
     }

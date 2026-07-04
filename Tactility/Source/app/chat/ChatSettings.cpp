@@ -8,6 +8,7 @@
 #include <Tactility/app/chat/ChatProtocol.h>
 
 #include <Tactility/crypt/Crypt.h>
+#include <Tactility/file/File.h>
 #include <Tactility/file/PropertiesFile.h>
 #include <Tactility/Logger.h>
 #include <Tactility/Paths.h>
@@ -33,6 +34,8 @@ constexpr auto* KEY_SENDER_ID = "senderId";
 constexpr auto* KEY_NICKNAME = "nickname";
 constexpr auto* KEY_ENCRYPTION_KEY = "encryptionKey";
 constexpr auto* KEY_CHAT_CHANNEL = "chatChannel";
+
+uint32_t defaultSenderId = 0;
 
 // IV_SEED provides basic obfuscation for stored encryption keys, not strong encryption.
 // The device master key (from crypt::getIv) provides the actual security.
@@ -112,8 +115,9 @@ static uint32_t generateSenderId() {
 }
 
 ChatSettingsData getDefaultSettings() {
+    if (defaultSenderId == 0) defaultSenderId = generateSenderId();
     return ChatSettingsData{
-        .senderId = 0,
+        .senderId = defaultSenderId,
         .nickname = "Device",
         .encryptionKey = {},
         .hasEncryptionKey = false,
@@ -124,8 +128,14 @@ ChatSettingsData getDefaultSettings() {
 ChatSettingsData loadSettings() {
     ChatSettingsData settings = getDefaultSettings();
 
+    auto settings_path = getSettingsFilePath();
+    if (!file::isFile(settings_path)) {
+        settings.senderId = generateSenderId();
+        return settings;
+    }
+
     std::map<std::string, std::string> map;
-    if (!file::loadPropertiesFile(getSettingsFilePath(), map)) {
+    if (!file::loadPropertiesFile(settings_path, map)) {
         settings.senderId = generateSenderId();
         return settings;
     }
@@ -176,7 +186,12 @@ bool saveSettings(const ChatSettingsData& settings) {
         map[KEY_ENCRYPTION_KEY] = "";
     }
 
-    return file::savePropertiesFile(getSettingsFilePath(), map);
+    auto settings_path = getSettingsFilePath();
+    if (!file::findOrCreateParentDirectory(settings_path, 0755)) {
+        LOGGER.error("Failed to create parent dir for {}", settings_path);
+        return false;
+    }
+    return file::savePropertiesFile(settings_path, map);
 }
 
 bool settingsFileExists() {
