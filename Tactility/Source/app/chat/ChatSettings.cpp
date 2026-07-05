@@ -7,10 +7,11 @@
 #include <Tactility/app/chat/ChatSettings.h>
 #include <Tactility/app/chat/ChatProtocol.h>
 
-#include <Tactility/crypt/Crypt.h>
 #include <Tactility/file/File.h>
 #include <Tactility/file/PropertiesFile.h>
 #include <Tactility/Paths.h>
+
+#include <tactility/crypt.h>
 
 #include <esp_random.h>
 
@@ -38,7 +39,7 @@ constexpr auto* KEY_CHAT_CHANNEL = "chatChannel";
 uint32_t defaultSenderId = 0;
 
 // IV_SEED provides basic obfuscation for stored encryption keys, not strong encryption.
-// The device master key (from crypt::getIv) provides the actual security.
+// The device master key (from crypt_get_iv) provides the actual security.
 static constexpr auto* IV_SEED = "chat_key";
 
 static std::string toHexString(const uint8_t* data, size_t length) {
@@ -73,10 +74,10 @@ static bool readHex(const std::string& input, uint8_t* buffer, size_t length) {
 
 static bool encryptKey(const uint8_t key[ESP_NOW_KEY_LEN], std::string& hexOutput) {
     uint8_t iv[16];
-    crypt::getIv(IV_SEED, std::strlen(IV_SEED), iv);
+    crypt_get_iv(IV_SEED, std::strlen(IV_SEED), iv);
 
     uint8_t encrypted[ESP_NOW_KEY_LEN];
-    if (crypt::encrypt(iv, key, encrypted, ESP_NOW_KEY_LEN) != 0) {
+    if (crypt_encrypt(iv, key, encrypted, ESP_NOW_KEY_LEN) != 0) {
         LOG_E(TAG, "Failed to encrypt key");
         return false;
     }
@@ -96,9 +97,9 @@ static bool decryptKey(const std::string& hexInput, uint8_t key[ESP_NOW_KEY_LEN]
     }
 
     uint8_t iv[16];
-    crypt::getIv(IV_SEED, std::strlen(IV_SEED), iv);
+    crypt_get_iv(IV_SEED, std::strlen(IV_SEED), iv);
 
-    if (crypt::decrypt(iv, encrypted, key, ESP_NOW_KEY_LEN) != 0) {
+    if (crypt_decrypt(iv, encrypted, key, ESP_NOW_KEY_LEN) != 0) {
         LOG_E(TAG, "Failed to decrypt key");
         return false;
     }
