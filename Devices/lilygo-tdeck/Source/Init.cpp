@@ -36,13 +36,16 @@ static bool powerOn() {
     return true;
 }
 
-bool initBoot() {
+bool earlyInit() {
     LOG_I(TAG, LOG_MESSAGE_POWER_ON_START);
     if (!powerOn()) {
         LOG_E(TAG, LOG_MESSAGE_POWER_ON_FAILED);
         return false;
     }
+    return true;
+}
 
+bool initBoot() {
     /* 32 Khz and higher gives an issue where the screen starts dimming again above 80% brightness
      * when moving the brightness slider rapidly from a lower setting to 100%.
      * This is not a slider bug (data was debug-traced) */

@@ -19,10 +19,12 @@
 #include <Tactility/network/NtpPrivate.h>
 #include <Tactility/service/ServiceManifest.h>
 #include <Tactility/service/ServiceRegistration.h>
+#include <Tactility/service/audio/Audio.h>
 #include <Tactility/settings/TimePrivate.h>
 
 #include <tactility/concurrent/thread.h>
 #include <tactility/crypt_module.h>
+#include <tactility/drivers/audio_stream.h>
 #include <tactility/drivers/grove.h>
 #include <tactility/drivers/rtc.h>
 #include <tactility/drivers/uart_controller.h>
@@ -70,6 +72,7 @@ bool MainDispatcher::dispatch(Function function, TickType_t timeout) const {
 // region Default services
 namespace service {
     // Primary
+    namespace audio { extern const ServiceManifest manifest; }
     namespace gps { extern const ServiceManifest manifest; }
     namespace wifi { extern const ServiceManifest manifest; }
 #ifdef ESP_PLATFORM
@@ -109,6 +112,7 @@ namespace app {
     namespace appdetails { extern const AppManifest manifest; }
     namespace applist { extern const AppManifest manifest; }
     namespace appsettings { extern const AppManifest manifest; }
+    namespace audiosettings { extern const AppManifest manifest; }
     namespace boot { extern const AppManifest manifest; }
     namespace development { extern const AppManifest manifest; }
     namespace display { extern const AppManifest manifest; }
@@ -169,6 +173,9 @@ static void registerInternalApps() {
     addAppManifest(app::apphubdetails::manifest);
     addAppManifest(app::applist::manifest);
     addAppManifest(app::appsettings::manifest);
+    if (service::audio::isAvailable()) {
+        addAppManifest(app::audiosettings::manifest);
+    }
     addAppManifest(app::display::manifest);
     addAppManifest(app::files::manifest);
     addAppManifest(app::fileselection::manifest);
@@ -299,6 +306,9 @@ static void registerAndStartSecondaryServices() {
 
 static void registerAndStartPrimaryServices() {
     LOG_I(TAG, "Registering and starting primary system services");
+    if (device_exists_of_type(&AUDIO_STREAM_TYPE)) {
+        addService(service::audio::manifest);
+    }
     addService(service::gps::manifest);
     addService(service::wifi::manifest);
 #ifdef ESP_PLATFORM
@@ -347,6 +357,10 @@ void run(const Configuration& config, Module* dtsModules[], DtsDevice dtsDevices
     LOG_I(TAG, "Tactility v%s on %s (%s)", TT_VERSION, CONFIG_TT_DEVICE_NAME, CONFIG_TT_DEVICE_ID);
 
     assert(config.hardware);
+
+    if (config.hardware->earlyInit != nullptr) {
+        check(config.hardware->earlyInit() == ERROR_NONE, "Early init failed");
+    }
 
     LOG_I(TAG, "Initializing kernel");
     if (kernel_init(dtsModules, dtsDevices) != ERROR_NONE) {

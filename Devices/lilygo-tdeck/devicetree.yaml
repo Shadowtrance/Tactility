@@ -1,3 +1,6 @@
 dependencies:
   - Platforms/platform-esp32
+  - Drivers/es7210-module
+  - Drivers/dummy-i2s-amp-module
+  - Drivers/audio-stream-module
 dts: lilygo,tdeck.dts

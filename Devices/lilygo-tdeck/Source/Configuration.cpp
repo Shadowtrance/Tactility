@@ -8,6 +8,7 @@
 #include <tactility/check.h>
 #include <tactility/device.h>
 
+bool earlyInit();
 bool initBoot();
 
 using namespace tt::hal;
@@ -25,6 +26,7 @@ static std::vector<std::shared_ptr<tt::hal::Device>> createDevices() {
 }
 
 extern const Configuration hardwareConfiguration = {
+    .earlyInit = earlyInit,
     .initBoot = initBoot,
     .createDevices = createDevices
 };
