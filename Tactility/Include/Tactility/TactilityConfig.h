@@ -12,6 +12,10 @@
 #define TT_FEATURE_SCREENSHOT_ENABLED true
 #endif
 
+// QuickPanel (the drag-down drawer) is still early WIP. Flip to false locally to rule it
+// out while debugging unrelated UI/LVGL-lock issues, without needing a full rebuild config.
+#define TT_FEATURE_QUICKPANEL_ENABLED false
+
 namespace tt::config {
 
 constexpr auto SHOW_SYSTEM_PARTITION = false;

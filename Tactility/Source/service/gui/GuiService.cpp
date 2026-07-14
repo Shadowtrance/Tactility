@@ -4,8 +4,10 @@
 
 #include <Tactility/LogMessages.h>
 #include <Tactility/Tactility.h>
+#include <Tactility/TactilityConfig.h>
 #include <Tactility/app/AppInstance.h>
 #include <Tactility/lvgl/LvglSync.h>
+#include <Tactility/lvgl/QuickPanel.h>
 #include <Tactility/lvgl/Statusbar.h>
 #include <Tactility/lvgl/UsbHidInput.h>
 #include <Tactility/service/ServiceRegistration.h>
@@ -127,6 +129,9 @@ int32_t GuiService::guiMain() {
     lv_obj_set_style_radius(vertical_container, 0, LV_STATE_DEFAULT);
 
     service->statusbarWidget = lvgl::statusbar_create(vertical_container);
+#if TT_FEATURE_QUICKPANEL_ENABLED
+    lvgl::quickpanel_create();
+#endif
 
     auto* app_container = lv_obj_create(vertical_container);
     lv_obj_set_style_pad_all(app_container, 0, LV_STATE_DEFAULT);
@@ -143,6 +148,12 @@ int32_t GuiService::guiMain() {
         dispatcher_consume(service->dispatcher);
     }
 
+    // No lvgl::lock() here: detachDevices() already holds the LVGL lock while
+    // it calls stopService("Gui"), which joins this thread. Taking the lock
+    // here would deadlock against that caller.
+#if TT_FEATURE_QUICKPANEL_ENABLED
+    lvgl::quickpanel_destroy();
+#endif
     service->appRootWidget = nullptr;
     service->statusbarWidget = nullptr;
 
