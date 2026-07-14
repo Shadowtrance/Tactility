@@ -16,6 +16,10 @@
 
 #include <lvgl.h>
 
+#ifdef ESP_PLATFORM
+#include <sdkconfig.h>
+#endif
+
 namespace tt::app::kerneldisplay {
 
 constexpr auto* TAG = "KernelDisplay";
@@ -250,9 +254,6 @@ public:
                 lv_obj_add_state(screensaverDropdown, LV_STATE_DISABLED);
             }
         }
-
-        // Note: no touch calibration section here - unlike HalDisplayApp, the kernel PointerApi has
-        // no calibration support yet.
     }
 
     void onHide(AppContext& app) override {
