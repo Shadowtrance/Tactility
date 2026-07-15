@@ -54,11 +54,7 @@ constexpr uint8_t MADCTL_BIT_PAGE_COLUMN_ORDER = 5; // swap-xy
 constexpr uint8_t MADCTL_BIT_COLUMN_ADDRESS_ORDER = 6; // mirror-x
 constexpr uint8_t MADCTL_BIT_PAGE_ADDRESS_ORDER = 7; // mirror-y
 
-// Bring-up command list, ported verbatim (byte-for-byte) from the deprecated HAL's hx8357.c
-// initd[] table (Devices/unphone/Source/hx8357/hx8357.c) - the HX8357B variant (initb[]) is
-// dead code there (displayType is hardcoded to HX8357D) and was not ported. Format matches the
-// original: cmd, then a length byte (bit7 set means "this is actually a delay in 5ms units, no
-// data follows"), then that many data bytes. A single 0 cmd byte ends the list.
+// Bring-up command list
 constexpr uint8_t INIT_CMDS[] = {
     HX8357_SWRESET, 0x80 + 100 / 5, // Soft reset, then delay 100 ms
     HX8357D_SETC, 3,
@@ -118,11 +114,6 @@ struct Hx8357Internal {
     spi_device_handle_t spi_handle;
     gpio_num_t dc_pin;
     size_t max_transfer_size;
-    // Live MADCTL orientation bits, seeded from config at start() and updated in place by
-    // mirror()/swap_xy() - NOT reconstructed from the static config each call. swap_xy() and
-    // mirror() are invoked back-to-back by lvgl_display_apply_rotation() on every rotation
-    // change, so rebuilding from config would silently discard whichever bit the other call
-    // just set.
     bool swap_xy;
     bool mirror_x;
     bool mirror_y;
@@ -379,13 +370,6 @@ static bool hx8357_get_mirror_y(Device* device) {
     return GET_CONFIG(device)->mirror_y;
 }
 
-static error_t hx8357_set_gap(Device*, int32_t, int32_t) {
-    // Not supported by this controller's fixed CASET/PASET-per-draw protocol beyond the static
-    // gap-x/gap-y devicetree config already folded into draw_bitmap(); matches the deprecated
-    // HAL, which never exposed a runtime gap either.
-    return ERROR_NOT_SUPPORTED;
-}
-
 static error_t hx8357_invert_color(Device* device, bool invert_color_data) {
     auto* internal = static_cast<Hx8357Internal*>(device_get_driver_data(device));
     send_cmd(internal, invert_color_data ? HX8357_INVON : HX8357_INVOFF);
@@ -436,6 +420,9 @@ static error_t hx8357_get_backlight(Device* device, Device** backlight) {
 // endregion
 
 static const DisplayApi hx8357_display_api = {
+    .capabilities = DISPLAY_CAPABILITY_CAP_MIRROR | DISPLAY_CAPABILITY_CAP_SWAP_XY |
+        DISPLAY_CAPABILITY_INVERT_COLOR | DISPLAY_CAPABILITY_ON_OFF | DISPLAY_CAPABILITY_SLEEP |
+        DISPLAY_CAPABILITY_BACKLIGHT,
     .reset = hx8357_reset,
     .init = hx8357_init,
     .draw_bitmap = hx8357_draw_bitmap,
@@ -444,7 +431,10 @@ static const DisplayApi hx8357_display_api = {
     .get_swap_xy = hx8357_get_swap_xy,
     .get_mirror_x = hx8357_get_mirror_x,
     .get_mirror_y = hx8357_get_mirror_y,
-    .set_gap = hx8357_set_gap,
+    // set_gap is not exposed: this controller's fixed CASET/PASET-per-draw protocol only supports the
+    // static gap-x/gap-y devicetree config already folded into draw_bitmap(); matches the deprecated
+    // HAL, which never exposed a runtime gap either.
+    .set_gap = nullptr,
     .invert_color = hx8357_invert_color,
     .disp_on_off = hx8357_disp_on_off,
     .disp_sleep = hx8357_disp_sleep,
@@ -454,6 +444,7 @@ static const DisplayApi hx8357_display_api = {
     .get_frame_buffer = hx8357_get_frame_buffer,
     .get_frame_buffer_count = hx8357_get_frame_buffer_count,
     .get_backlight = hx8357_get_backlight,
+    .has_capability = nullptr,
 };
 
 Driver hx8357_driver = {
