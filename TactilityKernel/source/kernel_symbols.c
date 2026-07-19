@@ -34,6 +34,7 @@
 #include <tactility/error.h>
 #include <tactility/filesystem/file_system.h>
 #include <tactility/module.h>
+#include <tactility/wifi_auto_scan.h>
 #include <tactility/service/service_instance.h>
 #include <tactility/service/service_manager.h>
 #include <tactility/service/service_paths.h>
@@ -326,7 +327,10 @@ const struct ModuleSymbol KERNEL_SYMBOLS[] = {
     DEFINE_MODULE_SYMBOL(wifi_station_get_rssi),
     DEFINE_MODULE_SYMBOL(wifi_add_event_callback),
     DEFINE_MODULE_SYMBOL(wifi_remove_event_callback),
+    DEFINE_MODULE_SYMBOL(wifi_get_firmware_ops),
     DEFINE_MODULE_SYMBOL(WIFI_TYPE),
+    // wifi_auto_scan
+    DEFINE_MODULE_SYMBOL(wifi_auto_scan_set_paused),
     // drivers/usb_host_hid
     DEFINE_MODULE_SYMBOL(usb_host_hid_is_connected),
     DEFINE_MODULE_SYMBOL(usb_host_hid_subscribe),
