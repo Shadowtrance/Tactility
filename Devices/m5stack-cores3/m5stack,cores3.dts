@@ -205,5 +205,4 @@
 			backlight = <&display_backlight>;
 		};
 	};
-
 };

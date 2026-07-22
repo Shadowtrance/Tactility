@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "papers3_power.h"
 
+
 #include <tactility/check.h>
 #include <tactility/driver.h>
+#include <tactility/drivers/gpio.h>
 #include <tactility/drivers/gpio_controller.h>
 #include <tactility/drivers/power_supply.h>
 #include <tactility/drivers/pwm.h>
@@ -13,7 +15,7 @@
 
 #include <new>
 
-#define TAG "Papers3Power"
+constexpr auto* TAG = "Papers3Power";
 #define GET_CONFIG(device) (static_cast<const Papers3PowerConfig*>((device)->config))
 
 // Power-off signal timing, ported from the old deprecated-HAL PaperS3Power::powerOff().
@@ -192,17 +194,8 @@ static void destroy_power_supply_child(Device* child) {
 // region Driver lifecycle
 
 static error_t acquire_input(const GpioPinSpec& pin, GpioDescriptor** out_descriptor) {
-    auto* descriptor = gpio_descriptor_acquire(pin.gpio_controller, pin.pin, GPIO_OWNER_GPIO);
-    if (descriptor == nullptr) {
-        return ERROR_RESOURCE;
-    }
-    error_t error = gpio_descriptor_set_flags(descriptor, pin.flags | GPIO_FLAG_DIRECTION_INPUT);
-    if (error != ERROR_NONE) {
-        gpio_descriptor_release(descriptor);
-        return error;
-    }
-    *out_descriptor = descriptor;
-    return ERROR_NONE;
+    *out_descriptor = gpio_descriptor_acquire(pin.gpio_controller, pin.pin, pin.flags | GPIO_FLAG_DIRECTION_INPUT, GPIO_OWNER_GPIO);
+    return (*out_descriptor != nullptr) ? ERROR_NONE : ERROR_RESOURCE;
 }
 
 static error_t start(Device* device) {
@@ -226,13 +219,8 @@ static error_t start(Device* device) {
         return ERROR_RESOURCE;
     }
 
-    internal->power_off_descriptor = gpio_descriptor_acquire(config->pin_power_off.gpio_controller, config->pin_power_off.pin, GPIO_OWNER_GPIO);
-    if (internal->power_off_descriptor == nullptr ||
-        gpio_descriptor_set_flags(internal->power_off_descriptor, config->pin_power_off.flags | GPIO_FLAG_DIRECTION_OUTPUT) != ERROR_NONE) {
-        LOG_E(TAG, "Failed to configure power-off pin");
-        if (internal->power_off_descriptor != nullptr) {
-            gpio_descriptor_release(internal->power_off_descriptor);
-        }
+    internal->power_off_descriptor = gpio_descriptor_acquire(config->pin_power_off.gpio_controller, config->pin_power_off.pin, config->pin_power_off.flags | GPIO_FLAG_DIRECTION_OUTPUT, GPIO_OWNER_GPIO);
+    if (internal->power_off_descriptor == nullptr) {
         gpio_descriptor_release(internal->usb_detect_descriptor);
         gpio_descriptor_release(internal->charge_status_descriptor);
         delete internal;
