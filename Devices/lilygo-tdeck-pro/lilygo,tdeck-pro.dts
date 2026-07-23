@@ -9,18 +9,16 @@
 #include <tactility/bindings/esp32_sdspi.h>
 #include <tactility/bindings/esp32_pwm_ledc.h>
 #include <tactility/bindings/pwm_backlight.h>
-#include <bindings/xl9555.h>
-#include <bindings/cst66xx.h>
+#include <bindings/cst328.h>
 #include <bindings/gdeq031t10.h>
 #include <bindings/tca8418.h>
-#include <bindings/sy6970.h>
-#include <bindings/bq27220.h>
+#include <bindings/bq25896.h>
 
-// Reference: https://github.com/Xinyuan-LilyGO/T-Deck-MAX
+// Reference for V1.0 (not V1.1!): https://github.com/Xinyuan-LilyGO/T-Deck-Pro/tree/HD-V1-250326
 // lib/TDeckMaxBoard/src/TDeckMaxBoard.h, docs/pinmap.md
 / {
 	compatible = "root";
-	model = "LilyGO T-Deck Max";
+	model = "LilyGO T-Deck Pro";
 
 	wifi0 {
 		compatible = "espressif,esp32-wifi-pinned";
@@ -43,20 +41,10 @@
 		pin-sda = <&gpio0 13 GPIO_FLAG_NONE>;
 		pin-scl = <&gpio0 14 GPIO_FLAG_NONE>;
 
-		xl9555 {
-			compatible = "xlsemi,xl9555";
-			reg = <0x20>;
-		};
-
-		// Vendor docs label this chip "CST328", but the vendor HynTouch driver probes
-		// cst66xx first and that is what answers on this board.
 		touch {
-			compatible = "hynitron,cst66xx";
+			compatible = "hynitron,cst328";
 			reg = <0x1A>;
-			x-max = <240>;
-			y-max = <320>;
-			// Reset routed through the XL9555 IO expander (P07, active low).
-			pin-reset = <&xl9555 7 GPIO_FLAG_NONE>;
+			pin-reset = <&gpio0 45 GPIO_FLAG_NONE>;
 		};
 
 		// TCA8418 4x10 matrix scanner. Keymaps are written in the vendor's row/column
@@ -91,24 +79,11 @@
 			shift-col = <0>;
 			sym-row = <3>;
 			sym-col = <8>;
-			// Reset routed through the XL9555 IO expander (P11, active low).
-			pin-reset = <&xl9555 9 GPIO_FLAG_NONE>;
-		};
-
-		// Battery metrics from the BQ27220 fuel gauge; power-off via the SY6970 charger.
-		// Newer T-Deck Max revisions ship the SY6970 (0x6A) instead of the older BQ25896
-		// (0x6B); this board has the SY6970 (confirmed by I2C scan). The two are
-		// register-compatible for everything used here.
-		sy6970 {
-			compatible = "silergy,sy6970";
-			reg = <0x6A>;
-			charge-voltage-mv = <4288>;
-			charge-current-ma = <1024>;
 		};
 
 		bq27220 {
-			compatible = "ti,bq27220";
-			reg = <0x55>;
+			compatible = "ti,bq25896";
+			reg = <0x6B>;
 		};
 	};
 
@@ -147,7 +122,6 @@
 		display@0 {
 			compatible = "gooddisplay,gdeq031t10";
 			pin-dc = <&gpio0 35 GPIO_FLAG_NONE>;
-			pin-reset = <&gpio0 9 GPIO_FLAG_NONE>;
 			pin-busy = <&gpio0 37 GPIO_FLAG_NONE>;
 			clock-speed-hz = <10000000>;
 			// Default to a fast (~1s) refresh for the automatic ghost-clears so the
