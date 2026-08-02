@@ -12,6 +12,8 @@ list(APPEND REQUIRES_LIST
     gps-module
     gps-generic-module
     gps-meshtastic-module
+    lua-module
+    luavgl-module
     lv_screenshot
     minitar
 )

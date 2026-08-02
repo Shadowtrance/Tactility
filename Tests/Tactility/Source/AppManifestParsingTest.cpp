@@ -54,6 +54,80 @@ TEST_CASE("parseManifest() should parse a V2 (flat) manifest.properties file") {
     CHECK_EQ(manifest.appVersionCode, 1);
 }
 
+/** The key is optional, so every manifest written before it existed still means ELF. */
+TEST_CASE("parseManifestV2() should default the runtime to ELF when app.runtime is absent") {
+    std::map<std::string, std::string> properties = {
+        {"manifest.version", "0.1"},
+        {"app.id", "one.tactility.sdktest"},
+        {"app.name", "SDK Test"},
+        {"app.version.name", "0.1.0"},
+        {"app.version.code", "1"},
+        {"target.sdk", "0.0.0"},
+        {"target.platforms", "esp32"},
+    };
+    AppManifest manifest;
+    CHECK_EQ(parseManifestV2(properties, manifest), true);
+    CHECK(manifest.appRuntime == Runtime::Elf);
+}
+
+TEST_CASE("parseManifestV2() should parse app.runtime") {
+    std::map<std::string, std::string> properties = {
+        {"manifest.version", "0.1"},
+        {"app.id", "one.tactility.sdktest"},
+        {"app.name", "SDK Test"},
+        {"app.version.name", "0.1.0"},
+        {"app.version.code", "1"},
+        {"target.sdk", "0.0.0"},
+        {"target.platforms", "esp32"},
+        {"app.runtime", "lua"},
+    };
+    AppManifest manifest;
+    CHECK_EQ(parseManifestV2(properties, manifest), true);
+    CHECK(manifest.appRuntime == Runtime::Lua);
+
+    properties["app.runtime"] = "elf";
+    AppManifest elf_manifest;
+    CHECK_EQ(parseManifestV2(properties, elf_manifest), true);
+    CHECK(elf_manifest.appRuntime == Runtime::Elf);
+}
+
+/**
+ * Rejected rather than silently treated as ELF: a typo would otherwise start a Lua app as
+ * an ELF one and report a missing binary, a long way from the actual cause.
+ */
+TEST_CASE("parseManifestV2() should fail on an unknown app.runtime") {
+    std::map<std::string, std::string> properties = {
+        {"manifest.version", "0.1"},
+        {"app.id", "one.tactility.sdktest"},
+        {"app.name", "SDK Test"},
+        {"app.version.name", "0.1.0"},
+        {"app.version.code", "1"},
+        {"target.sdk", "0.0.0"},
+        {"target.platforms", "esp32"},
+        {"app.runtime", "luaa"},
+    };
+    AppManifest manifest;
+    CHECK_EQ(parseManifestV2(properties, manifest), false);
+}
+
+TEST_CASE("parseManifest() should read app.runtime from a V2 file") {
+    TestFile file("test-manifest-lua.properties");
+    file.writeData(
+        "manifest.version=0.1\n"
+        "target.sdk=0.0.0\n"
+        "target.platforms=esp32,esp32s3,esp32c6,esp32p4\n"
+        "app.id=one.tactility.luatest\n"
+        "app.version.name=0.1.0\n"
+        "app.version.code=1\n"
+        "app.name=Lua Test\n"
+        "app.runtime=lua\n"
+    );
+
+    AppManifest manifest;
+    CHECK_EQ(parseManifest(file.getPath(), manifest), true);
+    CHECK(manifest.appRuntime == Runtime::Lua);
+}
+
 TEST_CASE("parseManifestV1() should fail when a required key is missing") {
     std::map<std::string, std::string> properties = {
         {"[manifest]version", "0.1"},

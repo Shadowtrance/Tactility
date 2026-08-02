@@ -19,6 +19,8 @@ target_link_libraries(TactilityTests PRIVATE
     gps-module
     gps-generic-module
     gps-meshtastic-module
+    lua-module
+    luavgl-module
     lvgl
     SDL2::SDL2-static SDL2-static
 )

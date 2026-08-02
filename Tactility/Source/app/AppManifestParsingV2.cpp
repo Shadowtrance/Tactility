@@ -61,6 +61,23 @@ bool parseManifestV2(const std::map<std::string, std::string>& map, AppManifest&
 
     manifest.appVersionCode = std::stoull(version_code_string);
 
+    // Optional: absent means ELF, so manifests written before this key existed keep working.
+    // Looked up directly rather than via getValueFromManifest(), which logs an error when a
+    // key is missing - correct for required keys, but every ELF manifest would trip it.
+    //
+    // An unrecognised value fails rather than falling back: a typo would otherwise start a
+    // Lua app as an ELF one and report a missing binary, far from the cause.
+    if (const auto runtime = map.find("app.runtime"); runtime != map.end()) {
+        if (runtime->second == "elf") {
+            manifest.appRuntime = Runtime::Elf;
+        } else if (runtime->second == "lua") {
+            manifest.appRuntime = Runtime::Lua;
+        } else {
+            LOG_E(TAG, "Invalid app runtime '%s' - expected 'elf' or 'lua'", runtime->second.c_str());
+            return false;
+        }
+    }
+
     // target
 
     if (!getValueFromManifest(map, "target.sdk", manifest.targetSdk)) {
