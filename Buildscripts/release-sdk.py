@@ -105,7 +105,37 @@ def add_driver(target_path, driver_name):
     cmakelists_content = create_module_cmakelists(driver_name)
     write_module_cmakelists(os.path.join(target_path, f"Drivers/{driver_name}/CMakeLists.txt"), cmakelists_content)
 
+def module_is_started(module_name):
+    """
+    Whether Tactility.cpp starts this module.
+
+    Exporting a module's symbols is not enough for a side-loaded app to use them:
+    module_resolve_symbol_global() only walks *started* modules, so an app linking against
+    an unstarted module fails at load with "Can't find common <symbol>" - a long way from
+    the cause. The C symbol replaces '-' with '_' ("lua-module" -> "lua_module").
+    """
+    symbol = module_name.replace('-', '_')
+    with open(os.path.join('Tactility', 'Source', 'Tactility.cpp')) as f:
+        return f'module_ensure_started(&{symbol})' in f.read()
+
 def add_module(target_path, module_name):
+    # The generated CMakeLists always references binary/lib<module>.a, so a missing archive
+    # would produce an SDK that fails at configure time in the app, far from the cause.
+    # A module only builds when something REQUIREs it (see Tactility/CMakeLists.txt).
+    binary = f'build/esp-idf/{module_name}/lib{module_name}.a'
+    assert glob.glob(binary), (
+        f"{binary} not found - '{module_name}' was not built for this target. "
+        f"A module is only built when a component REQUIREs it; add it to a consumer "
+        f"(e.g. Tactility/CMakeLists.txt) or drop it from the SDK export."
+    )
+
+    assert module_is_started(module_name), (
+        f"'{module_name}' is exported to the SDK but Tactility.cpp never starts it. "
+        f"Its symbols would not resolve at load time, and apps using them would fail with "
+        f"\"Can't find common <symbol>\". Add "
+        f"module_ensure_started(&{module_name.replace('-', '_')}) to Tactility::run()."
+    )
+
     mappings = get_module_mappings(module_name)
     map_copy(mappings, target_path)
     cmakelists_content = create_module_cmakelists(module_name)
@@ -185,6 +215,12 @@ def main():
         # elf_loader
         {'src': 'Libraries/elf_loader/elf_loader.cmake', 'dst': 'Libraries/elf_loader/'},
         {'src': 'Libraries/elf_loader/license.txt', 'dst': 'Libraries/elf_loader/'},
+        # lua - only Include/ ships: the public headers are self-contained, and Source/
+        # holds the interpreter's internal headers, which an app has no business seeing.
+        {'src': 'build/esp-idf/lua/liblua.a', 'dst': 'Libraries/lua/binary/'},
+        {'src': 'Libraries/lua/Include/**', 'dst': 'Libraries/lua/include/'},
+        {'src': 'Libraries/lua/LICENSE*.*', 'dst': 'Libraries/lua/'},
+        {'src': 'Libraries/lua/README.md', 'dst': 'Libraries/lua/'},
         # minmea
         {'src': 'build/esp-idf/minmea/libminmea.a', 'dst': 'Libraries/minmea/binary/'},
         {'src': 'Libraries/minmea/Include/**', 'dst': 'Libraries/minmea/include/'},
@@ -200,6 +236,8 @@ def main():
     add_module(target_path, "lvgl-module")
     add_module(target_path, "crypt-module")
     add_module(target_path, "gps-module")
+    add_module(target_path, "lua-module")
+    add_module(target_path, "luavgl-module")
 
     # Drivers - only ones actually built for this target (chip-restricted drivers like
     # sc2356-module won't have a .a outside ESP32-P4)

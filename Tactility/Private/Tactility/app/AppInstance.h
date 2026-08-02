@@ -3,6 +3,7 @@
 #include <Tactility/app/AppContext.h>
 #include <Tactility/app/AppManifest.h>
 #include <Tactility/app/ElfApp.h>
+#include <Tactility/app/LuaApp.h>
 
 #include <Tactility/Bundle.h>
 #include <tactility/check.h>
@@ -50,6 +51,13 @@ class AppInstance : public AppContext {
             if (manifest->createApp != nullptr) {
                 LOG_W("AppInstance", "Manifest specifies createApp, but this is not used with external apps");
             }
+
+            // Lua first, and outside the ESP_PLATFORM guard below: a Lua app needs an
+            // interpreter rather than an ELF loader, so it runs on the simulator too.
+            if (manifest->appRuntime == Runtime::Lua) {
+                return createLuaApp(manifest);
+            }
+
 #ifdef ESP_PLATFORM
             return createElfApp(manifest);
 #else

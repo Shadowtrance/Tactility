@@ -53,6 +53,14 @@ public:
 
 typedef std::shared_ptr<App>(*CreateApp)();
 
+/** How an external app is executed. */
+enum class Runtime {
+    /** A compiled ELF binary, one per target platform. Only available on ESP32. */
+    Elf,
+    /** A Lua script interpreted by lua-module. Runs on every target. */
+    Lua
+};
+
 struct AppManifest {
 
     struct Flags {
@@ -89,6 +97,12 @@ struct AppManifest {
 
     /** Where the app is located */
     Location appLocation = Location::internal();
+
+    /**
+     * How an external app is executed. Defaults to Elf, so manifests written before this
+     * key existed keep working.
+     */
+    Runtime appRuntime = Runtime::Elf;
 
     /** Controls various settings */
     uint16_t appFlags = Flags::None;

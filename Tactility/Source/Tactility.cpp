@@ -28,6 +28,8 @@
 #include <gps_meshtastic/module.h>
 
 #include <crypt/module.h>
+#include <lua/module.h>
+#include <luavgl/module.h>
 #include <lvgl/module.h>
 #include <lvgl/widgets/toolbar.h>
 
@@ -412,6 +414,11 @@ void run(Module* const dtsModules[], const DtsDevice dtsDevices[]) {
     check(module_ensure_started(&gps_module) == ERROR_NONE);
     check(module_ensure_started(&gps_generic_module) == ERROR_NONE);
     check(module_ensure_started(&gps_meshtastic_module) == ERROR_NONE);
+    // Starting the module is what publishes its symbols: module_resolve_symbol_global()
+    // skips modules that aren't started, so a side-loaded app would fail to resolve
+    // lua_* at load time without this. It also keeps the linker from discarding the
+    // module, which is what makes the interpreter present in the binary at all.
+    check(module_ensure_started(&lua_module) == ERROR_NONE);
 
 #ifdef ESP_PLATFORM
     initEsp();
@@ -443,6 +450,9 @@ void run(Module* const dtsModules[], const DtsDevice dtsDevices[]) {
 #endif
     });
     check(module_ensure_started(&lvgl_module) == ERROR_NONE);
+    // After lvgl_module: these bindings wrap LVGL, so they are only meaningful once it is
+    // up. Starting the module is also what publishes its symbols to side-loaded apps.
+    check(module_ensure_started(&luavgl_module) == ERROR_NONE);
 
     LOG_I(TAG, "Core systems ready");
 

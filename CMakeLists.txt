@@ -45,6 +45,7 @@ if (DEFINED ENV{ESP_IDF_VERSION})
         "TactilityC"
         "TactilityFreeRtos"
         "Libraries/elf_loader"
+        "Libraries/lua"
         "Libraries/lv_screenshot"
         "Libraries/minitar"
         "Libraries/minmea"
@@ -93,11 +94,14 @@ if (NOT DEFINED ENV{ESP_IDF_VERSION})
     add_subdirectory(Libraries/cJSON)
     add_subdirectory(Libraries/lv_screenshot)
     add_subdirectory(Libraries/QRCode)
+    add_subdirectory(Libraries/lua)
     add_subdirectory(Libraries/minitar)
     add_subdirectory(Libraries/minmea)
     add_subdirectory(Modules/lvgl-module)
     add_subdirectory(Modules/crypt-module)
     add_subdirectory(Modules/gps-module)
+    add_subdirectory(Modules/lua-module)
+    add_subdirectory(Modules/luavgl-module)
     add_subdirectory(Drivers/gps-generic-module)
     add_subdirectory(Drivers/gps-meshtastic-module)
 
