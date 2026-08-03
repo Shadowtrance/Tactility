@@ -287,6 +287,14 @@ bool deleteRecursively(const std::string& path) {
         }
 
         for (const auto& entry : entries) {
+            // "." and ".." must be skipped here rather than relying on the check further
+            // down: "<path>/." is itself a directory, so it takes the recursive branch above
+            // and descends forever, growing the path until it blows past PATH_MAX. The
+            // check below only ever sees a bare "." or "..", never a child path ending in one.
+            if (std::strcmp(entry.d_name, ".") == 0 || std::strcmp(entry.d_name, "..") == 0) {
+                continue;
+            }
+
             auto child_path = path + "/" + entry.d_name;
             if (!deleteRecursively(child_path)) {
                 return false;

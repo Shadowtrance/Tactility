@@ -131,7 +131,9 @@ TEST_CASE("file_system_for_each visits every registered file system") {
         return true;
     });
 
-    CHECK_EQ(visited.size(), 3);
+    // Only this test's own file systems are asserted on. The registry is global and other
+    // linked-in code registers into it (platform-posix registers the data directory), so an
+    // exact total would make this test depend on what else happens to be in the binary.
     CHECK(std::find(visited.begin(), visited.end(), fs_a) != visited.end());
     CHECK(std::find(visited.begin(), visited.end(), fs_b) != visited.end());
     CHECK(std::find(visited.begin(), visited.end(), fs_c) != visited.end());
@@ -175,8 +177,9 @@ TEST_CASE("file_system_remove drops the file system from subsequent iteration") 
         return true;
     });
 
-    CHECK_EQ(visited.size(), 1);
-    CHECK_EQ(visited[0], fs_b);
+    // As above: assert on this test's own file systems rather than the registry's total.
+    CHECK(std::find(visited.begin(), visited.end(), fs_a) == visited.end()); // removed
+    CHECK(std::find(visited.begin(), visited.end(), fs_b) != visited.end()); // still present
 
     file_system_remove(fs_b);
 }

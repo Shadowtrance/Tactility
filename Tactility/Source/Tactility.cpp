@@ -3,6 +3,7 @@
 #include <Tactility/InitEsp.h>
 #endif
 
+#include <cstring>
 #include <format>
 
 #include <Tactility/Tactility.h>
@@ -281,6 +282,11 @@ static void registerInstalledApps(const std::string& path) {
     LOG_I(TAG, "Registering apps from %s", path.c_str());
 
     file::listDirectory(path, [&path](const auto& entry) {
+        // listDirectory() reports "." and ".." like readdir() does; without this each scan
+        // logs two spurious "Manifest not found" errors.
+        if (std::strcmp(entry.d_name, ".") == 0 || std::strcmp(entry.d_name, "..") == 0) {
+            return;
+        }
         auto absolute_path = std::format("{}/{}", path, entry.d_name);
         if (file::isDirectory(absolute_path)) {
             registerInstalledApp(absolute_path);
@@ -289,13 +295,24 @@ static void registerInstalledApps(const std::string& path) {
 }
 
 static void registerInstalledAppsFromFileSystems() {
-    file_system_for_each(nullptr, [](auto* fs, void* context) {
+    // Where install() actually puts apps. On ESP32 this is one of the mount paths below, so
+    // it is skipped as a duplicate; on POSIX getUserDataPath() is already "data" rather than
+    // "<mount>/tactility", so without this an installed app is never found at boot.
+    auto install_path = getAppInstallPath();
+    if (file::isDirectory(install_path)) {
+        registerInstalledApps(install_path); // logs the path itself
+    }
+
+    file_system_for_each(&install_path, [](auto* fs, void* context) {
+        const auto& already_scanned = *static_cast<const std::string*>(context);
         if (!file_system_is_mounted(fs)) return true;
         char path[128];
         if (file_system_get_path(fs, path, sizeof(path)) != ERROR_NONE) return true;
         const auto app_path = std::format("{}/tactility/app", path);
-        if (!app_path.starts_with(file::MOUNT_POINT_SYSTEM) && file::isDirectory(app_path)) {
-            LOG_I(TAG, "Registering apps from %s", app_path.c_str());
+        if (app_path != already_scanned &&
+            !app_path.starts_with(file::MOUNT_POINT_SYSTEM) &&
+            file::isDirectory(app_path)) {
+            // registerInstalledApps() logs the path itself
             registerInstalledApps(app_path);
         }
         return true;

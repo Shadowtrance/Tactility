@@ -18,6 +18,7 @@
 
 #include <lvgl/lvgl.h>
 
+#include <format>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -221,13 +222,17 @@ void View::viewFile(const std::string& path, const std::string& filename) {
     LOG_I(TAG, "Clicked %s", file_path.c_str());
 
     if (isSupportedAppFile(filename)) {
-#ifdef ESP_PLATFORM
-        // install(filename);
+        // Not guarded by ESP_PLATFORM: app::install() is a tar extraction with no
+        // platform-specific parts, so it works on the simulator too. Lua apps in particular
+        // run there, since they need an interpreter rather than an ELF loader.
+        //
+        // file_path, not processed_filepath: the latter is stripped of the working directory
+        // and left with a leading slash for LVGL's "A:" drive mapping, which is right for the
+        // image viewer but not for install(), which opens the file directly.
         auto message = std::format("Do you want to install {}?", filename);
-        installAppPath = processed_filepath;
+        installAppPath = file_path;
         auto choices = std::vector {"Yes", "No"};
         installAppLaunchId = alertdialog::start("Install?", message, choices);
-#endif
     } else if (isSupportedImageFile(filename)) {
         imageviewer::start(processed_filepath);
     } else if (isSupportedTextFile(filename)) {

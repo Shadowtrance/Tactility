@@ -7,6 +7,8 @@
 #include <tactility/log.h>
 #include <tactility/module.h>
 
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 constexpr auto* TAG = "Simulator";
@@ -26,10 +28,66 @@ static Driver* const simulator_drivers[] = {
 
 }
 
+/**
+ * Named presets for the resolutions real devices use, so a UI can be previewed at the size
+ * it will actually run at.
+ *
+ * Fonts are not part of this: they are selected at compile time from `lvgl.fontSize` in
+ * device.properties (see device.py), so a preset changes the canvas but not the type size.
+ * Good enough for layout work, not a pixel-exact reproduction of a given board.
+ */
+struct DisplayPreset {
+    const char* name;
+    uint16_t width;
+    uint16_t height;
+};
+
+static constexpr DisplayPreset DISPLAY_PRESETS[] = {
+    { "cardputer", 240, 135 },  // M5Stack Cardputer
+    { "cyd", 240, 320 },        // CYD boards, Elecrow CrowPanel - portrait
+    { "tdeck", 320, 240 },      // LilyGO T-Deck, M5Stack CoreS3
+    { "tab5", 1280, 720 },      // M5Stack Tab5
+};
+
+static SdlDisplayConfig sdl_display_config = { 320, 240 };
+
+/**
+ * Applies TACTILITY_DISPLAY, which is either a preset name or an explicit "<width>x<height>".
+ *
+ * An unusable value logs and falls back to the default rather than failing to boot: a typo
+ * in an environment variable should not stop the simulator from starting.
+ */
+static void apply_display_size_from_environment() {
+    const char* requested = getenv("TACTILITY_DISPLAY");
+    if (requested == nullptr || requested[0] == '\0') {
+        return;
+    }
+
+    for (const auto& preset : DISPLAY_PRESETS) {
+        if (std::strcmp(requested, preset.name) == 0) {
+            sdl_display_config = { preset.width, preset.height };
+            LOG_I(TAG, "Display preset '%s': %ux%u", preset.name, preset.width, preset.height);
+            return;
+        }
+    }
+
+    unsigned width = 0;
+    unsigned height = 0;
+    if (std::sscanf(requested, "%ux%u", &width, &height) == 2 &&
+        width >= 64 && height >= 64 && width <= 4096 && height <= 4096) {
+        sdl_display_config = { (uint16_t)width, (uint16_t)height };
+        LOG_I(TAG, "Display size %ux%u", width, height);
+        return;
+    }
+
+    LOG_W(TAG, "Unusable TACTILITY_DISPLAY '%s' - using %ux%u", requested,
+          sdl_display_config.horizontal_resolution, sdl_display_config.vertical_resolution);
+    LOG_W(TAG, "Expected <width>x<height> or one of: cardputer, cyd, tdeck, tab5");
+}
+
 // These devices have no real bus to attach to (SDL has no notion of one), but every non-root
 // device is still expected to have a parent (see Device::parent) - they're parented to root once
 // it's available below.
-static const SdlDisplayConfig sdl_display_config = { 320, 240 };
 static Device sdl_display_device {};
 static Device sdl_pointer_device {};
 static Device sdl_keyboard_device {};
@@ -89,6 +147,8 @@ static void on_root_started(Device* device, DeviceEvent event, void* context) {
 extern "C" {
 
 static error_t start() {
+    // Before the display device is constructed below, since it takes its size from the config
+    apply_display_size_from_environment();
     device_listener_add(on_root_started, nullptr);
     return ERROR_NONE;
 }

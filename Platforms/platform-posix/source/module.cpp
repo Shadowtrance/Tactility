@@ -6,9 +6,13 @@
 extern "C" {
 
 extern Driver posix_wifi_driver;
+extern void posix_file_systems_register();
 
 static error_t start() {
     check(driver_construct_add(&posix_wifi_driver) == ERROR_NONE);
+    // Registers the data directory, so anything that walks mounted file systems - notably
+    // the installed-app scan at boot - has something to find.
+    posix_file_systems_register();
     return ERROR_NONE;
 }
 

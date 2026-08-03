@@ -69,6 +69,29 @@ static bool lvgl_task_is_interrupt_requested() {
     return result;
 }
 
+/**
+ * LVGL's clock.
+ *
+ * With LV_USE_OS == LV_OS_NONE, LVGL has no time source of its own: lv_tick_inc() has to be
+ * called externally, and until it is, lv_timer_handler() believes no time has passed and
+ * stops refreshing after the first frame. On ESP32 esp_lvgl_port provides this; on POSIX
+ * nothing did, which is why the simulator drew a few tiles and then froze on a black
+ * window.
+ *
+ * Driven from the elapsed FreeRTOS tick count rather than a fixed increment per loop, so
+ * LVGL's idea of time still matches the wall clock when the loop runs late.
+ */
+static void lvgl_tick_update(TickType_t* last_ticks) {
+    const TickType_t now = get_ticks();
+    const TickType_t elapsed = now - *last_ticks; // unsigned: wraps correctly
+    const uint32_t elapsed_ms = (uint32_t)(elapsed * portTICK_PERIOD_MS);
+
+    if (elapsed_ms > 0) {
+        lv_tick_inc(elapsed_ms);
+        *last_ticks = now;
+    }
+}
+
 static void lvgl_task(void* arg) {
     uint32_t task_delay_ms = task_max_sleep_ms;
 
@@ -80,8 +103,12 @@ static void lvgl_task(void* arg) {
     // on_start must be called from the task, otherwise the display doesn't work
     if (lvgl_module_config.on_start) lvgl_module_config.on_start();
 
+    TickType_t last_tick_update = get_ticks();
+
     while (!lvgl_task_is_interrupt_requested()) {
         if (lvgl_try_lock(10)) {
+            // Before lv_timer_handler(), so it sees the time that has actually elapsed
+            lvgl_tick_update(&last_tick_update);
             task_delay_ms = lv_timer_handler();
             lvgl_unlock();
         }
