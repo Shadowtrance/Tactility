@@ -1,0 +1,39 @@
+# Signatures for TactilityKernel/include/tactility/drivers/gpio_controller.h
+#
+# These strings are exactly what DEFINE_MODULE_SYMBOL_TYPED() would carry on the symbol
+# itself - kept in a file here only so the idea can be tried without changing a kernel
+# header first. See GENERATION.md.
+
+@table gpio
+@prefix gpio_
+@include tactility/drivers/gpio_controller.h
+@include tactility/error.h
+
+# Descriptor lifetime and state
+gpio_descriptor_release              e(pGpioDescriptor)
+gpio_descriptor_get_pin_number       e(pGpioDescriptor,*u8)
+gpio_descriptor_set_level            e(pGpioDescriptor,b)
+gpio_descriptor_get_level            e(pGpioDescriptor,*b)
+gpio_descriptor_set_flags            e(pGpioDescriptor,u16)
+gpio_descriptor_get_flags            e(pGpioDescriptor,*u16)
+gpio_descriptor_has_flags            e(pGpioDescriptor,u16,*b)
+
+# Interrupts
+gpio_descriptor_enable_interrupt     e(pGpioDescriptor)
+gpio_descriptor_disable_interrupt    e(pGpioDescriptor)
+gpio_descriptor_remove_callback      e(pGpioDescriptor)
+
+# Controller
+gpio_controller_get_pin_count        e(pDevice,*u32)
+
+# Deliberately unsupported, to show where the boundary is:
+#
+# gpio_descriptor_get_owner_type      - enum out-parameter; needs a name<->value mapping
+#                                       so scripts see "input"/"output" rather than 2
+# gpio_descriptor_get_native_pin_number - void* out-parameter, platform-specific
+# gpio_descriptor_add_callback        - function pointer; needs a registry, a dispatch
+#                                       hop off the ISR, and a lifetime policy
+# gpio_controller_init_descriptors    - driver-internal, not for scripts
+# gpio_controller_deinit_descriptors  - driver-internal, not for scripts
+gpio_descriptor_get_owner_type       e(pGpioDescriptor,*enum)
+gpio_descriptor_add_callback         e(pGpioDescriptor,fn,pvoid)
