@@ -48,6 +48,8 @@
 
 #ifndef ESP_PLATFORM
 #include <tactility/log.h>
+#else
+#include <tactility/elf_run.h>
 #endif
 
 /**
@@ -174,6 +176,7 @@ const struct ModuleSymbol KERNEL_SYMBOLS[] = {
     DEFINE_MODULE_SYMBOL(file_system_unmount),
     DEFINE_MODULE_SYMBOL(file_system_is_mounted),
     DEFINE_MODULE_SYMBOL(file_system_get_path),
+    DEFINE_MODULE_SYMBOL(file_system_for_each),
     // memory
     DEFINE_MODULE_SYMBOL(MEMORY_POLICY_DEFAULT),
     DEFINE_MODULE_SYMBOL(memory_print_stats),
@@ -461,6 +464,9 @@ const struct ModuleSymbol KERNEL_SYMBOLS[] = {
     // log
 #ifndef ESP_PLATFORM
     DEFINE_MODULE_SYMBOL(log_generic),
+#else
+    // elf_run - lets a loaded app run further ELF images (e.g. a shell running command binaries)
+    DEFINE_MODULE_SYMBOL(elf_run),
 #endif
     // module
     DEFINE_MODULE_SYMBOL(module_construct),
