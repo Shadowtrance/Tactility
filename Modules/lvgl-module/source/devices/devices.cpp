@@ -40,11 +40,20 @@ constexpr uint32_t IDLE_REPAINT_MS = 5000;
 struct IdleRepaintContext {
     lv_display_t* lvgl_display;
     struct Device* kernel_display_device;
+    lv_timer_t* timer;
+    // Set once the invalidate+lv_refr_now() repaint has run for the current idle stretch, so it
+    // isn't redone every tick while still idle.
+    bool repaint_done_since_activity;
+    // Set only once display_refresh() itself returns ERROR_NONE, tracked separately from
+    // repaint_done_since_activity so a failed refresh (e.g. ERROR_RESOURCE) keeps getting retried
+    // on later idle ticks instead of being silently skipped for the rest of the idle stretch.
+    bool refresh_done_since_activity;
 };
 
-static lv_timer_t* idle_repaint_timer = nullptr;
-static IdleRepaintContext idle_repaint_context = {};
-static bool idle_repaint_done_since_activity = false;
+// One slot per display bound in lvgl_devices_attach()'s loop below that turns out to be
+// DISPLAY_CAPABILITY_SLOW_REFRESH; a board with multiple such displays needs independent idle
+// tracking for each; slots are 1:1 with idle_repaint_contexts' index, not a compacted list.
+static IdleRepaintContext idle_repaint_contexts[LVGL_DEVICES_MAX_PER_TYPE] = {};
 
 extern "C" {
 
@@ -59,21 +68,28 @@ static bool lvgl_device_list_collect(struct Device* device, void* context) {
 static void idle_repaint_timer_cb(lv_timer_t* timer) {
     auto* ctx = static_cast<IdleRepaintContext*>(lv_timer_get_user_data(timer));
     if (lv_display_get_inactive_time(ctx->lvgl_display) < IDLE_REPAINT_MS) {
-        idle_repaint_done_since_activity = false;
+        ctx->repaint_done_since_activity = false;
+        ctx->refresh_done_since_activity = false;
         return;
     }
-    if (idle_repaint_done_since_activity) {
-        return; // Don't redo this every tick while still idle.
+    if (!ctx->repaint_done_since_activity) {
+        ctx->repaint_done_since_activity = true;
+        lv_obj_invalidate(lv_display_get_screen_active(ctx->lvgl_display));
+        // lv_refr_now() runs the redraw synchronously, so display_refresh() below sees the
+        // now-current framebuffer instead of stale content from before the invalidate.
+        lv_refr_now(ctx->lvgl_display);
     }
-    idle_repaint_done_since_activity = true;
-    lv_obj_invalidate(lv_display_get_screen_active(ctx->lvgl_display));
-    // lv_refr_now() runs the redraw synchronously, so display_refresh() below sees the
-    // now-current framebuffer instead of stale content from before the invalidate.
-    lv_refr_now(ctx->lvgl_display);
-    // Under PARTIAL render mode this redraw still tiles into ordinary sub-threshold draw_bitmap()
-    // calls that stay in fast MODE_DU, which alone never fully clears prior ghosting even when it
-    // draws the correct pixels. This forces the quality pass that clears it.
-    display_refresh(ctx->kernel_display_device);
+    if (ctx->refresh_done_since_activity) {
+        return;
+    }
+    // Under PARTIAL render mode the repaint above still tiles into ordinary sub-threshold
+    // draw_bitmap() calls that stay in fast MODE_DU, which alone never fully clears prior
+    // ghosting even when it draws the correct pixels. This forces the quality pass that clears
+    // it. Tracked separately from the repaint so a failure here (e.g. ERROR_RESOURCE) retries on
+    // the next idle tick instead of also repeating the repaint, which succeeded already.
+    if (display_refresh(ctx->kernel_display_device) == ERROR_NONE) {
+        ctx->refresh_done_since_activity = true;
+    }
 }
 
 void lvgl_devices_attach() {
@@ -125,10 +141,13 @@ void lvgl_devices_attach() {
             // cases without extra plumbing at app-close time specifically.
             if (display_has_capability(kernel_display_device, DISPLAY_CAPABILITY_SLOW_REFRESH)) {
                 display_clear(kernel_display_device);
-                if (idle_repaint_timer == nullptr) {
-                    idle_repaint_context = { added_display, kernel_display_device };
-                    idle_repaint_timer = lv_timer_create(idle_repaint_timer_cb, 1000, &idle_repaint_context);
-                    idle_repaint_done_since_activity = false;
+                IdleRepaintContext* ctx = &idle_repaint_contexts[i];
+                if (ctx->timer == nullptr) {
+                    ctx->lvgl_display = added_display;
+                    ctx->kernel_display_device = kernel_display_device;
+                    ctx->repaint_done_since_activity = false;
+                    ctx->refresh_done_since_activity = false;
+                    ctx->timer = lv_timer_create(idle_repaint_timer_cb, 1000, ctx);
                 }
             }
             // Pointers/keyboards below bind to the first display bound here, matching that display's
@@ -234,9 +253,12 @@ void lvgl_devices_detach() {
         indev = lv_indev_get_next(NULL);
     }
 
-    if (idle_repaint_timer != nullptr) {
-        lv_timer_delete(idle_repaint_timer);
-        idle_repaint_timer = nullptr;
+    for (size_t i = 0; i < LVGL_DEVICES_MAX_PER_TYPE; i++) {
+        IdleRepaintContext* ctx = &idle_repaint_contexts[i];
+        if (ctx->timer != nullptr) {
+            lv_timer_delete(ctx->timer);
+            *ctx = {};
+        }
     }
 
     lv_disp_t* display = lv_disp_get_next(NULL);

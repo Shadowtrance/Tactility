@@ -42,6 +42,14 @@ static constexpr uint32_t QUALITY_REFRESH_PARTIAL_COUNT = 20;
 // separate real frames and pins a whole multi-frame interaction to GC16.
 static constexpr uint32_t QUALITY_HOLD_MS = 50;
 
+// Caps how long a single hold session can keep re-extending itself (see
+// commit_quality_mode_decision()). A real multi-rect LVGL redraw finishes well within this; a
+// caller whose own triggers (is_full_screen_change/partial_count_exceeded) keep firing faster
+// than QUALITY_HOLD_MS apart, such as GraphicsDemo's tight banded draw loop, would otherwise keep
+// re-extending the hold indefinitely once one of those triggers happened to line up with an
+// active hold window.
+static constexpr uint32_t QUALITY_HOLD_SESSION_MAX_MS = 200;
+
 // 4x4 ordered (Bayer) dither thresholds, spread evenly across a 0-15 nibble range.
 static constexpr uint8_t BAYER_4X4[4][4] = {
     { 0, 8, 2, 10 },
@@ -94,6 +102,8 @@ struct Papers3DisplayInternal {
     // While get_ticks() < this, every draw_bitmap() call uses quality mode regardless of the
     // other triggers; see QUALITY_HOLD_MS.
     TickType_t quality_hold_until_tick;
+    // get_ticks() when the current hold session first armed; see QUALITY_HOLD_SESSION_MAX_MS.
+    TickType_t quality_hold_session_start_tick;
 };
 
 static void power_on(Papers3DisplayInternal* internal) {
@@ -138,6 +148,10 @@ static error_t papers3_display_clear(Device* device) {
     power_on(internal);
     epd_hl_set_all_white(&internal->hl_state);
     auto result = epd_hl_update_screen(&internal->hl_state, MODE_GC16, config->temperature_celsius);
+    if (result == EPD_DRAW_SUCCESS) {
+        internal->partial_count_since_quality = 0;
+        internal->quality_hold_until_tick = 0;
+    }
     return result == EPD_DRAW_SUCCESS ? ERROR_NONE : ERROR_RESOURCE;
 }
 
@@ -164,6 +178,10 @@ static error_t papers3_display_refresh(Device* device) {
         back_fb[i] = static_cast<uint8_t>(~back_fb[i]);
     }
     auto result = epd_hl_update_screen(&internal->hl_state, MODE_GC16, config->temperature_celsius);
+    if (result == EPD_DRAW_SUCCESS) {
+        internal->partial_count_since_quality = 0;
+        internal->quality_hold_until_tick = 0;
+    }
     return result == EPD_DRAW_SUCCESS ? ERROR_NONE : ERROR_RESOURCE;
 }
 
@@ -190,20 +208,26 @@ static bool should_use_quality_mode(Papers3DisplayInternal* internal, int32_t wi
 // freshly cleaned to every trigger above. A failed fast update still counts toward the partial
 // count, since it was still MODE_DU content, not a clean slate.
 //
-// quality_hold_until_tick is only meant to bridge the near-zero gap between sibling dirty rects
-// of the SAME LVGL redraw (see QUALITY_HOLD_MS's comment), not to be re-armed by every quality
-// draw indefinitely. A GC16 draw's own duration (400ms+) already exceeds QUALITY_HOLD_MS, so
-// re-arming it here on every success made quality mode self-perpetuate forever once triggered
-// once: by the time the next should_use_quality_mode() check ran, this draw had already reset
-// the hold window into the near future again. Only extend the hold when it was already active,
-// i.e. this draw was itself bridging a gap, not the one that first triggered quality mode via
-// is_full_screen_change or partial_count_exceeded.
+// quality_hold_until_tick exists to bridge the near-zero gap between sibling dirty rects of the
+// SAME LVGL redraw (see QUALITY_HOLD_MS's comment). A GC16 draw's own duration (400ms+) already
+// exceeds QUALITY_HOLD_MS, so unconditionally re-arming a fresh window on every successful quality
+// draw let a caller whose own triggers (is_full_screen_change/partial_count_exceeded) keep firing
+// faster than QUALITY_HOLD_MS apart, such as GraphicsDemo's tight banded draw loop, perpetuate
+// quality mode forever, since each such draw's re-arm was still live by the time the next one
+// landed. quality_hold_session_start_tick bounds this: a hold session may keep extending itself
+// to bridge consecutive sibling rects, but never past QUALITY_HOLD_SESSION_MAX_MS from when it
+// first armed, regardless of how it keeps getting triggered.
 static void commit_quality_mode_decision(Papers3DisplayInternal* internal, bool used_quality, bool draw_succeeded, bool was_within_hold) {
     if (used_quality) {
         if (draw_succeeded) {
             internal->partial_count_since_quality = 0;
-            if (was_within_hold) {
-                internal->quality_hold_until_tick = get_ticks() + millis_to_ticks(QUALITY_HOLD_MS);
+            const TickType_t now = get_ticks();
+            if (!was_within_hold) {
+                internal->quality_hold_session_start_tick = now;
+            }
+            const TickType_t session_elapsed = now - internal->quality_hold_session_start_tick;
+            if (session_elapsed < millis_to_ticks(QUALITY_HOLD_SESSION_MAX_MS)) {
+                internal->quality_hold_until_tick = now + millis_to_ticks(QUALITY_HOLD_MS);
             }
         }
     } else {
@@ -367,6 +391,7 @@ static error_t start(Device* device) {
     internal->panel_pixel_count = static_cast<uint32_t>(epd_rotated_display_width()) * static_cast<uint32_t>(epd_rotated_display_height());
     internal->partial_count_since_quality = 0;
     internal->quality_hold_until_tick = 0;
+    internal->quality_hold_session_start_tick = 0;
 
     device_set_driver_data(device, internal);
 
