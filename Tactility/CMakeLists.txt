@@ -30,6 +30,7 @@ list(APPEND REQUIRES_LIST
     lvgl-window-manager-module
     app-module
     c-symbols-module
+    cjson-module
     cpp-symbols-module
     crypt-module
     freertos-module

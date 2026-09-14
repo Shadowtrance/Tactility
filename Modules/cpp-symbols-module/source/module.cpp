@@ -5,7 +5,9 @@
 #include <cstdint>
 #include <new>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 #if defined(__GLIBCXX__) || defined(ESP_PLATFORM)
 #define TT_CPP_SYMBOLS_AVAILABLE 1
@@ -72,6 +74,46 @@ extern "C" {
     // return-value pointer (Itanium ABI), same convention as substr() above.
     void* _ZSt12__str_concatINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEET_PKNS6_10value_typeENS6_9size_typeES9_SA_RKNS6_14allocator_typeE(void*, const char*, unsigned int, const char*, unsigned int, const void*);
     void* _ZStplIcSt11char_traitsIcESaIcEENSt7__cxx1112basic_stringIT_T0_T1_EERKS8_PKS5_(void*, const void*, const char*);
+    // More basic_string members needed by AudiobookPlayer (path/filename manipulation).
+    unsigned int _ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4findEPKcj(const void*, const char*, unsigned int);
+    unsigned int _ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4findEPKcjj(const void*, const char*, unsigned int, unsigned int);
+    unsigned int _ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5rfindEPKcjj(const void*, const char*, unsigned int, unsigned int);
+    unsigned int _ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5rfindEcj(const void*, char, unsigned int);
+    int _ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareERKS4_(const void*, const void*);
+    void _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4swapERS4_(void*, void*);
+    void* _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE6insertEjPKc(void*, unsigned int, const char*);
+    void* _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7replaceEjjPKcj(void*, unsigned int, unsigned int, const char*, unsigned int);
+    unsigned int _ZNSt8__detail14__to_chars_lenIjEEjT_i(unsigned int, int);
+    void _ZNSt8__detail18__to_chars_10_implIjEEvPcjT_(char*, unsigned int, unsigned int);
+    bool _ZSteqIcSt11char_traitsIcESaIcEEbRKNSt7__cxx1112basic_stringIT_T0_T1_EEPKS5_(const void*, const char*); // operator==(string const&, const char*)
+    bool _ZSteqIcSt11char_traitsIcESaIcEEbRKNSt7__cxx1112basic_stringIT_T0_T1_EESA_(const void*, const void*); // operator==(string const&, string const&)
+    // operator+ overloads: hidden return-value pointer (return basic_string by value).
+    void* _ZStplIcSt11char_traitsIcESaIcEENSt7__cxx1112basic_stringIT_T0_T1_EEOS8_S9_(void*, void*, void*);
+    void* _ZStplIcSt11char_traitsIcESaIcEENSt7__cxx1112basic_stringIT_T0_T1_EEPKS5_RKS8_(void*, const char*, const void*);
+    void* _ZStplIcSt11char_traitsIcESaIcEENSt7__cxx1112basic_stringIT_T0_T1_EERKS8_SA_(void*, const void*, const void*);
+    // vector<unsigned char> and vector<std::string> internals - Note: mangled names required.
+    void _ZNKSt6vectorIhSaIhEE12_M_check_lenEjPKc(const void*, unsigned int, const char*);
+    void _ZNKSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EE12_M_check_lenEjPKc(const void*, unsigned int, const char*);
+    bool _ZNKSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EE5emptyEv(const void*);
+    void* _ZNSt12_Vector_baseIhSaIhEE11_M_allocateEj(void*, unsigned int);
+    void* _ZNSt12_Vector_baseIhSaIhEE17_M_create_storageEj(void*, unsigned int);
+    void _ZNSt6vectorIhSaIhEE17_M_default_appendEj(void*, unsigned int);
+    void _ZNSt6vectorIhSaIhEE6resizeEj(void*, unsigned int);
+    unsigned char* _ZNSt27__uninitialized_default_n_1ILb1EE18__uninit_default_nIPhjEET_S3_T0_(unsigned char*, unsigned int);
+    void* _ZSt9__fill_a1IhhEN9__gnu_cxx11__enable_ifIXaasrSt9__is_byteIT_E7__valueoosrSt10__are_sameIS3_T0_E7__valuesrSt20__memcpyable_integerIS6_E7__widthEvE6__typeEPS3_SC_RKS6_(unsigned char*, unsigned char*, const unsigned char*);
+    // std::mutex
+    void _ZNSt5mutex4lockEv(void*);
+    // Remaining basic_string/vector template instantiations, raw-extern like _M_construct's
+    // forward-iterator overload above - these are genuinely out-of-line template
+    // instantiations (not compiler-inlined ctors/dtors), so no forcing wrapper is needed.
+    void _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructILb1EEEvPKcj(void*, const char*, unsigned int);
+    // resize_and_overwrite's instantiation is scoped to to_string(unsigned)'s own private lambda
+    // type - unnameable directly, but calling std::to_string(unsigned) below (construct_
+    // to_string_result) instantiates it in this TU under this exact mangled name, addressable
+    // by name even though its C++ type can't be spelled outside to_string's own body.
+    void _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE20resize_and_overwriteIRZNS_9to_stringEjEUlPcjE_EEvjT_(void*, unsigned int, void*);
+    void* _ZSt14__relocate_a_1IPNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEES6_SaIS5_EET0_T_S9_S8_RT1_(void*, void*, void*, void*);
+    int _ZStssIcSt11char_traitsIcESaIcEEDTcl21__char_traits_cmp_catIT0_ELi0EEERKNSt7__cxx1112basic_stringIT_S3_T1_EESB_(const void*, const void*); // operator<=>(string const&, string const&)
 #endif
 }
 
@@ -94,6 +136,123 @@ void construct_basic_string_from_cstr(void* self, const char* s, const void* all
 // Same story for the move constructor, basic_string(basic_string&&).
 void construct_basic_string_move(void* self, void* other) {
     new (self) std::string(std::move(*static_cast<std::string*>(other)));
+}
+
+// vector<std::string>: same story as basic_string's ctors above - the destructor for a
+// non-trivial element type has no out-of-line definition anywhere to take the address of, so a
+// wrapper that actually destroys one forces the compiler to emit a genuine, addressable
+// definition here, registered below under the mangled name the ELF loader looks up.
+void destroy_vector_of_strings(void* self) {
+    static_cast<std::vector<std::string>*>(self)->~vector();
+}
+// Same story for __new_allocator<std::string>::allocate() (used internally by vector<string>'s
+// growth/reserve path).
+void* allocate_string_storage(void* self, unsigned int n, const void* hint) {
+    return static_cast<std::__new_allocator<std::string>*>(self)->allocate(n, hint);
+}
+
+// Same story for vector<unsigned char>'s destructor.
+void destroy_vector_of_bytes(void* self) {
+    static_cast<std::vector<unsigned char>*>(self)->~vector();
+}
+
+// _Vector_base<T>::~_Vector_base only deallocates the raw buffer (element destruction is
+// vector<T>::~vector()'s job, called before this) - a distinct entry point with no accessible
+// out-of-line definition of its own (it's a protected base of vector<T>, and its destructor body
+// is a one-line inline in the header). A shim that publicly re-derives from it regains access to
+// call the real destructor at the right address, without duplicating its (private) cleanup logic.
+struct StringVectorBaseShim : std::_Vector_base<std::string, std::allocator<std::string>> {};
+void destroy_vector_base_of_strings(void* self) {
+    static_cast<StringVectorBaseShim*>(self)->~StringVectorBaseShim();
+}
+
+// std::to_string(unsigned) is `inline` in the header (no prebuilt out-of-line definition in
+// libstdc++'s archive) - the app calls it directly as an opaque function in at least one call
+// site (rather than always inlining it), so it needs a real out-of-line definition under its own
+// mangled name, not just a forcing side effect. Hidden return-value pointer convention, matching
+// the other string-returning functions (operator+, __str_concat) elsewhere in this file. This
+// same call also instantiates resize_and_overwrite()'s to_string-private lambda, registered
+// separately below under its own mangled name.
+void construct_to_string_result(void* out, unsigned int value) {
+    new (out) std::string(std::to_string(value));
+}
+
+// basic_string::rfind<string_view>(string_view const&, pos) is a small header-inline SFINAE
+// forwarder around the already-exported rfind(const char*, pos, n) overload - no prebuilt
+// out-of-line definition either, same story as to_string above.
+[[gnu::used]] unsigned int rfind_string_view(const std::string& self, const std::string_view& sv, unsigned int pos) {
+    return self.rfind(sv, pos);
+}
+
+// _Vector_base<T>::_Vector_impl_data::_M_swap_data - a plain one-line inline swap of three
+// pointers, normally never emitted out-of-line, but the app references it directly anyway
+// (matches _M_replace_cold's "kept out of line" pattern elsewhere in this file). Its type and
+// method are public members of the (struct, so default-public) _Vector_base.
+using StringVectorImplData = std::_Vector_base<std::string, std::allocator<std::string>>::_Vector_impl_data;
+void swap_string_vector_impl_data(void* self, void* other) {
+    static_cast<StringVectorImplData*>(self)->_M_swap_data(*static_cast<StringVectorImplData*>(other));
+}
+// Same story for vector<unsigned char>(size_type, allocator const&).
+void construct_vector_of_bytes_sized(void* self, unsigned int count, const void* alloc) {
+    new (self) std::vector<unsigned char>(count, *static_cast<const std::allocator<unsigned char>*>(alloc));
+}
+
+// Same _Vector_base<T>::~_Vector_base distinction as the string version above, for
+// vector<unsigned char>.
+struct ByteVectorBaseShim : std::_Vector_base<unsigned char, std::allocator<unsigned char>> {};
+void destroy_vector_base_of_bytes(void* self) {
+    static_cast<ByteVectorBaseShim*>(self)->~ByteVectorBaseShim();
+}
+
+// push_back/emplace_back/back on vector<string> are ordinary public member functions with
+// out-of-line definitions, registered below under their real mangled names - the app's own
+// push_back/emplace_back calls resolve directly here, so each must insert exactly once.
+void push_back_string(void* self, const std::string& value) {
+    static_cast<std::vector<std::string>*>(self)->push_back(value);
+}
+std::string& emplace_back_string(void* self, std::string&& value) {
+    return static_cast<std::vector<std::string>*>(self)->emplace_back(std::move(value));
+}
+
+// _M_realloc_append(T&&) is what push_back/emplace_back call internally when the vector needs
+// to grow - the app can also call it directly (its own compiled code inlined the fast/slow-path
+// split from push_back's body, keeping only the growth call out-of-line). These do exactly what
+// _M_realloc_append itself does (append one element, growing the vector), so redirecting the
+// app's call here is behavior-preserving - unlike push_back_string/emplace_back_string above,
+// which append TWO elements and must not be reused for this.
+void realloc_append_string_const_ref(void* self, const std::string& value) {
+    static_cast<std::vector<std::string>*>(self)->push_back(value);
+}
+void realloc_append_string_rvalue(void* self, std::string&& value) {
+    static_cast<std::vector<std::string>*>(self)->push_back(std::move(value));
+}
+
+// _Guard_alloc is a private RAII rollback guard nested inside vector<T>::_M_realloc_append's own
+// body (rolls back the new buffer if appending throws mid-copy) - not derivable-into like
+// _Vector_base above, since it's private to vector<T> itself rather than a protected base. Its
+// layout is fixed by the header ({pointer storage, size_type len, _Base& vect}) and its destructor
+// body is just "deallocate storage via the vector's allocator if non-null", so this replicates
+// that logic directly against the same layout instead of calling the inaccessible real dtor.
+template <typename T>
+struct GuardAllocLayout {
+    T* storage;
+    std::size_t len;
+    void* vect;
+};
+template <typename T>
+void destroy_guard_alloc(void* self) {
+    auto* guard = static_cast<GuardAllocLayout<T>*>(self);
+    if (guard->storage) {
+        std::allocator<T>().deallocate(guard->storage, guard->len);
+    }
+}
+std::string& back_of_string_vector(void* self) {
+    return static_cast<std::vector<std::string>*>(self)->back();
+}
+// vector<string>'s move-assignment operator (self = std::move(other)) - forces the private
+// _M_move_assign/_M_swap_data helpers it needs to be emitted as addressable definitions too.
+void move_assign_string_vector(void* self, void* other) {
+    *static_cast<std::vector<std::string>*>(self) = std::move(*static_cast<std::vector<std::string>*>(other));
 }
 }
 #endif
@@ -164,6 +323,59 @@ static const ModuleSymbol SYMBOLS[] = {
     { "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC5EOS4_", (void*)&construct_basic_string_move },
     DEFINE_MODULE_SYMBOL(_ZSt12__str_concatINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEET_PKNS6_10value_typeENS6_9size_typeES9_SA_RKNS6_14allocator_typeE),
     DEFINE_MODULE_SYMBOL(_ZStplIcSt11char_traitsIcESaIcEENSt7__cxx1112basic_stringIT_T0_T1_EERKS8_PKS5_),
+    DEFINE_MODULE_SYMBOL(_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4findEPKcj),
+    DEFINE_MODULE_SYMBOL(_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4findEPKcjj),
+    DEFINE_MODULE_SYMBOL(_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5rfindEPKcjj),
+    DEFINE_MODULE_SYMBOL(_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5rfindEcj),
+    DEFINE_MODULE_SYMBOL(_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareERKS4_),
+    DEFINE_MODULE_SYMBOL(_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4swapERS4_),
+    DEFINE_MODULE_SYMBOL(_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE6insertEjPKc),
+    DEFINE_MODULE_SYMBOL(_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7replaceEjjPKcj),
+    DEFINE_MODULE_SYMBOL(_ZNSt8__detail14__to_chars_lenIjEEjT_i),
+    DEFINE_MODULE_SYMBOL(_ZNSt8__detail18__to_chars_10_implIjEEvPcjT_),
+    DEFINE_MODULE_SYMBOL(_ZSteqIcSt11char_traitsIcESaIcEEbRKNSt7__cxx1112basic_stringIT_T0_T1_EEPKS5_),
+    DEFINE_MODULE_SYMBOL(_ZSteqIcSt11char_traitsIcESaIcEEbRKNSt7__cxx1112basic_stringIT_T0_T1_EESA_),
+    DEFINE_MODULE_SYMBOL(_ZStplIcSt11char_traitsIcESaIcEENSt7__cxx1112basic_stringIT_T0_T1_EEOS8_S9_),
+    DEFINE_MODULE_SYMBOL(_ZStplIcSt11char_traitsIcESaIcEENSt7__cxx1112basic_stringIT_T0_T1_EEPKS5_RKS8_),
+    DEFINE_MODULE_SYMBOL(_ZStplIcSt11char_traitsIcESaIcEENSt7__cxx1112basic_stringIT_T0_T1_EERKS8_SA_),
+    DEFINE_MODULE_SYMBOL(_ZNKSt6vectorIhSaIhEE12_M_check_lenEjPKc),
+    DEFINE_MODULE_SYMBOL(_ZNKSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EE12_M_check_lenEjPKc),
+    DEFINE_MODULE_SYMBOL(_ZNKSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EE5emptyEv),
+    DEFINE_MODULE_SYMBOL(_ZNSt12_Vector_baseIhSaIhEE11_M_allocateEj),
+    DEFINE_MODULE_SYMBOL(_ZNSt12_Vector_baseIhSaIhEE17_M_create_storageEj),
+    DEFINE_MODULE_SYMBOL(_ZNSt6vectorIhSaIhEE17_M_default_appendEj),
+    DEFINE_MODULE_SYMBOL(_ZNSt6vectorIhSaIhEE6resizeEj),
+    DEFINE_MODULE_SYMBOL(_ZNSt27__uninitialized_default_n_1ILb1EE18__uninit_default_nIPhjEET_S3_T0_),
+    DEFINE_MODULE_SYMBOL(_ZSt9__fill_a1IhhEN9__gnu_cxx11__enable_ifIXaasrSt9__is_byteIT_E7__valueoosrSt10__are_sameIS3_T0_E7__valuesrSt20__memcpyable_integerIS6_E7__widthEvE6__typeEPS3_SC_RKS6_),
+    DEFINE_MODULE_SYMBOL(_ZNSt5mutex4lockEv),
+    DEFINE_MODULE_SYMBOL(_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructILb1EEEvPKcj),
+    DEFINE_MODULE_SYMBOL(_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE20resize_and_overwriteIRZNS_9to_stringEjEUlPcjE_EEvjT_),
+    { "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5rfindISt17basic_string_viewIcS2_EEENSt9enable_ifIXsrSt6__and_IJSt14is_convertibleIRKT_S7_ESt6__not_ISA_IPSC_PKS4_EESF_ISA_ISD_PKcEEEE5valueEjE4typeESD_j", (void*)&rfind_string_view },
+    DEFINE_MODULE_SYMBOL(_ZSt14__relocate_a_1IPNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEES6_SaIS5_EET0_T_S9_S8_RT1_),
+    DEFINE_MODULE_SYMBOL(_ZStssIcSt11char_traitsIcESaIcEEDTcl21__char_traits_cmp_catIT0_ELi0EEERKNSt7__cxx1112basic_stringIT_S3_T1_EESB_),
+    // vector<std::string> - Note: You have to use the mangled names here
+    { "_ZNSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EED1Ev", (void*)&destroy_vector_of_strings },
+    { "_ZNSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EED2Ev", (void*)&destroy_vector_of_strings },
+    { "_ZNSt15__new_allocatorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEE8allocateEjPKv", (void*)&allocate_string_storage },
+    { "_ZNSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EE9push_backERKS5_", (void*)&push_back_string },
+    { "_ZNSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EE12emplace_backIJS5_EEERS5_DpOT_", (void*)&emplace_back_string },
+    { "_ZNSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EE4backEv", (void*)&back_of_string_vector },
+    { "_ZNSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EE14_M_move_assignEOS7_St17integral_constantIbLb1EE", (void*)&move_assign_string_vector },
+    // vector<unsigned char> - Note: You have to use the mangled names here
+    { "_ZNSt6vectorIhSaIhEED1Ev", (void*)&destroy_vector_of_bytes },
+    { "_ZNSt6vectorIhSaIhEED2Ev", (void*)&destroy_vector_of_bytes },
+    { "_ZNSt6vectorIhSaIhEEC1EjRKS0_", (void*)&construct_vector_of_bytes_sized },
+    { "_ZNSt12_Vector_baseIhSaIhEED2Ev", (void*)&destroy_vector_base_of_bytes },
+    // _Vector_base<T>::~_Vector_base only deallocates the raw buffer (elements are destroyed by
+    // vector<T>'s own destructor before this runs) - a distinct entry point from ~vector(), so
+    // it needs its own wrapper rather than reusing destroy_vector_of_strings/_of_bytes above.
+    { "_ZNSt12_Vector_baseINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EED2Ev", (void*)&destroy_vector_base_of_strings },
+    { "_ZNSt7__cxx119to_stringEj", (void*)&construct_to_string_result },
+    { "_ZNSt12_Vector_baseINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EE17_Vector_impl_data12_M_swap_dataERS8_", (void*)&swap_string_vector_impl_data },
+    { "_ZNSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EE17_M_realloc_appendIJRKS5_EEEvDpOT_", (void*)&realloc_append_string_const_ref },
+    { "_ZNSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EE17_M_realloc_appendIJS5_EEEvDpOT_", (void*)&realloc_append_string_rvalue },
+    { "_ZNSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaIS5_EE12_Guard_allocD1Ev", (void*)&destroy_guard_alloc<std::string> },
+    { "_ZNSt6vectorIhSaIhEE12_Guard_allocD1Ev", (void*)&destroy_guard_alloc<unsigned char> },
 #endif
 #endif // TT_CPP_SYMBOLS_AVAILABLE
     MODULE_SYMBOL_TERMINATOR

@@ -21,6 +21,9 @@
 #include <miniz.h>
 #include <sys/errno.h>
 
+#include <simple_dec/esp_audio_simple_dec.h>
+#include <esp_audio_dec_default.h>
+
 #ifdef CONFIG_IDF_TARGET_ESP32P4
 #include <esp_cache.h>
 #include <driver/ppa.h>
@@ -117,11 +120,22 @@ extern "C" {
     int __clzsi2(unsigned int x);
     // GCC 64-bit integer arithmetic helpers (needed for 64-bit div on 32-bit RISC-V)
     long long __divdi3(long long a, long long b);
+    long long __moddi3(long long a, long long b);
     unsigned long long __udivdi3(unsigned long long a, unsigned long long b);
     unsigned long long (__atomic_load_8)(const volatile void*, int);
     void (__atomic_store_8)(volatile void*, unsigned long long, int);
     unsigned long long (__atomic_exchange_8)(volatile void*, unsigned long long, int);
 #endif
+}
+
+// Registers the Kconfig-selected default audio decoders (trimmed to MP3+PCM, see
+// Buildscripts/sdkconfig/default.properties) once at module start, so
+// esp_audio_simple_dec_open() is ready for any app to use without each one remembering to
+// register decoders itself - registration is idempotent-per-boot and cheap, but the actual
+// decoder object code only needs to exist once in the firmware, not duplicated per app.
+error_t platform_esp32_start(void) {
+    esp_audio_dec_register_default();
+    return ERROR_NONE;
 }
 
 extern "C" {
@@ -237,6 +251,15 @@ static const ModuleSymbol platform_esp32_symbols[] = {
 #endif
     // esp_system.h
     DEFINE_MODULE_SYMBOL(esp_restart),
+    // simple_dec/esp_audio_simple_dec.h - decoders are registered once at module start
+    // (platform_esp32_start -> esp_audio_dec_register_default), Kconfig-trimmed to the
+    // decoders Tactility enables (see Buildscripts/sdkconfig/default.properties).
+    DEFINE_MODULE_SYMBOL(esp_audio_simple_check_audio_type),
+    DEFINE_MODULE_SYMBOL(esp_audio_simple_dec_open),
+    DEFINE_MODULE_SYMBOL(esp_audio_simple_dec_process),
+    DEFINE_MODULE_SYMBOL(esp_audio_simple_dec_get_info),
+    DEFINE_MODULE_SYMBOL(esp_audio_simple_dec_reset),
+    DEFINE_MODULE_SYMBOL(esp_audio_simple_dec_close),
     // soft float
 #ifndef CONFIG_IDF_TARGET_ESP32P4
     DEFINE_MODULE_SYMBOL(__addsf3),
@@ -315,6 +338,7 @@ static const ModuleSymbol platform_esp32_symbols[] = {
     DEFINE_MODULE_SYMBOL(__gtdf2),
     DEFINE_MODULE_SYMBOL(__clzsi2),
     DEFINE_MODULE_SYMBOL(__divdi3),
+    DEFINE_MODULE_SYMBOL(__moddi3),
     DEFINE_MODULE_SYMBOL(__udivdi3),
     DEFINE_MODULE_SYMBOL(__atomic_load_8),
     DEFINE_MODULE_SYMBOL(__atomic_store_8),
@@ -354,6 +378,10 @@ extern Driver esp32_usbhost_hid_driver;
 extern Driver esp32_usbhost_hid_keyboard_driver;
 extern Driver esp32_usbhost_midi_driver;
 extern Driver esp32_usbhost_msc_driver;
+#if CONFIG_IDF_TARGET_ESP32P4 || CONFIG_IDF_TARGET_ESP32S3
+extern Driver esp32_usbhost_uac_driver;
+extern Driver usb_uac_codec_driver;
+#endif
 #endif
 #if SOC_USB_OTG_SUPPORTED && (CONFIG_TINYUSB_HID_COUNT || CONFIG_TINYUSB_MSC_ENABLED || CONFIG_TINYUSB_MIDI_COUNT || CONFIG_TINYUSB_CDC_ENABLED)
 extern Driver esp32_usb_device_controller_driver;
@@ -403,6 +431,10 @@ static Driver* const platform_esp32_drivers[] = {
     &esp32_usbhost_hid_keyboard_driver,
     &esp32_usbhost_midi_driver,
     &esp32_usbhost_msc_driver,
+#if CONFIG_IDF_TARGET_ESP32P4 || CONFIG_IDF_TARGET_ESP32S3
+    &esp32_usbhost_uac_driver,
+    &usb_uac_codec_driver,
+#endif
 #endif
 #if SOC_USB_OTG_SUPPORTED && (CONFIG_TINYUSB_HID_COUNT || CONFIG_TINYUSB_MSC_ENABLED || CONFIG_TINYUSB_MIDI_COUNT || CONFIG_TINYUSB_CDC_ENABLED)
     &esp32_usb_device_controller_driver,
@@ -424,7 +456,7 @@ static Driver* const platform_esp32_drivers[] = {
 
 Module platform_esp32_module = {
     .name = "platform-esp32",
-    .start = nullptr,
+    .start = platform_esp32_start,
     .stop = nullptr,
     .drivers = platform_esp32_drivers,
     .symbols = platform_esp32_symbols,

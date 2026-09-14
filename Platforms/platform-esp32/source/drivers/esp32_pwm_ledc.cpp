@@ -189,8 +189,15 @@ static error_t esp32_pwm_ledc_is_inverted(Device* device, bool* inverted) {
 }
 
 // Applies the tracked period, duty and inverted settings (whether they came from the config
-// defaults or were overridden beforehand) and turns the output on.
+// defaults or were overridden beforehand) and turns the output on. A no-op when already enabled:
+// callers (e.g. backlight brightness changes) call enable() after every set_duty() as a safety
+// no-op, and re-running apply_channel() would re-run the GPIO/LEDC channel binding every time,
+// causing visible flicker.
 static error_t esp32_pwm_ledc_enable(Device* device) {
+    if (GET_INTERNAL(device)->enabled) {
+        return ERROR_NONE;
+    }
+
     error_t error = apply_period(device);
     if (error != ERROR_NONE) {
         return error;

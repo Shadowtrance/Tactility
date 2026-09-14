@@ -75,6 +75,13 @@ GpioDescriptor* gpio_descriptor_acquire(
     desc->flags = flags;
     mutex_unlock(&data->mutex);
 
+    // A peripheral bus (I2C, SPI, I2S, UART, SDMMC, ...) configures and reserves the pin itself
+    // via its own native driver calls; applying our own gpio_config() first would just have the
+    // peripheral's own reservation conflict with ours.
+    if (owner == GPIO_OWNER_PERIPHERAL) {
+        return desc;
+    }
+
     // Init flags by implementation
     auto init_result = gpio_descriptor_set_flags(desc, flags);
     if (init_result != ERROR_NONE) {
