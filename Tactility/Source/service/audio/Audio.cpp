@@ -113,7 +113,11 @@ void setOutputMuted(bool muted) {
 static std::atomic<bool> s_play_pause_requested(false);
 
 void requestPlayPause() {
-    s_play_pause_requested.store(true);
+    // Toggle rather than store(true): each call represents one physical toggle-press, so two
+    // presses before consumption must cancel out (net "no pending toggle"), not collapse to a
+    // single one.
+    bool expected = s_play_pause_requested.load();
+    while (!s_play_pause_requested.compare_exchange_weak(expected, !expected)) {}
 }
 
 bool consumePlayPauseRequest() {

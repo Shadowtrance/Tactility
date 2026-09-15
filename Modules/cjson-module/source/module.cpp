@@ -10,7 +10,9 @@ static const ModuleSymbol SYMBOLS[] = {
     // SetNumberValue/SetBoolValue/ArrayForEach macros, which expand at the app's own compile
     // time and need no export).
     DEFINE_MODULE_SYMBOL(cJSON_Version),
-    DEFINE_MODULE_SYMBOL(cJSON_InitHooks),
+    // cJSON_InitHooks intentionally not exported: it overrides cJSON's process-global
+    // malloc/free hooks, which every app and the firmware itself share - one app could break
+    // allocation for everyone.
     DEFINE_MODULE_SYMBOL(cJSON_Parse),
     DEFINE_MODULE_SYMBOL(cJSON_ParseWithLength),
     DEFINE_MODULE_SYMBOL(cJSON_ParseWithOpts),

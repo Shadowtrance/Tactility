@@ -2,6 +2,10 @@
 
 #pragma once
 
+#ifndef __cplusplus
+#include <stdbool.h>
+#endif
+
 // C ABI over the Tactility app-framework's audio service (output volume/mute, play-pause
 // latch), exported to side-loaded ELF apps through the "tactility-audio" kernel module's symbol
 // table (see Tactility/Source/service/audio/AudioExports.cpp in the firmware repo, which

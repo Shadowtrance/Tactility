@@ -134,7 +134,12 @@ extern "C" {
 // register decoders itself - registration is idempotent-per-boot and cheap, but the actual
 // decoder object code only needs to exist once in the firmware, not duplicated per app.
 error_t platform_esp32_start(void) {
-    esp_audio_dec_register_default();
+    esp_audio_err_t dec_register_result = esp_audio_dec_register_default();
+    if (dec_register_result != ESP_AUDIO_ERR_OK) {
+        // Not a boot failure: apps can still use everything else. But without this, a later
+        // esp_audio_simple_dec_open() failure has no explanation in the log.
+        ESP_LOGE("platform-esp32", "esp_audio_dec_register_default failed: %d", (int) dec_register_result);
+    }
     return ERROR_NONE;
 }
 

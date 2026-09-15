@@ -149,6 +149,16 @@ struct AudioStreamData {
     // through them, so close (possibly forced by set_enabled) can't race with read/write.
     SemaphoreHandle_t mutex = nullptr;
 
+    // While open_input/open_output holds the reservation placeholder, open_stream() is
+    // mid-flight calling audio_codec_open() against a codec pointer it captured before that
+    // call - a codec device STOPPED event during that window can't null anything out (there's
+    // no handle yet to mark listener_closed), so on_codec_device_event() instead polls this
+    // field until the open resolves before letting its caller free the codec's memory. Set to
+    // the codec being opened while a reservation is in flight for that direction; cleared once
+    // open_stream() commits or aborts the reservation.
+    Device* input_reservation_codec = nullptr;
+    Device* output_reservation_codec = nullptr;
+
     // The audio-stream device this state belongs to; used by on_codec_device_event (which
     // only receives the state as context) for notify_change(). Nulled during stop_device so
     // a late listener invocation becomes a no-op.
@@ -247,16 +257,21 @@ Device* codec_for_direction(AudioStreamData* data, AudioCodecDirection direction
 }
 
 // Marks an I/O operation as in-flight on `handle`, preventing close_stream() from freeing it
-// underneath us. Returns false (and does nothing further) if the handle is closing/closed --
-// callers must bail out with an error in that case. Must be paired with io_end().
-bool io_begin(AudioStreamData* data, AudioStreamHandleImpl* handle) {
+// underneath us, and hands back the codec to use for this call. Returns false (and does
+// nothing further) if the handle is closing/closed -- callers must bail out with an error in
+// that case. Reads handle->codec under the same lock as the validity check (rather than
+// letting the caller read it unlocked beforehand) so the two can never observe inconsistent
+// state relative to on_codec_device_event()'s mutex-protected null-out. Must be paired with
+// io_end().
+bool io_begin(AudioStreamData* data, AudioStreamHandleImpl* handle, Device** out_codec) {
     xSemaphoreTake(data->mutex, portMAX_DELAY);
     bool is_input = (handle->direction == AUDIO_CODEC_DIR_INPUT);
     AudioStreamHandleImpl* slot_value = is_input ? data->open_input : data->open_output;
-    if (slot_value != handle || handle->closing || handle->listener_closed) {
+    if (slot_value != handle || handle->closing || handle->listener_closed || handle->codec == nullptr) {
         xSemaphoreGive(data->mutex);
         return false;
     }
+    *out_codec = handle->codec;
     handle->busy_count++;
     xSemaphoreGive(data->mutex);
     return true;
@@ -325,6 +340,8 @@ void on_codec_device_event(Device* dev, DeviceEvent event, void* context) {
         auto* reservation = reinterpret_cast<AudioStreamHandleImpl*>(1);
         AudioStreamHandleImpl* drained_handle = nullptr;
         bool must_drain = false;
+        Device** reservation_codec = (direction == AUDIO_CODEC_DIR_INPUT) ? &data->input_reservation_codec : &data->output_reservation_codec;
+        bool must_wait_for_open = (event == DEVICE_EVENT_STOPPED && open_handle == reservation && *reservation_codec == current);
         if (open_handle != nullptr && open_handle != reservation) {
             if (event == DEVICE_EVENT_STOPPED && open_handle->codec == current) {
                 open_handle->codec = nullptr;
@@ -343,10 +360,31 @@ void on_codec_device_event(Device* dev, DeviceEvent event, void* context) {
 
         if (must_drain && drained_handle->drain_semaphore != nullptr) {
             // Bounded: in-flight I/O carries its own caller-supplied timeout and returns on its
-            // own within that bound, so this can't hang teardown indefinitely. If it somehow
-            // doesn't (a misbehaving driver ignoring its timeout), proceeding anyway after the
-            // bound is the same risk the codec's own I/O call already accepted.
+            // own within that bound (2s comfortably covers every timeout this codebase's own
+            // callers use), so this can't hang teardown indefinitely for them. There is no
+            // cancellation primitive in the codec API to forcibly abort an in-flight
+            // audio_codec_read/write call, so this bound is a real, accepted risk (not fully
+            // eliminated) for a caller that passes portMAX_DELAY or a timeout longer than this
+            // wait: proceeding after the bound frees memory that call may still be using. If
+            // that becomes a real scenario, the fix is a codec-level cancellation API, not a
+            // longer wait here.
             xSemaphoreTake(drained_handle->drain_semaphore, pdMS_TO_TICKS(2000));
+        }
+
+        if (must_wait_for_open) {
+            // open_stream() is between reserving the slot and audio_codec_open() returning --
+            // there's no handle yet to mark listener_closed/drain, so poll for the reservation
+            // to resolve instead. Bounded for the same reason as the drain wait above: whatever
+            // codec call open_stream() is blocked in carries its own timeout.
+            for (int waited_ms = 0; waited_ms < 2000; waited_ms += 20) {
+                xSemaphoreTake(data->mutex, portMAX_DELAY);
+                bool resolved = (*reservation_codec != current);
+                xSemaphoreGive(data->mutex);
+                if (resolved) {
+                    break;
+                }
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
         }
 
         LOG_I(
@@ -402,12 +440,19 @@ error_t open_stream(Device* device, const struct AudioStreamConfig* config, Audi
     // above while we do the (potentially slow) codec open below outside the lock.
     auto* reservation = reinterpret_cast<AudioStreamHandleImpl*>(1);
     *slot = reservation;
+    // Records that this codec has an open in flight, so a concurrent codec STOPPED event
+    // (on_codec_device_event) waits for the open to resolve before its caller frees the
+    // codec's memory -- there's no handle yet at this point for the event to mark
+    // listener_closed on, so it can't protect this window the normal way.
+    Device** reservation_codec = is_input ? &data->input_reservation_codec : &data->output_reservation_codec;
+    *reservation_codec = codec;
     xSemaphoreGive(data->mutex);
 
     uint32_t codec_rate = 0;
     if (audio_codec_get_native_sample_rate(codec, direction, &codec_rate) != ERROR_NONE || codec_rate == 0) {
         xSemaphoreTake(data->mutex, portMAX_DELAY);
         if (*slot == reservation) { *slot = nullptr; }
+        *reservation_codec = nullptr;
         xSemaphoreGive(data->mutex);
         return ERROR_RESOURCE;
     }
@@ -432,6 +477,7 @@ error_t open_stream(Device* device, const struct AudioStreamConfig* config, Audi
         LOG_E(TAG, "Failed to open codec for %s", is_input ? "input" : "output");
         xSemaphoreTake(data->mutex, portMAX_DELAY);
         if (*slot == reservation) { *slot = nullptr; }
+        *reservation_codec = nullptr;
         xSemaphoreGive(data->mutex);
         return ERROR_RESOURCE;
     }
@@ -466,6 +512,7 @@ error_t open_stream(Device* device, const struct AudioStreamConfig* config, Audi
         audio_codec_close(codec);
         xSemaphoreTake(data->mutex, portMAX_DELAY);
         if (*slot == reservation) { *slot = nullptr; }
+        *reservation_codec = nullptr;
         xSemaphoreGive(data->mutex);
         return ERROR_OUT_OF_MEMORY;
     }
@@ -480,6 +527,7 @@ error_t open_stream(Device* device, const struct AudioStreamConfig* config, Audi
         if (*slot == reservation) {
             *slot = nullptr;
         }
+        *reservation_codec = nullptr;
         xSemaphoreGive(data->mutex);
         audio_codec_close(codec);
         vSemaphoreDelete(handle->drain_semaphore);
@@ -487,6 +535,7 @@ error_t open_stream(Device* device, const struct AudioStreamConfig* config, Audi
         return ERROR_RESOURCE;
     }
     *slot = handle;
+    *reservation_codec = nullptr;
     xSemaphoreGive(data->mutex);
 
     *out_handle = handle;
@@ -508,8 +557,7 @@ error_t read_stream(AudioStreamHandle handle_base, void* out_data, size_t data_s
     }
 
     auto* data = GET_DATA(handle->device);
-    Device* codec = handle->codec;
-    if (data == nullptr || codec == nullptr) {
+    if (data == nullptr) {
         return ERROR_RESOURCE;
     }
 
@@ -521,7 +569,8 @@ error_t read_stream(AudioStreamHandle handle_base, void* out_data, size_t data_s
         return ERROR_NONE;
     }
 
-    if (!io_begin(data, handle)) {
+    Device* codec = nullptr;
+    if (!io_begin(data, handle, &codec)) {
         return ERROR_INVALID_STATE;
     }
 
@@ -594,8 +643,7 @@ error_t write_stream(AudioStreamHandle handle_base, const void* in_data, size_t 
     }
 
     auto* data = GET_DATA(handle->device);
-    Device* codec = handle->codec;
-    if (data == nullptr || codec == nullptr) {
+    if (data == nullptr) {
         return ERROR_RESOURCE;
     }
 
@@ -607,7 +655,8 @@ error_t write_stream(AudioStreamHandle handle_base, const void* in_data, size_t 
         return ERROR_NONE;
     }
 
-    if (!io_begin(data, handle)) {
+    Device* codec = nullptr;
+    if (!io_begin(data, handle, &codec)) {
         return ERROR_INVALID_STATE;
     }
 

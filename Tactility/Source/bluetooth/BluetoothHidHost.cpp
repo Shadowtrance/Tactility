@@ -386,7 +386,15 @@ static void hidEncRetryTimerCb(void* /*arg*/) {
             // Instead keep waiting (bounded), and only proceed with whatever is known after
             // the retries run out - a peer whose discovery genuinely stalled still ends up
             // with a working connection for any reports that were resolved.
-            if (ctx.encRetryCount < 6) { // ~3s total alongside the chain's own progress
+            // Once inputRpts is populated, cap at 6 retries (~3s) - discovery from here is
+            // just the report-map read, expected to be quick. But if characteristic discovery
+            // itself hasn't produced any reports yet, typeResolutionDone forcing proceed here
+            // would permanently latch readyBlockFired on zero reports (see below) before that
+            // discovery had a chance to populate inputRpts - keep waiting instead, bounded by
+            // a much higher cap so a peer that genuinely has no reports doesn't hang forever.
+            bool have_reports = !ctx.inputRpts.empty();
+            int retry_cap = have_reports ? 6 : 40; // ~3s vs ~20s
+            if (ctx.encRetryCount < retry_cap) {
                 ctx.encRetryCount++;
                 esp_timer_start_once(hid_enc_retry_timer, 500 * 1000);
                 return;

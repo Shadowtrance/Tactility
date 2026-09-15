@@ -12,7 +12,7 @@ file(GLOB_RECURSE SOURCE_FILES "source/*.c*")
 # cJSON symbol exports (source/module.cpp) are used on every platform, but the managed-component
 # target name only resolves in an ESP-IDF build; POSIX links the repo's own cJSON library instead.
 set(REQUIRES_LIST TactilityKernel)
-if (DEFINED ENV{ESP_IDF_VERSION})
+if (ESP_PLATFORM)
     list(APPEND REQUIRES_LIST espressif__cjson)
 else ()
     list(APPEND REQUIRES_LIST cJSON)
