@@ -59,6 +59,7 @@
 #include <cjson_symbols/module.h>
 #include <cpp_symbols/module.h>
 #include <crypt/module.h>
+#include <font/module.h>
 #include <freertos/module.h>
 
 #include <gps/module.h>
@@ -96,6 +97,7 @@ extern "C" Module tactility_audio_module;
 #include <tactility/kernel_init.h>
 #include <tactility/log.h>
 #include <tactility/memory.h>
+#include <tactility/paths.h>
 
 namespace tt {
 
@@ -180,7 +182,9 @@ namespace app {
     namespace selectiondialog { extern const ::AppManifest manifest; }
     namespace settings { extern const ::AppManifest manifest; }
     namespace setup { extern const ::AppManifest manifest; }
+    namespace shell { extern const ::AppManifest manifest; }
     namespace systeminfo { extern const ::AppManifest manifest; }
+    namespace terminal { extern const ::AppManifest manifest; }
     namespace timedatesettings { extern const ::AppManifest manifest; }
 #ifdef CONFIG_TT_TOUCH_CALIBRATION_SUPPORTED
     namespace touchcalibration { extern const ::AppManifest manifest; }
@@ -245,8 +249,10 @@ static void registerInternalApps() {
     app_manager_add(&app::settings::manifest);
     app_manager_add(&app::selectiondialog::manifest);
     app_manager_add(&app::setup::manifest);
+    app_manager_add(&app::shell::manifest);
     app_manager_add(&app::systeminfo::manifest);
     app_manager_add(&app::timedatesettings::manifest);
+    app_manager_add(&app::terminal::manifest);
 #ifdef CONFIG_TT_TOUCH_CALIBRATION_SUPPORTED
     app_manager_add(&app::touchcalibration::manifest);
 #endif
@@ -337,24 +343,15 @@ static void registerAndStartServices() {
 #endif
 }
 
-void createTempDirectory() {
-    auto data_path = getDataPath();
-    auto temp_path = std::format("{}/tmp", data_path);
-    if (!file::isDirectory(temp_path)) {
-        if (!file::findOrCreateParentDirectory(temp_path, 0777)) {
-            LOG_E(TAG, "Failed to create %s", data_path.c_str());
-        } else if (mkdir(temp_path.c_str(), 0777) == 0) {
-            LOG_I(TAG, "Created %s", temp_path.c_str());
-        } else {
-            LOG_E(TAG, "Failed to create %s", temp_path.c_str());
-        }
-    } else {
-        LOG_I(TAG, "Found existing %s", temp_path.c_str());
-    }
-}
-
 void prepareFileSystems() {
-    createTempDirectory();
+    char temp_path[64];
+    if (paths_get_temp_path(temp_path, sizeof(temp_path)) != ERROR_NONE) {
+        LOG_E(TAG, "Failed to determine temp path");
+        return;
+    }
+    if (!file::findOrCreateDirectory(temp_path, 0777)) {
+        LOG_E(TAG, "Failed to create %s", temp_path);
+    }
 }
 
 void registerApps() {
@@ -473,7 +470,7 @@ static void onLvglStarted() {
     applySavedTouchCalibration();
 #endif
 
-    memory_print_stats();
+    memory_log_stats();
 }
 
 static void onLvglStopped() {
@@ -507,7 +504,7 @@ static void onLvglStopped() {
 
     module_stop(&lvgl_window_manager_module);
 
-    memory_print_stats();
+    memory_log_stats();
 }
 
 void run(Module* const dtsModules[], const DtsDevice dtsDevices[]) {
@@ -533,6 +530,7 @@ void run(Module* const dtsModules[], const DtsDevice dtsDevices[]) {
     check(module_ensure_started(&pthread_module) == ERROR_NONE);
     // Other libraries
     check(module_ensure_started(&http_module) == ERROR_NONE);
+    check(module_ensure_started(&font_module) == ERROR_NONE);
     check(module_ensure_started(&app_module) == ERROR_NONE);
     check(module_ensure_started(&crypt_module) == ERROR_NONE);
     check(module_ensure_started(&audio_decoder_module) == ERROR_NONE);
