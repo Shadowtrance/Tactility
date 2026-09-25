@@ -82,6 +82,7 @@
 #include <tactility/concurrent/thread.h>
 #include <tactility/device.h>
 #include <tactility/drivers/audio_stream.h>
+#include <tactility/drivers/camera.h>
 #include <tactility/drivers/display.h>
 
 
@@ -200,6 +201,7 @@ namespace app {
     namespace webserversettings { extern const ::AppManifest manifest; }
 #ifdef ESP_PLATFORM
     namespace apwebserver { extern const ::AppManifest manifest; }
+    namespace camera { extern const ::AppManifest manifest; }
     namespace crashdiagnostics { extern const ::AppManifest manifest; }
 #if CONFIG_TT_TDECK_WORKAROUND == 1
     namespace keyboardsettings { extern const ::AppManifest manifest; } // T-Deck only for now
@@ -266,6 +268,9 @@ static void registerInternalApps() {
     app_manager_add(&app::webserversettings::manifest);
 #ifdef ESP_PLATFORM
     app_manager_add(&app::apwebserver::manifest);
+    if (device_exists_of_type(&CAMERA_TYPE)) {
+        app_manager_add(&app::camera::manifest);
+    }
     app_manager_add(&app::crashdiagnostics::manifest);
 #if defined(CONFIG_TT_TDECK_WORKAROUND)
         app_manager_add(&app::keyboardsettings::manifest);

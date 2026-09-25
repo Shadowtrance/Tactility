@@ -18,6 +18,9 @@ struct Sc2356Config {
     /** SCCB I2C address (0x36) */
     uint8_t address;
 
+    /** Clockwise mounting correction applied after the requested display rotation. */
+    uint16_t rotation_offset;
+
     // Reset pin. GPIO_PIN_SPEC_NONE if the sensor's reset is tied high on the board (or otherwise
     // not under our control), in which case start_device skips the reset pulse entirely and goes
     // straight to probing.
