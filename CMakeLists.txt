@@ -63,7 +63,7 @@ if (DEFINED ENV{ESP_IDF_VERSION})
     # Wraps newlib's reentrant syscall stubs, not the plain read()/write()/close() newlib itself.
     # Implements as thin wrappers around them. newlib's own stdio (fflush()'s buffer-flush path in particular)
     # calls these _r stubs directly, bypassing the plain names entirely.
-    # See Modules/app-module/source/stdio_wrap.cpp's own comment for the exact call chain.
+    # See Modules/app-module/source/stdio_wrap_esp32.cpp's own comment for the exact call chain.
     idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=_read_r" APPEND)
     idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=_write_r" APPEND)
     idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=_close_r" APPEND)
@@ -75,12 +75,38 @@ if (DEFINED ENV{ESP_IDF_VERSION})
     idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=getcwd" APPEND)
     idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=chdir" APPEND)
 
+    # fstat()/isatty() go through _fstat_r. poll() and tcgetattr()/tcsetattr() are defined directly (poll.c, vfs_calls.c).
+    # Wrapped so app fds report as polling-capable raw character devices.
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=_fstat_r" APPEND)
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=poll" APPEND)
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=tcgetattr" APPEND)
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=tcsetattr" APPEND)
+
+    # exit() from an app ends only that app (see app_scheduler_exit_current()) instead of aborting.
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=exit" APPEND)
+
     # opendir()/readdir()/closedir() also define the plain names directly (vfs_calls.c).
     # Wrapped so opendir("/") synthesizes a listing of own registered filesystems instead of ENOENT.
     # See Platforms/platform-esp32/source/root_dir.cpp.
     idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=opendir" APPEND)
     idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=readdir" APPEND)
     idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=closedir" APPEND)
+
+    # mkdir() is an alias in vfs_calls.c. Wrapped so an existing mount root reports EEXIST.
+    # See Platforms/platform-esp32/source/mkdir.cpp.
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=mkdir" APPEND)
+
+    # Path-based VFS calls are aliases in vfs_calls.c. Wrapped so a NULL path fails with EFAULT instead of crashing.
+    # See Platforms/platform-esp32/source/vfs_null_path.cpp.
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=_open_r" APPEND)
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=_stat_r" APPEND)
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=_link_r" APPEND)
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=_unlink_r" APPEND)
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=_rename_r" APPEND)
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=truncate" APPEND)
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=access" APPEND)
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=utime" APPEND)
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=rmdir" APPEND)
 
     idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=lv_button_create" APPEND)
     idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=lv_dropdown_create" APPEND)

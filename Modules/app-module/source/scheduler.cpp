@@ -15,19 +15,44 @@
 
 #include <tactility/error.h>
 #include <tactility/log.h>
+#include <tactility/delay.h>
 #include <tactility/memory.h>
+#include <tactility/time.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <new>
 
 constexpr auto* TAG = "app_scheduler";
 
-// Slot 0 is reserved by ESP-IDF's pthread API (see TactilityKernel's Thread wrapper for the
-// same convention/comment) - app tasks use slot 1 to stash their own app_instance_id, so any
-// code running on an app's own task can retrieve it via app_scheduler_current_app_id() without
-// needing it threaded through as a parameter.
+// The app instance whose task this thread is, so code running on an app's own task can retrieve it via
+// app_scheduler_current_app_id() without it being threaded through as a parameter.
+#ifdef ESP_PLATFORM
+// A FreeRTOS task-local slot rather than thread_local, which faults before the scheduler starts
+// (e.g. a write() during early boot). Slot 0 is reserved by ESP-IDF's pthread API.
 constexpr size_t APP_INSTANCE_ID_THREAD_SLOT_INDEX = 1;
+
+AppInstanceId get_current_app_id() {
+    return reinterpret_cast<uintptr_t>(pvTaskGetThreadLocalStoragePointer(nullptr, APP_INSTANCE_ID_THREAD_SLOT_INDEX));
+}
+
+void set_current_app_id(AppInstanceId app_instance_id) {
+    vTaskSetThreadLocalStoragePointer(nullptr, APP_INSTANCE_ID_THREAD_SLOT_INDEX, reinterpret_cast<void*>(static_cast<uintptr_t>(app_instance_id)));
+}
+#else
+// thread_local rather than a FreeRTOS task-local slot: on the simulator, that slot is read from whichever
+// task is scheduled, even by a foreign thread (e.g. SDL's), which must never be mistaken for an app.
+thread_local AppInstanceId current_app_id = 0;
+
+AppInstanceId get_current_app_id() {
+    return current_app_id;
+}
+
+void set_current_app_id(AppInstanceId app_instance_id) {
+    current_app_id = app_instance_id;
+}
+#endif
 
 // Matches TactilityKernel's Thread wrapper's THREAD_PRIORITY_NORMAL.
 constexpr UBaseType_t APP_TASK_PRIORITY = 4;
@@ -95,6 +120,41 @@ void set_state(AppInstanceId app_instance_id, AppInstanceState state) {
     }
     mutex_unlock(&ledger.mutex);
 }
+
+// Set while this thread is an app instance's task running AppLoaderApi::run().
+thread_local TaskContext* current_task_context = nullptr;
+
+#ifndef ESP_PLATFORM
+// On the simulator, a task ending itself unwinds its whole stack (pthread_exit()). After exit(), that
+// stack still holds the app's own frames, so its binary may only be unloaded once the unwind has
+// passed them: this guard lives in app_task_main()'s frame and unloads when the unwind destroys it.
+struct DeferredUnload {
+    const AppLoaderApi* loader = nullptr;
+    void* runtime = nullptr;
+
+    ~DeferredUnload() {
+        if (loader != nullptr) {
+            loader->unload(runtime);
+            pending_deferred_unloads.fetch_sub(1, std::memory_order_release);
+        }
+    }
+
+    // A binary that is still loaded would be reused by the next load of the same path, globals included
+    static inline std::atomic<int> pending_deferred_unloads { 0 };
+};
+
+thread_local DeferredUnload* current_deferred_unload = nullptr;
+
+constexpr TickType_t DEFERRED_UNLOAD_WAIT_TICKS = pdMS_TO_TICKS(1000);
+
+void wait_for_deferred_unloads() {
+    const TickType_t start = get_ticks();
+    while (DeferredUnload::pending_deferred_unloads.load(std::memory_order_acquire) > 0
+        && get_timeout_remaining_ticks(DEFERRED_UNLOAD_WAIT_TICKS, start) > 0) {
+        delay_ticks(1);
+    }
+}
+#endif
 
 void set_task(AppInstanceId app_instance_id, TaskHandle_t task) {
     auto& ledger = app_ledger();
@@ -194,11 +254,17 @@ void deliver_result_to_parent_if_any(AppInstanceId app_instance_id, int32_t resu
     }
 }
 
+void finish_app_task(TaskContext* ctx, int32_t result, bool exiting);
+
 void app_task_main(void* context) {
     auto* ctx = static_cast<TaskContext*>(context);
+#ifndef ESP_PLATFORM
+    DeferredUnload deferred_unload;
+    current_deferred_unload = &deferred_unload;
+#endif
 
-    check(pvTaskGetThreadLocalStoragePointer(nullptr, APP_INSTANCE_ID_THREAD_SLOT_INDEX) == nullptr);
-    vTaskSetThreadLocalStoragePointer(nullptr, APP_INSTANCE_ID_THREAD_SLOT_INDEX, reinterpret_cast<void*>(static_cast<uintptr_t>(ctx->app_instance_id)));
+    check(get_current_app_id() == 0);
+    set_current_app_id(ctx->app_instance_id);
 
     // Debug logging so it's invisible by default
     // When logging happens, it can distort the application stdout, which breaks apps that use
@@ -207,15 +273,33 @@ void app_task_main(void* context) {
 
     set_state(ctx->app_instance_id, APP_INSTANCE_STATE_ACTIVE);
 
+    current_task_context = ctx;
     int32_t result = ctx->loader->run(ctx->runtime, ctx->app_instance_id, app_arguments_count_null_terminated(ctx->argv), ctx->argv);
+    current_task_context = nullptr;
 
+    finish_app_task(ctx, result, false);
+}
+
+// Everything after an app's AppLoaderApi::run() returned, or after it called exit(). Ends the calling task.
+void finish_app_task(TaskContext* ctx, int32_t result, bool exiting) {
     // The platform might buffer stdout (e.g. esp-idf with newlib)
     // Do a manual flush to ensure data has been written:
     fflush(stdout);
 
-    vTaskSetThreadLocalStoragePointer(nullptr, APP_INSTANCE_ID_THREAD_SLOT_INDEX, nullptr);
+    set_current_app_id(0);
 
+#ifndef ESP_PLATFORM
+    if (exiting) {
+        current_deferred_unload->loader = ctx->loader;
+        current_deferred_unload->runtime = ctx->runtime;
+        DeferredUnload::pending_deferred_unloads.fetch_add(1, std::memory_order_release);
+    } else {
+        ctx->loader->unload(ctx->runtime);
+    }
+#else
+    (void)exiting;
     ctx->loader->unload(ctx->runtime);
+#endif
 
     deliver_result_to_parent_if_any(ctx->app_instance_id, result);
 
@@ -283,6 +367,9 @@ error_t app_scheduler_start(AppInstanceId app_instance_id, const AppStartContext
     }
 
     void* runtime = nullptr;
+#ifndef ESP_PLATFORM
+    wait_for_deferred_unloads();
+#endif
     error_t load_result = loader->load(location, &runtime);
     if (load_result != ERROR_NONE) {
         LOG_E(TAG, "[instance %lu] Failed to load app: %s", app_instance_id, error_to_string(load_result));
@@ -454,8 +541,20 @@ error_t app_scheduler_stop(AppInstanceId app_instance_id, TickType_t join_timeou
 }
 
 AppInstanceId app_scheduler_current_app_id(void) {
-    void* value = pvTaskGetThreadLocalStoragePointer(nullptr, APP_INSTANCE_ID_THREAD_SLOT_INDEX);
-    return reinterpret_cast<uintptr_t>(value);
+    return get_current_app_id();
+}
+
+void app_scheduler_exit_current(int32_t status) {
+    // Checked first: thread_local can't be read before the scheduler starts on ESP32
+    if (get_current_app_id() == 0) {
+        return;
+    }
+    TaskContext* ctx = current_task_context;
+    if (ctx == nullptr) {
+        return;
+    }
+    current_task_context = nullptr;
+    finish_app_task(ctx, status, true);
 }
 
 } // extern "C"

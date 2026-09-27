@@ -9,6 +9,7 @@
 #include <ctime>
 #include <ctype.h>
 #include <locale.h>
+#include <regex.h>
 
 extern "C" {
 
@@ -147,6 +148,9 @@ static const ModuleSymbol SYMBOLS[] = {
     DEFINE_MODULE_SYMBOL_SIGNATURE(strrchr, const char* (*)(const char*, int)),
     DEFINE_MODULE_SYMBOL_SIGNATURE(strpbrk, const char* (*)(const char*, const char*)),
     DEFINE_MODULE_SYMBOL_SIGNATURE(memchr, const void* (*)(const void*, int, size_t)),
+#if !defined(__APPLE__)
+    DEFINE_MODULE_SYMBOL_SIGNATURE(memrchr, const void* (*)(const void*, int, size_t)),
+#endif
     DEFINE_MODULE_SYMBOL(strerror),
     DEFINE_MODULE_SYMBOL(strtod),
     DEFINE_MODULE_SYMBOL(strtol),
@@ -155,6 +159,7 @@ static const ModuleSymbol SYMBOLS[] = {
     DEFINE_MODULE_SYMBOL(strncat),
     DEFINE_MODULE_SYMBOL(strspn),
     DEFINE_MODULE_SYMBOL(strcoll),
+    DEFINE_MODULE_SYMBOL(strtok),
     DEFINE_MODULE_SYMBOL(memset),
     DEFINE_MODULE_SYMBOL(memcpy),
     DEFINE_MODULE_SYMBOL(memcmp),
@@ -180,6 +185,10 @@ static const ModuleSymbol SYMBOLS[] = {
     DEFINE_MODULE_SYMBOL(toupper),
     // locale.h
     DEFINE_MODULE_SYMBOL(localeconv),
+    // regex.h
+    DEFINE_MODULE_SYMBOL(regcomp),
+    DEFINE_MODULE_SYMBOL(regexec),
+    DEFINE_MODULE_SYMBOL(regfree),
     MODULE_SYMBOL_TERMINATOR
 };
 

@@ -14,6 +14,10 @@ namespace Shell {
 struct Command {
     const char* name;
     const char* help;
+    /** The app manifest this command starts. Equals name for a built-in app. */
+    const char* id;
+    /** Binary to run for an installed app, nullptr for a built-in one. */
+    const char* path;
 };
 
 /** Registers the builtin command set. */
