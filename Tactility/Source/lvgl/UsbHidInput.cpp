@@ -182,6 +182,31 @@ static void keyboard_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
     data->state = LV_INDEV_STATE_RELEASED;
 }
 
+// The pointer indev only exists while a mouse is connected, so apps can tell whether pointer input is available.
+static void addMouseIndev(UsbHidInputCtx* ctx) {
+    if (ctx->mouse_indev != nullptr) {
+        return;
+    }
+    ctx->mouse_indev = lv_indev_create();
+    lv_indev_set_type(ctx->mouse_indev, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(ctx->mouse_indev, mouse_read_cb);
+    lv_indev_set_user_data(ctx->mouse_indev, ctx);
+    if (ctx->mouse_cursor != nullptr) {
+        lv_indev_set_cursor(ctx->mouse_indev, ctx->mouse_cursor);
+        lv_obj_remove_flag(ctx->mouse_cursor, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void removeMouseIndev(UsbHidInputCtx* ctx) {
+    if (ctx->mouse_indev != nullptr) {
+        lv_indev_delete(ctx->mouse_indev);
+        ctx->mouse_indev = nullptr;
+    }
+    if (ctx->mouse_cursor != nullptr) {
+        lv_obj_add_flag(ctx->mouse_cursor, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void usbHidInputTask(void* arg) {
     auto* ctx = static_cast<UsbHidInputCtx*>(arg);
     LOG_I(TAG, "started");
@@ -191,14 +216,6 @@ static void usbHidInputTask(void* arg) {
     // live in SPIRAM, and touching flash I/O from a SPIRAM stack crashes when the flash cache
     // gets disabled mid-read.
     lvgl_lock();
-
-    ctx->mouse_indev = lv_indev_create();
-    lv_indev_set_type(ctx->mouse_indev, LV_INDEV_TYPE_POINTER);
-    lv_indev_set_read_cb(ctx->mouse_indev, mouse_read_cb);
-    lv_indev_set_user_data(ctx->mouse_indev, ctx);
-    if (ctx->mouse_cursor != nullptr) {
-        lv_indev_set_cursor(ctx->mouse_indev, ctx->mouse_cursor);
-    }
 
     ctx->kb_indev = lv_indev_create();
     lv_indev_set_type(ctx->kb_indev, LV_INDEV_TYPE_KEYPAD);
@@ -282,17 +299,17 @@ static void usbHidInputTask(void* arg) {
             break;
         case USB_HID_EVENT_MOUSE_CONNECTED:
             ctx->mouse_connected = true;
-            if (ctx->mouse_cursor && lvgl_try_lock(pdMS_TO_TICKS(200))) {
-                lv_obj_remove_flag(ctx->mouse_cursor, LV_OBJ_FLAG_HIDDEN);
-                lvgl_unlock();
-            }
+            // Blocking lock: a skipped connect would leave the mouse without an indev
+            lvgl_lock();
+            addMouseIndev(ctx);
+            lvgl_unlock();
             break;
         case USB_HID_EVENT_MOUSE_DISCONNECTED:
             ctx->mouse_connected = false;
-            if (ctx->mouse_cursor && lvgl_try_lock(pdMS_TO_TICKS(200))) {
-                lv_obj_add_flag(ctx->mouse_cursor, LV_OBJ_FLAG_HIDDEN);
-                lvgl_unlock();
-            }
+            ctx->mouse_btn1.store(false);
+            lvgl_lock();
+            removeMouseIndev(ctx);
+            lvgl_unlock();
             break;
         default:
             break;
