@@ -1,0 +1,7 @@
+dependencies:
+- Platforms/platform-esp32
+- Drivers/bm8563-module
+- Drivers/gt911-module
+- Drivers/lilygo-t5s3-epd-module
+dts: lilygo,t5-epd47-s3.dts
+dts-only: true
