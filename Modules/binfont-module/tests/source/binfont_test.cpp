@@ -7,6 +7,7 @@
 #include <graphics/pixel_buffer.h>
 #include <tactility/memory.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -298,6 +299,58 @@ TEST_CASE("binfont_generate rasterizes a TTF close to lv_font_conv") {
 
     binfont_close(generated);
     binfont_close(reference);
+}
+
+TEST_CASE("binfont_generate includes every codepoint of the TTF without a codepoint list") {
+    const BinFontGeneratorConfig config = {
+        .ttf_path = BINFONT_TEST_TEXT_TTF,
+        .size = 14,
+        .bpp = 2,
+        .codepoints = nullptr,
+        .codepoint_count = 0,
+    };
+    uint8_t* data = nullptr;
+    size_t size = 0;
+    REQUIRE(binfont_generate(&config, &data, &size) == ERROR_NONE);
+    BinFont* font = nullptr;
+    REQUIRE(binfont_open_memory(data, size, true, &font) == ERROR_NONE);
+
+    BinFontGlyph glyph;
+    for (uint32_t codepoint : { 0x20u, 0x41u, 0x7Eu, 0xE9u, 0xFFu, 0x2026u, 0x20ACu }) {
+        CAPTURE(codepoint);
+        CHECK(binfont_get_glyph(font, codepoint, &glyph));
+    }
+    // Not in the subset
+    CHECK_FALSE(binfont_get_glyph(font, 0x0100, &glyph));
+    CHECK_FALSE(binfont_get_glyph(font, 0x0416, &glyph));
+
+    binfont_close(font);
+}
+
+TEST_CASE("binfont_get_ttf_codepoints lists the character map of a TTF") {
+    uint32_t* codepoints = nullptr;
+    size_t count = 0;
+    REQUIRE(binfont_get_ttf_codepoints(BINFONT_TEST_TEXT_TTF, &codepoints, &count) == ERROR_NONE);
+    CHECK(count > 190);
+    CHECK(std::find(codepoints, codepoints + count, 0x41u) != codepoints + count);
+    CHECK(std::find(codepoints, codepoints + count, 0x20ACu) != codepoints + count);
+    CHECK(std::find(codepoints, codepoints + count, 0x0416u) == codepoints + count);
+    memory_free(codepoints);
+
+    CHECK_EQ(binfont_get_ttf_codepoints(BINFONT_TEST_FIXTURES_DIR "/missing.ttf", &codepoints, &count), ERROR_NOT_FOUND);
+}
+
+TEST_CASE("binfont_generate rejects a codepoint count without codepoints") {
+    const BinFontGeneratorConfig config = {
+        .ttf_path = BINFONT_TEST_TEXT_TTF,
+        .size = 14,
+        .bpp = 2,
+        .codepoints = nullptr,
+        .codepoint_count = 5,
+    };
+    uint8_t* data = nullptr;
+    size_t size = 0;
+    CHECK_EQ(binfont_generate(&config, &data, &size), ERROR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("binfont_generate fails for a missing TTF") {

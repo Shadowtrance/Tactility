@@ -21,7 +21,7 @@
 #include <Tactility/TactilityPrivate.h>
 #include <Tactility/app/boot/BootScreen.h>
 #include <Tactility/hal/usb/Usb.h>
-#include <Tactility/lvgl/IconFonts.h>
+#include <Tactility/lvgl/Fonts.h>
 #include <Tactility/lvgl/Lvgl.h>
 #include <Tactility/settings/BootSettings.h>
 #include <Tactility/settings/DisplaySettings.h>
@@ -269,8 +269,8 @@ bool bootInit(TickType_t startTime) {
         return false;
     }
 
-    LOG_I(TAG, "Loading icon fonts");
-    lvgl::initIconFonts();
+    LOG_I(TAG, "Loading fonts");
+    lvgl::loadFonts(lvgl::loadFontConfiguration());
 
     screen.end();
 
