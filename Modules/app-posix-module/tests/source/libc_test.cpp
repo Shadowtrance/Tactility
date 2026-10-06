@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// libc calls made by an app instance (fstat, termios, poll, printf, exit), routed by this module's
-// libc wraps (../source/stdio_wrap.cpp) to the app instance's own fds and lifecycle.
+// libc calls made by an app instance (fstat, termios, poll, printf, exit, path-based calls), routed by this
+// module's libc wraps (../source/stdio_wrap.cpp) to the app instance's own fds, cwd and lifecycle.
 #include "doctest.h"
 
 #include <app/event.h>
@@ -15,7 +15,10 @@
 #include <service/manager.h>
 
 #include <tactility/delay.h>
+#include <tactility/paths.h>
 
+#include <dirent.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <sys/ioctl.h>
@@ -28,9 +31,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <vector>
 
 extern ServiceManifest app_internal_loader_service_manifest;
+extern ServiceManifest loader_service_manifest;
 
 namespace {
 
@@ -204,6 +209,19 @@ int32_t icrnl_app_main(int, char*[]) {
     tcsetattr(STDIN_FILENO, TCSANOW, &t);
     g_icrnl_first_done.store(true, std::memory_order_release);
     g_icrnl_second_read.store(read(STDIN_FILENO, &c, 1) == 1 ? c : -1, std::memory_order_release);
+    return 0;
+}
+
+// Set by the app below: whether a relative path opened by code built into the simulator resolved against the process's cwd
+std::atomic<int> g_builtin_relative_open { -1 };
+const char* g_builtin_relative_path = nullptr;
+
+int32_t builtin_relative_path_app_main(int, char*[]) {
+    FILE* file = fopen(g_builtin_relative_path, "r");
+    g_builtin_relative_open.store(file != nullptr ? 1 : 0, std::memory_order_release);
+    if (file != nullptr) {
+        fclose(file);
+    }
     return 0;
 }
 
@@ -691,4 +709,60 @@ TEST_CASE("app_signal_send() rejects an out-of-range signal and an unknown app")
     CHECK_EQ(app_signal_send(1, 0), ERROR_INVALID_ARGUMENT);
     CHECK_EQ(app_signal_send(1, 32), ERROR_INVALID_ARGUMENT);
     CHECK_EQ(app_signal_send(0x7FFFFFF0, SIGTERM), ERROR_NOT_FOUND);
+}
+
+TEST_CASE("Path-based calls of an app binary resolve relative paths against the app's own cwd") {
+    if (service_manager_find_instance(APP_LOADER_PATH_SERVICE_ID) == nullptr) {
+        service_manager_add(&loader_service_manifest, /*auto_start=*/true);
+    }
+    char directory_template[] = "/tmp/tactility-paths-XXXXXX";
+    REQUIRE(mkdtemp(directory_template) != nullptr);
+    const std::string result_path = std::string(directory_template) + ".result";
+
+    const char* argv[] = { PATHS_FIXTURE_APP_PATH, directory_template, result_path.c_str() };
+    AppLocation location { APP_LOCATION_PATH, const_cast<char*>(PATHS_FIXTURE_APP_PATH) };
+    AppStartContext context = app_start_context_for_location(location);
+    app_start_context_set_arguments_ext(&context, 3, argv);
+    AppInstanceId instance_id = 0;
+    REQUIRE_EQ(app_start_with_context(&context, &instance_id), ERROR_NONE);
+    REQUIRE(wait_for_state(instance_id, APP_INSTANCE_STATE_STOPPED, 2000));
+
+    int failed_check = -1;
+    FILE* result = fopen(result_path.c_str(), "r");
+    REQUIRE_NE(result, nullptr);
+    CHECK_EQ(fscanf(result, "%d", &failed_check), 1);
+    fclose(result);
+    CHECK_EQ(failed_check, 0);
+
+    const std::string kept_path = std::string(directory_template) + "/kept.txt";
+    CHECK_EQ(access(kept_path.c_str(), F_OK), 0);
+    // Outside an app, relative paths still resolve against the process's own cwd
+    CHECK_NE(access("kept.txt", F_OK), 0);
+
+    unlink(kept_path.c_str());
+    unlink(result_path.c_str());
+    rmdir(directory_template);
+}
+
+TEST_CASE("Path-based calls of code built into the simulator keep resolving against the process's cwd") {
+    ensure_memory_loader_registered();
+    char path_template[] = "tactility-builtin-path-XXXXXX";
+    const int fd = mkstemp(path_template);
+    REQUIRE_NE(fd, -1);
+    close(fd);
+    g_builtin_relative_path = path_template;
+    g_builtin_relative_open.store(-1, std::memory_order_relaxed);
+
+    AppManifest manifest { "test.libc.builtin_paths", "Paths", APP_CATEGORY_USER, { APP_LOCATION_MEMORY, reinterpret_cast<void*>(builtin_relative_path_app_main) } };
+    REQUIRE_EQ(app_manager_add(&manifest), ERROR_NONE);
+    AppInstanceId instance_id = 0;
+    AppStartContext context;
+    REQUIRE_EQ(app_start_context_from_id("test.libc.builtin_paths", &context), ERROR_NONE);
+    REQUIRE_EQ(app_start_with_context(&context, &instance_id), ERROR_NONE);
+    REQUIRE(wait_for_state(instance_id, APP_INSTANCE_STATE_STOPPED, 2000));
+
+    CHECK_EQ(g_builtin_relative_open.load(std::memory_order_acquire), 1);
+
+    unlink(path_template);
+    app_manager_remove("test.libc.builtin_paths");
 }

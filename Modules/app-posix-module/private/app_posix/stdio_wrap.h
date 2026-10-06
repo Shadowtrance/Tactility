@@ -4,6 +4,8 @@
 #include <cstdarg>
 #include <cstddef>
 #include <cstdio>
+#include <dirent.h>
+#include <fcntl.h>
 #include <sys/poll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -13,6 +15,21 @@
 #include <termios.h>
 #include <unistd.h>
 
+
+/**
+ * While alive, the path-based wraps called on this thread treat the call as made by the app's own code
+ * when @a caller lies inside its image, and resolve its relative paths against the app's cwd (see app/libc.h).
+ * Code built into the simulator keeps the process's cwd, which its relative mount points (e.g. "system") rely on.
+ */
+class AppPathCallScope {
+    bool previous;
+
+public:
+    explicit AppPathCallScope(const void* caller);
+    ~AppPathCallScope();
+    AppPathCallScope(const AppPathCallScope&) = delete;
+    AppPathCallScope& operator=(const AppPathCallScope&) = delete;
+};
 
 // Implemented in stdio_wrap.cpp, installed under the real names by stdio_wrap_elf.cpp or stdio_wrap_apple.cpp.
 extern "C" {
@@ -33,6 +50,22 @@ pid_t __wrap_getppid();
 int __wrap_usleep(useconds_t usec);
 unsigned int __wrap_sleep(unsigned int seconds);
 [[noreturn]] void __wrap_exit(int status);
+
+int __wrap_open(const char* path, int flags, ...);
+FILE* __wrap_fopen(const char* path, const char* mode);
+int __wrap_stat(const char* path, struct stat* st);
+int __wrap_lstat(const char* path, struct stat* st);
+int __wrap_access(const char* path, int mode);
+int __wrap_unlink(const char* path);
+int __wrap_remove(const char* path);
+int __wrap_rename(const char* src, const char* dst);
+int __wrap_mkdir(const char* path, mode_t mode);
+int __wrap_rmdir(const char* path);
+DIR* __wrap_opendir(const char* path);
+int __real_fclose(FILE* file);
+FILE* __real_fdopen(int fd, const char* mode);
+int __real_closedir(DIR* dir);
+int __wrap_truncate(const char* path, off_t length);
 
 int __wrap_vprintf(const char* format, va_list args);
 int __wrap_printf(const char* format, ...);

@@ -6,6 +6,7 @@
 #include <app/private/event.h>
 #include <app/private/fd_table.h>
 #include <app/private/ledger.h>
+#include <app/private/resources.h>
 #include <app/private/scheduler.h>
 #include <app/private/stream_internal.h>
 #include <app/scheduler.h>
@@ -88,6 +89,8 @@ struct TaskContext {
     // Live allocations of the app's own code, see app/memory.h. Only updated by the app's own task.
     int32_t allocCount;
     int64_t allocBytes;
+    // APP_MANIFEST_FLAG_CLEANUP: the instance's resources are tracked (see app/private/resources.h)
+    bool cleanup;
 };
 
 struct ReaperContext {
@@ -142,10 +145,15 @@ thread_local TaskContext* current_task_context = nullptr;
 struct DeferredUnload {
     const AppLoaderApi* loader = nullptr;
     void* runtime = nullptr;
+    // Non-zero when the instance's resources are released after unloading (see app/private/resources.h)
+    AppInstanceId cleanup_instance_id = 0;
 
     ~DeferredUnload() {
         if (loader != nullptr) {
             loader->unload(runtime);
+            if (cleanup_instance_id != 0) {
+                app_resources_release(cleanup_instance_id);
+            }
             pending_deferred_unloads.fetch_sub(1, std::memory_order_release);
         }
     }
@@ -299,20 +307,33 @@ void finish_app_task(TaskContext* ctx, int32_t result, bool exiting) {
 
     set_current_app_id(0);
 
+    // Tasks the app created may still be running its code. Its memory and files are only released after unloading,
+    // since its static destructors can still free and close them.
+    if (ctx->cleanup) {
+        app_resources_release_tasks(ctx->app_instance_id);
+    }
+
 #ifndef ESP_PLATFORM
     if (exiting) {
         current_deferred_unload->loader = ctx->loader;
         current_deferred_unload->runtime = ctx->runtime;
+        current_deferred_unload->cleanup_instance_id = ctx->cleanup ? ctx->app_instance_id : 0;
         DeferredUnload::pending_deferred_unloads.fetch_add(1, std::memory_order_release);
     } else {
         ctx->loader->unload(ctx->runtime);
+        if (ctx->cleanup) {
+            app_resources_release(ctx->app_instance_id);
+        }
     }
 #else
     (void)exiting;
     ctx->loader->unload(ctx->runtime);
+    if (ctx->cleanup) {
+        app_resources_release(ctx->app_instance_id);
+    }
 #endif
 
-    if (ctx->allocCount > 0 || ctx->allocBytes > 0) {
+    if (!ctx->cleanup && (ctx->allocCount > 0 || ctx->allocBytes > 0)) {
         LOG_W(TAG, "[instance %lu] %ld allocations (%lld bytes) not freed", ctx->app_instance_id, static_cast<long>(ctx->allocCount), static_cast<long long>(ctx->allocBytes));
     }
 
@@ -364,6 +385,18 @@ void finish_app_task(TaskContext* ctx, int32_t result, bool exiting) {
 #else
     vTaskDelete(nullptr);
 #endif
+}
+
+bool has_cleanup_flag(const char* manifest_id) {
+    if (manifest_id[0] == '\0') {
+        return false;
+    }
+    auto& ledger = app_ledger();
+    mutex_lock(&ledger.mutex);
+    auto iterator = ledger.manifests.find(manifest_id);
+    const bool cleanup = iterator != ledger.manifests.end() && (iterator->second->flags & APP_MANIFEST_FLAG_CLEANUP) != 0;
+    mutex_unlock(&ledger.mutex);
+    return cleanup;
 }
 
 } // namespace
@@ -466,6 +499,7 @@ error_t app_scheduler_start(AppInstanceId app_instance_id, const AppStartContext
         .taskTcb = task_tcb,
         .allocCount = 0,
         .allocBytes = 0,
+        .cleanup = false,
     };
 
     if (context == nullptr) {
@@ -479,6 +513,13 @@ error_t app_scheduler_start(AppInstanceId app_instance_id, const AppStartContext
         loader->unload(runtime);
         app_arguments_free(argc, argv);
         return ERROR_OUT_OF_MEMORY;
+    }
+
+    if (has_cleanup_flag(start_context->id)) {
+        context->cleanup = app_resources_register(app_instance_id) == ERROR_NONE;
+        if (!context->cleanup) {
+            LOG_W(TAG, "[instance %lu] Failed to track resources", app_instance_id);
+        }
     }
 
     char task_name[16];
@@ -496,6 +537,10 @@ error_t app_scheduler_start(AppInstanceId app_instance_id, const AppStartContext
     }
 #endif
     if (task_handle == nullptr) {
+        if (context->cleanup) {
+            app_resources_release_tasks(app_instance_id);
+            app_resources_release(app_instance_id);
+        }
         delete context;
 #ifdef ESP_PLATFORM
         memory_free(task_tcb);
@@ -559,6 +604,10 @@ error_t app_scheduler_stop(AppInstanceId app_instance_id, TickType_t join_timeou
 
 AppInstanceId app_scheduler_current_app_id(void) {
     return get_current_app_id();
+}
+
+void app_scheduler_set_current_app_id(AppInstanceId app_instance_id) {
+    set_current_app_id(app_instance_id);
 }
 
 void app_memory_record_alloc(size_t size) {
