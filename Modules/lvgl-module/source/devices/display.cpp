@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#define LV_USE_PRIVATE_API 1 // For the lv_theme_t declaration
-
 #include <lvgl/devices/display.h>
 
+#include <lvgl/lvgl.h>
 #include <lvgl/ppa.h>
+#include <lvgl/theme_private.h>
 
 #include <tactility/device.h>
 #include <tactility/driver.h>
@@ -11,6 +11,7 @@
 #include <tactility/log.h>
 
 #include <lvgl/devices/device_context.h>
+
 
 #include <stdlib.h>
 
@@ -20,37 +21,13 @@
 
 constexpr auto* TAG = "lvgl_display";
 
-#if LV_USE_THEME_MONO
-
-static lv_style_t mono_button_style;
-static bool mono_button_style_initialized = false;
-static lv_theme_t mono_theme_extension;
-
-static void mono_theme_extension_apply(lv_theme_t*, lv_obj_t* obj) {
-    if (lv_obj_check_type(obj, &lv_button_class)) {
-        lv_obj_add_style(obj, &mono_button_style, LV_PART_MAIN | LV_STATE_DEFAULT);
-    }
+// The themes are generated with LSS from Modules/lvgl-module/themes/*.lss
+static void lvgl_display_apply_theme(lv_display_t* disp, struct Device* device, lv_color_format_t color_format) {
+    bool is_mono_display = color_format == LV_COLOR_FORMAT_I1 || color_format == LV_COLOR_FORMAT_L8;
+    // Slow-refresh panels (e-paper) can't show animations
+    bool supports_animations = !display_has_capability(device, DISPLAY_CAPABILITY_SLOW_REFRESH);
+    lv_display_set_theme(disp, lvgl_theme_init_for_display(disp, is_mono_display, supports_animations));
 }
-
-// The mono theme draws a border around every button. This removes it in the default state, keeping the pressed border and focus outline.
-static void lvgl_display_extend_mono_theme(lv_display_t* disp) {
-    if (!mono_button_style_initialized) {
-        lv_style_init(&mono_button_style);
-        lv_style_set_border_width(&mono_button_style, 0);
-        mono_button_style_initialized = true;
-    }
-    // LVGL prefers the default and simple themes when they are also enabled, so only the mono theme itself is extended
-    lv_theme_t* mono_theme = lv_display_get_theme(disp);
-    if (mono_theme == nullptr || mono_theme != lv_theme_mono_get()) {
-        return;
-    }
-    mono_theme_extension = *mono_theme;
-    lv_theme_set_parent(&mono_theme_extension, mono_theme);
-    lv_theme_set_apply_cb(&mono_theme_extension, mono_theme_extension_apply);
-    lv_display_set_theme(disp, &mono_theme_extension);
-}
-
-#endif
 
 struct LvglDisplayCtx {
     void* buf1;
@@ -504,9 +481,7 @@ error_t lvgl_display_add(struct Device* device, const struct LvglDisplayConfig* 
         return ERROR_OUT_OF_MEMORY;
     }
 
-#if LV_USE_THEME_MONO
-    lvgl_display_extend_mono_theme(disp);
-#endif
+    lvgl_display_apply_theme(disp, device, lv_color_format);
 
     ctx->render_mode = render_mode;
     lv_display_set_color_format(disp, lv_color_format);

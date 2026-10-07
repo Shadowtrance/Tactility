@@ -131,6 +131,7 @@ MemoryBarWidgets createMemoryBar(lv_obj_t* parent, const char* label) {
     lv_obj_set_style_pad_all(container, 0, LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(container, 0, LV_STATE_DEFAULT);
     lv_obj_set_flex_flow(container, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_bg_opa(container, 0, LV_STATE_DEFAULT);
 
     auto* left_label = lv_label_create(container);
@@ -144,12 +145,6 @@ MemoryBarWidgets createMemoryBar(lv_obj_t* parent, const char* label) {
     auto* bottom_label = lv_label_create(parent);
     lv_obj_set_width(bottom_label, LV_PCT(100));
     lv_obj_set_style_text_align(bottom_label, LV_TEXT_ALIGN_RIGHT, 0);
-
-    if (lvgl_get_ui_density() == LVGL_UI_DENSITY_COMPACT) {
-        lv_obj_set_style_pad_bottom(bottom_label, 2, LV_STATE_DEFAULT);
-    } else {
-        lv_obj_set_style_pad_bottom(bottom_label, 12, LV_STATE_DEFAULT);
-    }
 
     return {bar, bottom_label};
 }

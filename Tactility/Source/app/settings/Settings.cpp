@@ -9,7 +9,7 @@
 #include <Tactility/app/AppGrid.h>
 
 #include <lvgl/icons/shared.h>
-#include <lvgl/widgets/toolbar.h>
+#include <lvgl/theme.h>
 #include <tactility/check.h>
 
 #include <lvgl.h>
@@ -55,7 +55,7 @@ const char* appIcon(const ::AppManifest* manifest) {
 }
 
 void onAppClicked(const ::AppManifest& manifest, void*) {
-    // Fire-and-forget top-level navigation, same as AppList's own app-launch buttons.
+    // Fire-and-forget top-level navigation, same as the Launcher's own app-launch buttons.
     uint32_t instanceId = 0;
     // Re-resolved by id against the live ledger, not the (possibly stale) cached manifest above:
     // fails gracefully if the app was uninstalled since this button was built, instead of handing
@@ -109,9 +109,12 @@ void createWidgets(lv_obj_t* parent, void* userData) {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(parent, 0, LV_STATE_DEFAULT);
 
-    auto* toolbar = lvgl_toolbar_create(parent, "Settings");
-    lvgl_toolbar_set_nav_action(toolbar, LV_SYMBOL_CLOSE, onBackPressed, ctx);
-    ctx->grid.createWidgets(parent, toolbar);
+    if (!lvgl_theme_is_mono()) {
+        ctx->grid.setIconColor(AppGrid::IconColor::Secondary);
+    }
+    ctx->grid.setSwipeNavigation(true);
+    ctx->grid.createWidgetsWithBottomBar(parent);
+    ctx->grid.addBarButton(LVGL_ICON_SHARED_CLOSE, onBackPressed, ctx);
 }
 
 int32_t appMain(int argc, char* argv[]) {
@@ -154,7 +157,7 @@ extern const ::AppManifest manifest = {
     .category = APP_CATEGORY_SYSTEM,
     .location = { .type = APP_LOCATION_MEMORY, .location = reinterpret_cast<void*>(appMain) },
     .flags = APP_MANIFEST_FLAG_HIDDEN,
-    .stack = { .depth = 4000, .desired_memory_capability = 0 },
+    .stack = { .depth = 5120, .desired_memory_capability = 0 },
 };
 
 } // namespace
