@@ -1,0 +1,270 @@
+/dts-v1/;
+
+#include <tactility/bindings/root.h>
+#include <tactility/bindings/battery_sense.h>
+#include <tactility/bindings/esp32_ble.h>
+#include <tactility/bindings/esp32_gpio.h>
+#include <tactility/bindings/esp32_grove.h>
+#include <tactility/bindings/esp32_i2c_master.h>
+#include <tactility/bindings/esp32_i2s.h>
+#include <tactility/bindings/esp32_sdmmc.h>
+#include <tactility/bindings/esp32_spi.h>
+#include <tactility/bindings/esp32_uart.h>
+#include <tactility/bindings/esp32_usbdevice.h>
+#include <tactility/bindings/esp32_wifi_pinned.h>
+#include <tactility/bindings/gpio_hog.h>
+#include <bindings/tca95xx.h>
+#include <bindings/ads1115.h>
+#include <bindings/button_control.h>
+#include <bindings/es7243e.h>
+#include <bindings/es8311.h>
+#include <bindings/gt911.h>
+#include <bindings/lp5814.h>
+#include <bindings/nv3031b.h>
+#include <bindings/sx1262.h>
+#include <gps_generic/bindings.h>
+
+// Reference: https://wiki.seeedstudio.com/meshtastic_wio_tracker_l2_intro/
+/ {
+	compatible = "root";
+	model = "Seeed Studio Wio Tracker L2 Pro";
+
+	wifi0 {
+		compatible = "espressif,esp32-wifi-pinned";
+	};
+
+	ble0 {
+		compatible = "espressif,esp32-ble";
+	};
+
+	gpio0 {
+		compatible = "espressif,esp32-gpio";
+		gpio-count = <49>;
+	};
+
+	// Declared before i2c0 so the codec can reference it
+	i2s0 {
+		compatible = "espressif,esp32-i2s";
+		port = <I2S_NUM_0>;
+		pin-mclk = <&gpio0 10 GPIO_FLAG_NONE>;
+		pin-bclk = <&gpio0 11 GPIO_FLAG_NONE>;
+		pin-ws = <&gpio0 12 GPIO_FLAG_NONE>;
+		pin-data-out = <&gpio0 16 GPIO_FLAG_NONE>;
+		pin-data-in = <&gpio0 15 GPIO_FLAG_NONE>;
+	};
+
+	i2c0 {
+		compatible = "espressif,esp32-i2c-master";
+		port = <I2C_NUM_0>;
+		clock-frequency = <100000>;
+		pin-sda = <&gpio0 47 GPIO_FLAG_NONE>;
+		pin-scl = <&gpio0 48 GPIO_FLAG_NONE>;
+
+		// PCA9555, register compatible with the TCA9535
+		pca9555 {
+			compatible = "ti,tca9535";
+			reg = <0x21>;
+
+			// Driven high by the vendor firmware. After a cold boot the audio codecs only answer with this high.
+			pin4 {
+				compatible = "gpio-hog";
+				pin = <&pca9555 4 GPIO_FLAG_NONE>;
+				mode = <GPIO_HOG_MODE_OUTPUT_HIGH>;
+			};
+
+			lcd_power {
+				compatible = "gpio-hog";
+				pin = <&pca9555 5 GPIO_FLAG_NONE>;
+				mode = <GPIO_HOG_MODE_OUTPUT_HIGH>;
+			};
+
+			grove_power {
+				compatible = "gpio-hog";
+				pin = <&pca9555 7 GPIO_FLAG_NONE>;
+				mode = <GPIO_HOG_MODE_OUTPUT_HIGH>;
+			};
+
+			// Active high
+			gnss_reset {
+				compatible = "gpio-hog";
+				pin = <&pca9555 9 GPIO_FLAG_NONE>;
+				mode = <GPIO_HOG_MODE_OUTPUT_LOW>;
+			};
+
+			user_led {
+				compatible = "gpio-hog";
+				pin = <&pca9555 10 GPIO_FLAG_NONE>;
+				mode = <GPIO_HOG_MODE_OUTPUT_LOW>;
+			};
+
+			usb_otg {
+				compatible = "gpio-hog";
+				pin = <&pca9555 11 GPIO_FLAG_NONE>;
+				mode = <GPIO_HOG_MODE_OUTPUT_LOW>;
+			};
+
+			speaker_amplifier {
+				compatible = "gpio-hog";
+				pin = <&pca9555 12 GPIO_FLAG_NONE>;
+				mode = <GPIO_HOG_MODE_OUTPUT_HIGH>;
+			};
+
+			gnss_power {
+				compatible = "gpio-hog";
+				pin = <&pca9555 13 GPIO_FLAG_NONE>;
+				mode = <GPIO_HOG_MODE_OUTPUT_HIGH>;
+			};
+
+			sdcard_power {
+				compatible = "gpio-hog";
+				pin = <&pca9555 14 GPIO_FLAG_NONE>;
+				mode = <GPIO_HOG_MODE_OUTPUT_HIGH>;
+			};
+
+			battery_divider {
+				compatible = "gpio-hog";
+				pin = <&pca9555 15 GPIO_FLAG_NONE>;
+				mode = <GPIO_HOG_MODE_OUTPUT_HIGH>;
+			};
+		};
+
+		// Native orientation is portrait, the device is used in landscape
+		touch {
+			compatible = "goodix,gt911";
+			reg = <0x5D>;
+			x-max = <240>;
+			y-max = <320>;
+			swap-xy;
+			mirror-y;
+			pin-reset = <&pca9555 8 GPIO_FLAG_ACTIVE_LOW>;
+			pin-interrupt = <&pca9555 3 GPIO_FLAG_NONE>;
+		};
+
+		// Speaker
+		es8311 {
+			compatible = "everest,es8311";
+			reg = <0x18>;
+			i2s = <&i2s0>;
+		};
+
+		// Microphone
+		es7243e {
+			compatible = "everest,es7243e";
+			reg = <0x14>;
+			i2s = <&i2s0>;
+		};
+
+		// Battery on AIN0 through a 1:2 divider that is enabled by expander pin 15
+		ads1115 {
+			compatible = "ti,ads1115";
+			reg = <0x48>;
+			full-scale-mv = <4096>;
+		};
+
+		// Started at boot after the display is drawn
+		display_backlight {
+			compatible = "ti,lp5814";
+			reg = <0x2C>;
+			status = "disabled";
+			// 40 mA per output, as in the vendor firmware
+			high-current;
+			dot-current = <200>;
+		};
+	};
+
+	battery-sense {
+		compatible = "battery-sense";
+		io-channel = <&ads1115 0>;
+		reference-voltage-mv = <4096>;
+		multiplier = <2000>;
+	};
+
+	// WAKE: short press enter, long press back. BOOT: short press next, long press previous.
+	buttons {
+		compatible = "tactility,button-control";
+		pin-primary = <&pca9555 0 GPIO_FLAG_NONE>;
+		pin-secondary = <&gpio0 0 GPIO_FLAG_PULL_UP>;
+	};
+
+	spi0 {
+		compatible = "espressif,esp32-spi";
+		host = <SPI2_HOST>;
+		cs-gpios = <&gpio0 21 GPIO_FLAG_NONE>;
+		pin-sclk = <&gpio0 4 GPIO_FLAG_NONE>;
+		pin-mosi = <&gpio0 6 GPIO_FLAG_NONE>;
+		pin-miso = <&gpio0 5 GPIO_FLAG_NONE>;
+
+		radio@0 {
+			compatible = "semtech,sx1262";
+			reg = <0>;
+			pin-reset = <&gpio0 7 GPIO_FLAG_NONE>;
+			pin-busy = <&gpio0 8 GPIO_FLAG_NONE>;
+			pin-dio1 = <&gpio0 9 GPIO_FLAG_NONE>;
+			tcxo-millivolts = <3000>;
+			dio2-as-rf-switch;
+		};
+	};
+
+	spi1 {
+		compatible = "espressif,esp32-spi";
+		host = <SPI3_HOST>;
+		cs-gpios = <&gpio0 46 GPIO_FLAG_NONE>;
+		pin-sclk = <&gpio0 42 GPIO_FLAG_NONE>;
+		pin-mosi = <&gpio0 41 GPIO_FLAG_NONE>;
+		pin-miso = <&gpio0 40 GPIO_FLAG_NONE>;
+		pin-wp = <&gpio0 39 GPIO_FLAG_NONE>;
+		pin-hd = <&gpio0 38 GPIO_FLAG_NONE>;
+
+		display@0 {
+			compatible = "newvision,nv3031b";
+			horizontal-resolution = <320>;
+			vertical-resolution = <240>;
+			swap-xy;
+			mirror-y;
+			pixel-clock-hz = <40000000>;
+			pin-reset = <&pca9555 6 GPIO_FLAG_NONE>;
+			backlight = <&display_backlight>;
+		};
+	};
+
+	sdmmc0 {
+		compatible = "espressif,esp32-sdmmc";
+		pin-clk = <&gpio0 2 GPIO_FLAG_NONE>;
+		pin-cmd = <&gpio0 3 GPIO_FLAG_NONE>;
+		pin-d0 = <&gpio0 1 GPIO_FLAG_NONE>;
+		slot = <SDMMC_HOST_SLOT_1>;
+		bus-width = <1>;
+	};
+
+	uart_gps {
+		compatible = "espressif,esp32-uart";
+		port = <UART_NUM_1>;
+		pin-tx = <&gpio0 17 GPIO_FLAG_NONE>;
+		pin-rx = <&gpio0 18 GPIO_FLAG_NONE>;
+
+		gps {
+			compatible = "tactility,gps-generic";
+			status = "disabled";
+			baud-rate = <9600>;
+		};
+	};
+
+	// Powered by expander pin 7
+	grove0 {
+		compatible = "espressif,esp32-grove";
+		defaultMode = <GROVE_MODE_I2C>;
+		pinSdaTx = <&gpio0 13 GPIO_FLAG_NONE>;
+		pinSclRx = <&gpio0 14 GPIO_FLAG_NONE>;
+		uartPort = <UART_NUM_2>;
+		i2cPort = <I2C_NUM_1>;
+		i2cClockFrequency = <400000>;
+	};
+
+	usbdevice0 {
+		compatible = "espressif,esp32-usbdevice";
+
+		usbdevicemsc0 {
+			compatible = "espressif,esp32-usbdevice-msc";
+		};
+	};
+};

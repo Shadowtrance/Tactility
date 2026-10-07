@@ -6,6 +6,7 @@ pin): two 8-bit ports for input, output, polarity inversion, and direction, addr
 pins 0-15 (port 0 = pins 0-7, port 1 = pins 8-15).
 
 It does not support pull-up/down resistors or high-impedance outputs; requesting those
-flags returns `ERROR_NOT_SUPPORTED`.
+flags returns `ERROR_NOT_SUPPORTED`. Active-low pins use the polarity register for reading
+and are inverted in software when driven as outputs.
 
 License: [Apache v2.0](LICENSE-Apache-2.0.md)

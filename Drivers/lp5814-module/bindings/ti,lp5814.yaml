@@ -1,0 +1,27 @@
+description: >
+  Texas Instruments LP5814 4-channel LED driver used as a display backlight.
+  The outputs selected by channels are driven together with manual PWM dimming.
+
+include: ["i2c-device.yaml"]
+
+compatible: "ti,lp5814"
+
+bus: i2c
+
+properties:
+  channels:
+    type: int
+    default: 15
+    description: Bit mask of the outputs OUT0 to OUT3 that drive the backlight
+  high-current:
+    type: boolean
+    default: false
+    description: Use a maximum output current of 51 mA instead of 25.5 mA
+  dot-current:
+    type: int
+    default: 255
+    description: Output current per enabled output in 1/255 of the maximum current [0,255], so 0.2 mA steps at 51 mA and 0.1 mA steps at 25.5 mA
+  brightness-default:
+    type: int
+    default: 255
+    description: Default brightness level (PWM duty in 1/255), applied by set_brightness_default()

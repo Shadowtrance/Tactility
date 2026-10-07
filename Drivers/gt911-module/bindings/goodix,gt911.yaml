@@ -33,7 +33,8 @@ properties:
     description: |
       Reset GPIO pin. Reset polarity is set with the GPIO descriptor's ACTIVE_HIGH or
       ACTIVE_LOW flag (active-low is the GT911's native convention; boards that invert the
-      reset line, e.g. Tulip 4 R11, use ACTIVE_HIGH).
+      reset line, e.g. Tulip 4 R11, use ACTIVE_HIGH). Pins on an IO expander are supported, the
+      driver then pulses the reset itself with the interrupt pin held low (address 0x5D).
   pin-interrupt:
     type: phandles
     default: GPIO_PIN_SPEC_NONE

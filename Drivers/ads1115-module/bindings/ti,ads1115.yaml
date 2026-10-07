@@ -1,0 +1,15 @@
+description: >
+  Texas Instruments ADS1115 16-bit ADC. Channels 0 to 3 are the single-ended inputs AIN0 to
+  AIN3. Results are returned as 12-bit values, 0 to 4095 for 0 V to full-scale-mv.
+
+include: ["i2c-device.yaml"]
+
+compatible: "ti,ads1115"
+
+bus: i2c
+
+properties:
+  full-scale-mv:
+    type: int
+    default: 4096
+    description: Programmable gain amplifier full scale in millivolts (6144, 4096, 2048, 1024, 512 or 256)

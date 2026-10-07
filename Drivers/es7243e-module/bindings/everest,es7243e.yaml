@@ -1,0 +1,15 @@
+description: Everest Semiconductor ES7243E stereo microphone ADC
+
+include: ["i2c-device.yaml"]
+
+compatible: "everest,es7243e"
+
+properties:
+  i2s:
+    type: phandle
+    required: true
+    description: "I2S controller device that carries audio data"
+  input-gain-percent:
+    type: int
+    default: 100
+    description: "Extra digital gain multiplier applied by audio_stream on top of the ADC's hardware gain, as an integer percentage (100 = 1.0x)"

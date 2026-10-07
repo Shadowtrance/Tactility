@@ -24,6 +24,14 @@ Website: https://github.com/vroland/epdiy
 
 License: [LGPL v3.0 or later](https://github.com/vroland/epdiy/blob/main/LICENSE)
 
+### esp-iot-solution
+
+The NV3031B panel driver (`Drivers/nv3031b-module`) is adapted from the `esp_lcd_sh8601` component.
+
+Website: https://github.com/espressif/esp-iot-solution
+
+License: [Apache License v2.0](https://github.com/espressif/esp-iot-solution/blob/master/LICENSE)
+
 ### ESP-IDF
 
 This project uses ESP-IDF to compile the ESP32 firmware.
@@ -52,6 +60,14 @@ License: Multiple (SIL Open Font License, Apache License, Ubuntu Font License): 
 Website: https://github.com/nayarsystems/posix_tz_db
 
 License: [MIT](https://github.com/nayarsystems/posix_tz_db/blob/master/LICENSE)
+
+### LovyanGFX
+
+The NV3031B initialization sequence in `Drivers/nv3031b-module/source/nv3031b_init_cmds.h` is taken from LovyanGFX.
+
+Website: https://github.com/lovyan03/LovyanGFX
+
+License: [FreeBSD (BSD 2-Clause)](https://github.com/lovyan03/LovyanGFX/blob/master/license.txt)
 
 ### Minmea
 

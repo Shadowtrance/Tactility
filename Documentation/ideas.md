@@ -22,6 +22,8 @@
   Check during installation process, but also when starting (SD card might have old app install from before Tactility OS update)
 - Support direct installation of an `.app` file with `tactility.py install --app helloworld.app`
 - minitar/untarFile(): "entry->metadata.path" can escape its confined path (e.g. "../something")
+- xl9555 and tca9534 drivers: support `GPIO_FLAG_ACTIVE_LOW` on outputs in software, like tca95xx does.
+  Afterwards the raw level reset handling in cst66xx and tca8418 can use ACTIVE_LOW too.
 
 ## Medium Priority
 

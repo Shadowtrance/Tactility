@@ -69,6 +69,73 @@ static error_t reset_controller_pin(const GpioPinSpec& pin, uint8_t pulses) {
     return ERROR_NONE;
 }
 
+static bool is_expander_pin(const GpioPinSpec& pin) {
+    return pin.gpio_controller != nullptr && !driver_is_compatible(device_get_driver(pin.gpio_controller), "espressif,esp32-gpio");
+}
+
+// esp_lcd_touch only accepts native pins, so the reset is done here with the reset polarity from
+// the pin flags. INT is held physically low while reset is released, which selects address 0x5D.
+static error_t reset_with_expander_pins(const GpioPinSpec& reset_pin, const GpioPinSpec& interrupt_pin, uint8_t pulses) {
+    if (pulses == 0) {
+        return ERROR_NONE;
+    }
+
+    GpioDescriptor* interrupt = nullptr;
+    if (interrupt_pin.gpio_controller != nullptr) {
+        interrupt = gpio_descriptor_acquire(interrupt_pin.gpio_controller, interrupt_pin.pin, GPIO_FLAG_DIRECTION_OUTPUT, GPIO_OWNER_GPIO);
+        if (interrupt == nullptr) {
+            LOG_E(TAG, "Failed to acquire interrupt pin");
+            return ERROR_RESOURCE;
+        }
+    }
+
+    GpioDescriptor* reset = nullptr;
+    if (reset_pin.gpio_controller != nullptr) {
+        reset = gpio_descriptor_acquire(reset_pin.gpio_controller, reset_pin.pin, reset_pin.flags | GPIO_FLAG_DIRECTION_OUTPUT, GPIO_OWNER_GPIO);
+        if (reset == nullptr) {
+            LOG_E(TAG, "Failed to acquire reset pin");
+            if (interrupt != nullptr) {
+                gpio_descriptor_release(interrupt);
+            }
+            return ERROR_RESOURCE;
+        }
+    }
+
+    error_t error = ERROR_NONE;
+    if (interrupt != nullptr) {
+        error = gpio_descriptor_set_level(interrupt, false);
+    }
+    for (uint8_t i = 0; error == ERROR_NONE && reset != nullptr && i < pulses; i++) {
+        error = gpio_descriptor_set_level(reset, true);
+        if (error == ERROR_NONE) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            error = gpio_descriptor_set_level(reset, false);
+        }
+        if (error == ERROR_NONE) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
+
+    if (interrupt != nullptr) {
+        error_t release_error = gpio_descriptor_set_flags(interrupt, GPIO_FLAG_DIRECTION_INPUT);
+        if (error == ERROR_NONE) {
+            error = release_error;
+        }
+        gpio_descriptor_release(interrupt);
+    }
+    if (reset != nullptr) {
+        gpio_descriptor_release(reset);
+    }
+
+    if (error != ERROR_NONE) {
+        LOG_E(TAG, "Failed to reset controller");
+        return error;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(60));
+    return ERROR_NONE;
+}
+
 // region Driver lifecycle
 
 // GT911's I2C address depends on the controller's INT pin level at power-up (board-strapped, not
@@ -149,7 +216,10 @@ static error_t start(Device* device) {
         return ERROR_OUT_OF_MEMORY;
     }
 
-    error_t error = reset_controller_pin(config->pin_reset, config->reset_pulses);
+    bool expander_pins = is_expander_pin(config->pin_reset) || is_expander_pin(config->pin_interrupt);
+    error_t error = expander_pins
+        ? reset_with_expander_pins(config->pin_reset, config->pin_interrupt, config->reset_pulses)
+        : reset_controller_pin(config->pin_reset, config->reset_pulses);
     if (error != ERROR_NONE) {
         free(internal);
         return error;
@@ -164,8 +234,8 @@ static error_t start(Device* device) {
     esp_lcd_touch_config_t touch_config = {
         .x_max = config->x_max,
         .y_max = config->y_max,
-        .rst_gpio_num = pin_or_nc(config->pin_reset),
-        .int_gpio_num = pin_or_nc(config->pin_interrupt),
+        .rst_gpio_num = expander_pins ? GPIO_NUM_NC : pin_or_nc(config->pin_reset),
+        .int_gpio_num = expander_pins ? GPIO_NUM_NC : pin_or_nc(config->pin_interrupt),
         // Reset polarity comes from the pin_reset descriptor's ACTIVE_HIGH/ACTIVE_LOW flag; the
         // interrupt line is fixed active-low in hardware.
         .levels = {

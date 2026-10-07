@@ -1,0 +1,15 @@
+dependencies:
+  - Platforms/platform-esp32
+  - Drivers/tca95xx-16bit-module
+  - Drivers/ads1115-module
+  - Drivers/button-control-module
+  - Drivers/es7243e-module
+  - Drivers/es8311-module
+  - Drivers/audio-stream-module
+  - Drivers/sx126x-module
+  - Drivers/gt911-module
+  - Drivers/lp5814-module
+  - Drivers/nv3031b-module
+  - Drivers/gps-generic-module
+dts: seeed,wio-tracker-l2-pro.dts
+dts-only: true
