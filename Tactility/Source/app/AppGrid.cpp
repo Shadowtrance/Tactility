@@ -66,7 +66,7 @@ int32_t getSideWidth(lv_obj_t* bar, bool rightSide) {
         lv_obj_t* child = lv_obj_get_child(bar, static_cast<int32_t>(i));
         if (lv_obj_get_style_flex_grow(child, LV_PART_MAIN) > 0) {
             afterSpacer = true;
-        } else if (afterSpacer == rightSide && !lv_obj_has_flag_any(child, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_HIDDEN | LV_OBJ_FLAG_IGNORE_LAYOUT))) {
+        } else if (afterSpacer == rightSide && !lv_obj_is_hidden(child) && !lv_obj_is_ignore_layout(child)) {
             width += lv_obj_get_width(child);
             visible++;
         }
@@ -81,7 +81,7 @@ void updatePageIndicatorWidth(void* data) {
     const uint32_t count = lv_obj_get_child_count(bottom_bar);
     for (uint32_t i = 0; i < count && indicator == nullptr; i++) {
         lv_obj_t* child = lv_obj_get_child(bottom_bar, static_cast<int32_t>(i));
-        if (lv_obj_has_flag(child, LV_OBJ_FLAG_IGNORE_LAYOUT)) {
+        if (lv_obj_is_ignore_layout(child)) {
             indicator = child;
         }
     }
@@ -91,10 +91,15 @@ void updatePageIndicatorWidth(void* data) {
     const int32_t side_width = std::max(getSideWidth(bottom_bar, false), getSideWidth(bottom_bar, true));
     const int32_t gaps = 2 * lv_obj_get_style_pad_column(bottom_bar, LV_PART_MAIN);
     const int32_t available = lv_obj_get_content_width(bottom_bar) - 2 * side_width - gaps;
-    lv_obj_set_style_max_width(indicator, std::max<int32_t>(0, available), LV_STATE_DEFAULT);
+    const int32_t max_width = std::max<int32_t>(0, available);
+    // Setting a style marks the layout as dirty, which would resize the bar and call this again
+    if (lv_obj_get_style_max_width(indicator, LV_PART_MAIN) != max_width) {
+        lv_obj_set_style_max_width(indicator, max_width, LV_STATE_DEFAULT);
+    }
 }
 
 void onBottomBarSizeChanged(lv_event_t* event) {
+    lv_async_call_cancel(updatePageIndicatorWidth, lv_event_get_target_obj(event));
     lv_async_call(updatePageIndicatorWidth, lv_event_get_target_obj(event));
 }
 
@@ -116,16 +121,27 @@ void AppGrid::onDeferredRepopulate(void* userData) {
     static_cast<AppGrid*>(userData)->populate();
 }
 
+// A layout pass can resize the grid temporarily (e.g. to its content height, before the parent's flex layout grows it again)
+void AppGrid::onDeferredResize(void* userData) {
+    auto* self = static_cast<AppGrid*>(userData);
+    if (lv_obj_get_width(self->grid) != self->populatedWidth || lv_obj_get_height(self->grid) != self->populatedHeight) {
+        self->populate();
+    }
+}
+
 void AppGrid::onGridDeleted(lv_event_t* e) {
     // Cancels a still-pending repopulate scheduled right before the grid itself was deleted (e.g. the app closing)
     lv_async_call_cancel(onDeferredRepopulate, lv_event_get_user_data(e));
+    lv_async_call_cancel(onDeferredResize, lv_event_get_user_data(e));
     lv_async_call_cancel(onDeferredNextPage, lv_event_get_user_data(e));
     lv_async_call_cancel(onDeferredPreviousPage, lv_event_get_user_data(e));
 }
 
 // Deferred: page size depends on the grid size, which is final only after the layout pass that triggered this.
 void AppGrid::onGridSizeChanged(lv_event_t* e) {
-    lv_async_call(onDeferredRepopulate, lv_event_get_user_data(e));
+    // One pending check is enough, also when the size changes several times before it runs
+    lv_async_call_cancel(onDeferredResize, lv_event_get_user_data(e));
+    lv_async_call(onDeferredResize, lv_event_get_user_data(e));
 }
 
 // Changing the page doesn't keep the selected app selected: that would return to the selected app's page
@@ -209,6 +225,8 @@ void AppGrid::populate() {
     // Centers a full page of rows, so a partially filled last page keeps its rows in the same positions.
     lv_obj_set_style_pad_top(grid, 0, LV_STATE_DEFAULT);
     const PageLayout layout = computePageLayout(grid);
+    populatedWidth = lv_obj_get_width(grid);
+    populatedHeight = lv_obj_get_height(grid);
     lv_obj_set_style_pad_top(grid, layout.topOffset, LV_STATE_DEFAULT);
 
     const uint32_t item_count = items.size();
@@ -225,9 +243,9 @@ void AppGrid::populate() {
     page = std::min(page, page_count - 1);
     pageCount = page_count;
 
-    lv_obj_set_flag(pageIndicator, LV_OBJ_FLAG_HIDDEN, page_count <= 1);
-    lv_obj_set_flag(prevButton, LV_OBJ_FLAG_HIDDEN, page_count <= 1);
-    lv_obj_set_flag(nextButton, LV_OBJ_FLAG_HIDDEN, page_count <= 1);
+    lv_obj_set_hidden(pageIndicator, page_count <= 1);
+    lv_obj_set_hidden(prevButton, page_count <= 1);
+    lv_obj_set_hidden(nextButton, page_count <= 1);
     lvgl_page_indicator_set_page_count(pageIndicator, page_count);
     lvgl_page_indicator_set_page(pageIndicator, page);
 
@@ -303,13 +321,13 @@ void AppGrid::createGrid(lv_obj_t* parent) {
     lv_obj_set_style_pad_row(grid, TILE_GAP, LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(grid, TILE_GAP, LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(grid, 0, LV_STATE_DEFAULT);
-    lv_obj_remove_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollable(grid, false);
     // The arrow keys move between the tiles in rows and columns
     lvgl_grid_navigation_add(grid);
     lv_obj_add_event_cb(grid, onGridDeleted, LV_EVENT_DELETE, this);
     if (swipeNavigation) {
         // LVGL sends a gesture to the first object, starting at the touched one, that doesn't pass it on to its parent
-        lv_obj_remove_flag(grid, LV_OBJ_FLAG_GESTURE_BUBBLE);
+        lv_obj_set_gesture_bubble(grid, false);
         lv_obj_add_event_cb(grid, onGridGesture, LV_EVENT_GESTURE, this);
     }
 }
@@ -318,7 +336,7 @@ void AppGrid::createGrid(lv_obj_t* parent) {
 void AppGrid::onBottomBarFocused(lv_event_t* e) {
     const auto* self = static_cast<AppGrid*>(lv_event_get_user_data(e));
     lv_obj_t* current = lvgl_grid_navigation_get_focused(self->bottomBar);
-    lv_obj_t* target = lv_obj_has_flag(self->prevButton, LV_OBJ_FLAG_HIDDEN) ? lv_obj_get_child(self->bottomBar, 0) : self->prevButton;
+    lv_obj_t* target = lv_obj_is_hidden(self->prevButton) ? lv_obj_get_child(self->bottomBar, 0) : self->prevButton;
     if (current == nullptr || target == current || target == self->barSpacer) {
         return;
     }
@@ -336,7 +354,7 @@ void AppGrid::createWidgetsWithBottomBar(lv_obj_t* parent) {
     lv_obj_set_style_border_width(bottomBar, 0, LV_STATE_DEFAULT);
     lv_obj_set_flex_flow(bottomBar, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(bottomBar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_remove_flag(bottomBar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollable(bottomBar, false);
     lvgl_obj_add_edge_padding(bottomBar);
     lv_obj_add_event_cb(bottomBar, onBottomBarSizeChanged, LV_EVENT_SIZE_CHANGED, nullptr);
     lv_obj_add_event_cb(bottomBar, onBottomBarDeleted, LV_EVENT_DELETE, nullptr);
@@ -348,7 +366,7 @@ void AppGrid::createWidgetsWithBottomBar(lv_obj_t* parent) {
     barSpacer = lv_obj_create(bottomBar);
     lv_obj_set_size(barSpacer, 0, 0);
     lv_obj_set_flex_grow(barSpacer, 1);
-    lv_obj_remove_flag(barSpacer, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(barSpacer, false);
     prevButton = lvgl_icon_button_create(bottomBar);
     lv_label_set_text(lv_label_create(prevButton), "<");
     lv_obj_add_event_cb(prevButton, onPrevPressed, LV_EVENT_SHORT_CLICKED, this);
@@ -356,7 +374,7 @@ void AppGrid::createWidgetsWithBottomBar(lv_obj_t* parent) {
     lv_label_set_text(lv_label_create(nextButton), ">");
     lv_obj_add_event_cb(nextButton, onNextPressed, LV_EVENT_SHORT_CLICKED, this);
     pageIndicator = lvgl_page_indicator_create(bottomBar);
-    lv_obj_add_flag(pageIndicator, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_set_ignore_layout(pageIndicator, true);
     lv_obj_align(pageIndicator, LV_ALIGN_CENTER, 0, 0);
     // The arrow keys move between all buttons of the bar as one row
     lvgl_grid_navigation_add(bottomBar);
