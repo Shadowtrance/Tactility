@@ -3,6 +3,9 @@
 
 #include <tactility/device.h>
 #include <tactility/driver.h>
+#include <tactility/drivers/esp32_usbhost_backend.h>
+#include <tactility/drivers/esp32_usbhost_task.h>
+#include <tactility/drivers/esp32_usbhost_worker.h>
 #include <tactility/drivers/usb_host_midi.h>
 #include <tactility/log.h>
 
@@ -28,7 +31,13 @@ constexpr auto MIDI_TRANSFER_BUF_SIZE = 512;
 constexpr uint8_t MIDI_INTF_CLASS    = 0x01;
 constexpr uint8_t MIDI_INTF_SUBCLASS = 0x03;
 
+extern "C" Driver esp32_usbhost_midi_driver;
+
 struct UsbMidiContext {
+    Device*                  host         = nullptr;
+    // USB_HOST_MIDI_TYPE device, exists while a MIDI interface is claimed
+    Device                   midi_device  = {};
+    bool                     midi_device_active = false;
     usb_host_client_handle_t client_hdl   = nullptr;
     usb_device_handle_t      dev_hdl      = nullptr;
     usb_transfer_t*          transfer     = nullptr;
@@ -38,10 +47,6 @@ struct UsbMidiContext {
     std::atomic<bool>        running{false};
     TaskHandle_t             task_handle  = nullptr;
     SemaphoreHandle_t        task_done    = nullptr;
-
-    portMUX_TYPE          callback_lock = portMUX_INITIALIZER_UNLOCKED;
-    usb_midi_message_cb_t callback      = nullptr;
-    void*                 callback_arg  = nullptr;
 };
 
 static bool find_midi_interface(const usb_config_desc_t* cfg, uint8_t* out_intf, uint8_t* out_ep) {
@@ -72,14 +77,6 @@ static bool find_midi_interface(const usb_config_desc_t* cfg, uint8_t* out_intf,
 }
 
 static void dispatch_midi_packets(UsbMidiContext* ctx, const uint8_t* buf, int len) {
-    usb_midi_message_cb_t cb;
-    void* arg;
-    taskENTER_CRITICAL(&ctx->callback_lock);
-    cb  = ctx->callback;
-    arg = ctx->callback_arg;
-    taskEXIT_CRITICAL(&ctx->callback_lock);
-    if (!cb) return;
-
     for (int i = 0; i + 3 < len; i += 4) {
         uint8_t cin = buf[i] & 0x0F;
         if (cin < 0x02) continue;
@@ -89,13 +86,13 @@ static void dispatch_midi_packets(UsbMidiContext* ctx, const uint8_t* buf, int l
             .data1  = buf[i + 2],
             .data2  = buf[i + 3],
         };
-        cb(&msg, arg);
+        usb_midi_event_emit(&ctx->midi_device, &msg);
     }
 }
 
 static void midi_transfer_cb(usb_transfer_t* transfer) {
     auto* ctx = static_cast<UsbMidiContext*>(transfer->context);
-    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED && transfer->actual_num_bytes > 0) {
+    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED && transfer->actual_num_bytes > 0 && ctx->midi_device_active) {
         dispatch_midi_packets(ctx, transfer->data_buffer, transfer->actual_num_bytes);
     }
     if (ctx->running && ctx->connected && transfer->status != USB_TRANSFER_STATUS_NO_DEVICE) {
@@ -106,11 +103,31 @@ static void midi_transfer_cb(usb_transfer_t* transfer) {
     }
 }
 
+static void midi_device_create(UsbMidiContext* ctx) {
+    if (ctx->midi_device_active) {
+        return;
+    }
+    if (esp32_usbhost_device_create(ctx->host, &ctx->midi_device, ctx->host, "usb_midi0", &esp32_usbhost_midi_driver, ctx) == ERROR_NONE) {
+        ctx->midi_device_active = true;
+    }
+}
+
+static error_t midi_device_destroy(UsbMidiContext* ctx) {
+    if (!ctx->midi_device_active) {
+        return ERROR_NONE;
+    }
+    error_t error = esp32_usbhost_device_destroy(ctx->host, &ctx->midi_device);
+    if (error == ERROR_NONE) {
+        ctx->midi_device_active = false;
+    }
+    return error;
+}
+
 static void client_event_cb(const usb_host_client_event_msg_t* msg, void* arg) {
     auto* ctx = static_cast<UsbMidiContext*>(arg);
 
     if (msg->event == USB_HOST_CLIENT_EVENT_NEW_DEV) {
-        if (ctx->dev_hdl != nullptr || ctx->connected.load()) {
+        if (ctx->dev_hdl != nullptr || ctx->connected.load() || ctx->midi_device_active) {
             LOG_W(TAG, "ignoring additional MIDI device while one is already active");
             return;
         }
@@ -148,11 +165,15 @@ static void client_event_cb(const usb_host_client_event_msg_t* msg, void* arg) {
         ctx->transfer->context          = ctx;
         ctx->transfer->timeout_ms       = 0;
 
+        // Created before the first transfer so no messages are dropped
+        midi_device_create(ctx);
+        ctx->connected = true;
         if (usb_host_transfer_submit(ctx->transfer) == ESP_OK) {
-            ctx->connected = true;
             LOG_I(TAG, "MIDI device connected (intf=%d ep=0x%02x)", intf_num, ep_addr);
         } else {
             LOG_E(TAG, "failed to submit initial MIDI transfer");
+            ctx->connected = false;
+            midi_device_destroy(ctx);
             usb_host_interface_release(ctx->client_hdl, dev_hdl, intf_num);
             usb_host_device_close(ctx->client_hdl, dev_hdl);
             ctx->dev_hdl = nullptr;
@@ -162,6 +183,7 @@ static void client_event_cb(const usb_host_client_event_msg_t* msg, void* arg) {
         if (ctx->dev_hdl && msg->dev_gone.dev_hdl == ctx->dev_hdl) {
             LOG_I(TAG, "MIDI device disconnected");
             ctx->connected = false;
+            midi_device_destroy(ctx);
             usb_host_interface_release(ctx->client_hdl, ctx->dev_hdl, ctx->intf_num);
             usb_host_device_close(ctx->client_hdl, ctx->dev_hdl);
             ctx->dev_hdl = nullptr;
@@ -169,6 +191,7 @@ static void client_event_cb(const usb_host_client_event_msg_t* msg, void* arg) {
     }
 }
 
+// Stack may be in PSRAM: no flash access allowed from this task.
 static void midi_client_task(void* arg) {
     auto* ctx = static_cast<UsbMidiContext*>(arg);
     LOG_I(TAG, "MIDI client task started");
@@ -183,35 +206,27 @@ static void midi_client_task(void* arg) {
         usb_host_device_close(ctx->client_hdl, ctx->dev_hdl);
         ctx->dev_hdl = nullptr;
     }
+    midi_device_destroy(ctx);
 
     LOG_I(TAG, "MIDI client task stopped");
     xSemaphoreGive(ctx->task_done);
-    vTaskDelete(nullptr);
+    vTaskDeleteWithCaps(nullptr);
 }
-
-static void api_set_callback(struct Device* device, usb_midi_message_cb_t callback, void* user_data) {
-    auto* ctx = static_cast<UsbMidiContext*>(device_get_driver_data(device));
-    if (!ctx) return;
-    taskENTER_CRITICAL(&ctx->callback_lock);
-    ctx->callback     = callback;
-    ctx->callback_arg = user_data;
-    taskEXIT_CRITICAL(&ctx->callback_lock);
-}
-
-static bool api_is_connected(struct Device* device) {
-    auto* ctx = static_cast<UsbMidiContext*>(device_get_driver_data(device));
-    return ctx && ctx->connected.load();
-}
-
-static const UsbMidiApi midi_api = {
-    .set_callback = api_set_callback,
-    .is_connected = api_is_connected,
-};
 
 extern "C" {
 
-static error_t start_device(struct Device* device) {
+static error_t midi_device_start(Device* device) {
+    return device_get_driver_data(device) != nullptr ? ERROR_NONE : ERROR_INVALID_STATE;
+}
+
+static error_t midi_device_stop(Device* device) {
+    device_set_driver_data(device, nullptr);
+    return ERROR_NONE;
+}
+
+static error_t backend_start(Device* host, void** out_context) {
     auto* ctx = new UsbMidiContext();
+    ctx->host = host;
 
     if (usb_host_transfer_alloc(MIDI_TRANSFER_BUF_SIZE, 0, &ctx->transfer) != ESP_OK) {
         LOG_E(TAG, "failed to allocate MIDI transfer");
@@ -245,8 +260,8 @@ static error_t start_device(struct Device* device) {
     }
 
     ctx->running = true;
-    BaseType_t result = xTaskCreate(midi_client_task, "midi_client", MIDI_TASK_STACK,
-                                    ctx, MIDI_TASK_PRIORITY, &ctx->task_handle);
+    BaseType_t result = esp32_usbhost_task_create_psram(midi_client_task, "midi_client", MIDI_TASK_STACK,
+                                                        ctx, MIDI_TASK_PRIORITY, &ctx->task_handle);
     if (result != pdPASS) {
         LOG_E(TAG, "failed to create midi_client task");
         ctx->running = false;
@@ -257,35 +272,42 @@ static error_t start_device(struct Device* device) {
         return ERROR_RESOURCE;
     }
 
-    device_set_driver_data(device, ctx);
+    *out_context = ctx;
     LOG_I(TAG, "started");
     return ERROR_NONE;
 }
 
-static error_t stop_device(struct Device* device) {
-    auto* ctx = static_cast<UsbMidiContext*>(device_get_driver_data(device));
-    if (!ctx) return ERROR_NONE;
+static error_t backend_stop(void* context) {
+    auto* ctx = static_cast<UsbMidiContext*>(context);
 
-    ctx->running = false;
-    usb_host_client_unblock(ctx->client_hdl);
+    if (ctx->task_handle != nullptr) {
+        ctx->running = false;
+        usb_host_client_unblock(ctx->client_hdl);
 
-    if (xSemaphoreTake(ctx->task_done, pdMS_TO_TICKS(MIDI_STOP_TIMEOUT_MS)) != pdTRUE) {
-        LOG_E(TAG, "MIDI client task stop timed out after %dms — a full USB host restart may be required", MIDI_STOP_TIMEOUT_MS);
-        if (ctx->dev_hdl) {
-            ctx->connected = false;
-            if (usb_host_interface_release(ctx->client_hdl, ctx->dev_hdl, ctx->intf_num) != ESP_OK) {
-                LOG_W(TAG, "failed to release MIDI interface during force-stop");
+        if (xSemaphoreTake(ctx->task_done, pdMS_TO_TICKS(MIDI_STOP_TIMEOUT_MS)) != pdTRUE) {
+            LOG_E(TAG, "MIDI client task stop timed out after %dms — a full USB host restart may be required", MIDI_STOP_TIMEOUT_MS);
+            if (ctx->dev_hdl) {
+                ctx->connected = false;
+                if (usb_host_interface_release(ctx->client_hdl, ctx->dev_hdl, ctx->intf_num) != ESP_OK) {
+                    LOG_W(TAG, "failed to release MIDI interface during force-stop");
+                }
+                if (usb_host_device_close(ctx->client_hdl, ctx->dev_hdl) != ESP_OK) {
+                    LOG_W(TAG, "failed to close MIDI device during force-stop");
+                }
+                ctx->dev_hdl = nullptr;
             }
-            if (usb_host_device_close(ctx->client_hdl, ctx->dev_hdl) != ESP_OK) {
-                LOG_W(TAG, "failed to close MIDI device during force-stop");
-            }
-            ctx->dev_hdl = nullptr;
+            vTaskDeleteWithCaps(ctx->task_handle);
+            vTaskDelay(pdMS_TO_TICKS(50));
         }
-        vTaskDelete(ctx->task_handle);
-        vTaskDelay(pdMS_TO_TICKS(50));
+        ctx->task_handle = nullptr;
+        vSemaphoreDelete(ctx->task_done);
+        ctx->task_done = nullptr;
     }
-    ctx->task_handle = nullptr;
-    vSemaphoreDelete(ctx->task_done);
+
+    error_t error = midi_device_destroy(ctx);
+    if (error != ERROR_NONE) {
+        return error;
+    }
 
     usb_host_client_deregister(ctx->client_hdl);
     ctx->client_hdl = nullptr;
@@ -293,7 +315,6 @@ static error_t stop_device(struct Device* device) {
     usb_host_transfer_free(ctx->transfer);
     ctx->transfer = nullptr;
 
-    device_set_driver_data(device, nullptr);
     delete ctx;
     LOG_I(TAG, "stopped");
     return ERROR_NONE;
@@ -301,15 +322,20 @@ static error_t stop_device(struct Device* device) {
 
 Driver esp32_usbhost_midi_driver = {
     .name         = "esp32_usbhost_midi",
-    .compatible   = (const char*[]) { "espressif,esp32-usbhost-midi", nullptr },
-    .start_device = start_device,
-    .stop_device  = stop_device,
-    .api          = &midi_api,
+    .compatible   = (const char*[]) { nullptr },
+    .start_device = midi_device_start,
+    .stop_device  = midi_device_stop,
+    .api          = nullptr,
     .device_type  = &USB_HOST_MIDI_TYPE,
     .owner        = nullptr,
     .internal     = nullptr,
 };
 
 } // extern "C"
+
+const Esp32UsbHostBackend esp32_usbhost_midi_backend = {
+    .start = backend_start,
+    .stop  = backend_stop,
+};
 
 #endif // CONFIG_SOC_USB_OTG_SUPPORTED

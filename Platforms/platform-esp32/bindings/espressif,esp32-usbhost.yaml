@@ -13,3 +13,19 @@ properties:
       Default 0 selects the default peripheral (P4 default: controller 0, HS/UTMI).
       BIT(0) = controller 0 (HS, UTMI PHY - GPIO 49/50 aka USB2_OTG pins, e.g. USB-A on Tab5)
       BIT(1) = controller 1 (FS, FSLS PHY - GPIO 24/25 aka USB1 pins, e.g. USB-C OTG on Tab5)
+  hid:
+    type: boolean
+    default: true
+    description: Detect HID devices (keyboard, mouse, consumer control)
+  midi:
+    type: boolean
+    default: true
+    description: Detect MIDI devices
+  msc:
+    type: boolean
+    default: true
+    description: Detect and mount mass storage devices
+  audio:
+    type: boolean
+    default: true
+    description: Detect USB Audio Class output devices (ESP32-S3 and ESP32-P4 only, ignored on other targets)
