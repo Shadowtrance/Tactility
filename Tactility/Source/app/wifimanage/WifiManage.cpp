@@ -133,19 +133,22 @@ static void onConnectToHidden() {
 }
 
 /** Starting a scan doesn't block, so this runs directly on the LVGL task. */
-static void onRefresh() {
+static bool onRefresh() {
     Device* wifi_device = nullptr;
     if (device_get_first_by_type(&WIFI_TYPE, &wifi_device) != ERROR_NONE) {
         LOG_W(TAG, "No WiFi device found");
-        return;
+        return false;
     }
+    bool started = true;
     if (!wifi_is_scanning(wifi_device)) {
         error_t result = wifi_scan(wifi_device);
         if (result != ERROR_NONE) {
             LOG_E(TAG, "Failed to start scan (%s)", error_to_string(result));
+            started = false;
         }
     }
     device_put(wifi_device);
+    return started;
 }
 
 void updateView(Context* ctx, bool rebuildList) {
@@ -178,6 +181,8 @@ void scanIfIdle(Context* ctx) {
         error_t result = wifi_scan(ctx->wifiDevice);
         if (result != ERROR_NONE) {
             LOG_I(TAG, "Can't start scan (%s)", error_to_string(result));
+            ctx->state.setScanStartFailed();
+            updateView(ctx, true);
         }
     }
 }
