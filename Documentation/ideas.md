@@ -7,6 +7,7 @@
 
 ## Higher Priority
 
+- Fix system icon selection on mono display
 - Find out why the first build of an app with a clean build cache folder always fails
 - Improve posix support: use user home path and system /tmp folder.
 - Drivers/audio-codec-module is not a module. Move it somewhere else. Or make it an actual module.
@@ -19,16 +20,12 @@
 
 ## Medium Priority
 
+- Try https://github.com/bootdsc/Fastwave-Eink-Driver with CL-32 e-paper.
 - Pick different font to improve monochrome screen readability (or change the weight).
 - Use GPS time to set/update the current time: when enabled, at boot, when wifi is not enabled, start the gps device and wait until a lock is acquired, then get the time and sync it. Then stop the GPS device.
-- Try https://github.com/bootdsc/Fastwave-Eink-Driver with CL-32 e-paper.
-- Power Off with e-paper should trigger full refresh before power off.
 - Inspect code for memory improvements: replace `std::*` with `tt::std::*`
-- Tactility/Source/bluetooth move into bluetooth module, make it work generically for all bluetooth apis
-- DisplayApi: resolution x/y shouldn't be functions but struct values
 - Tactility/Source/app/imageviewer/ImageViewer.cpp: Limit memory used to open an image.
   loadFile() now resizes fileData to the entire file size before displaying the image. start accepts a file path without a size limit, so opening a large image can exhaust memory on an embedded device before LVGL decodes it. Reject files above a supported limit or retain a bounded file-backed decoding path.
-- A device profile selection screen for Simulator: select device profiles such as T-Lora Pager, T-Deck Plus, CL-32, Cardputer and T-Embed which changes the resolution and theming defaults after restarting.
 - A fullscreen tiny keyboard that works with single stroke gestures (similar to Palm OS Graffiti)
 - Move more window management code from Tactility/ to window-manager
 - Implement signal/raise for terminal apps (for CTRL+C and window resize signals)
@@ -47,7 +44,6 @@
   Create some kind of "intent" handler like on Android.
   The intent can have an action (e.g. view), a URL and an optional bundle.
   The manifest can provide the intent handler
-- LilyGO T-Dongle S3: 1 button control, stop auto-launching web server
 - Core2: support power off via software
 - Try out speed optimizations: https://docs.espressif.com/projects/esp-faq/en/latest/software-framework/peripherals/lcd.html
   (relates to CONFIG_ESP32S3_DATA_CACHE_LINE_64B that is in use for RGB displays via the `device.properties` fix/workaround)
