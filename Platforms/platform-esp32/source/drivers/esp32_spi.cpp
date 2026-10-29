@@ -8,6 +8,7 @@
 #include <tactility/drivers/esp32_gpio_helpers.h>
 #include <tactility/drivers/gpio_controller.h>
 #include <driver/spi_master.h>
+#include <esp_memory_utils.h>
 #include <algorithm>
 #include <cstring>
 #include <new>
@@ -26,6 +27,7 @@ struct SpiDevice {
     spi_device_handle_t handle = nullptr;
     GpioDescriptor* cs = nullptr;
     bool bus_acquired = false;
+    bool half_duplex = false;
 };
 
 struct Esp32SpiInternal {
@@ -110,6 +112,7 @@ static error_t add_device(Device* device, const SpiDeviceConfig* config, SpiDevi
     device_config.mode = config->mode;
     device_config.spics_io_num = -1;
     device_config.queue_size = 1;
+    device_config.flags = config->half_duplex ? SPI_DEVICE_HALFDUPLEX : 0;
 
     const esp_err_t result = spi_bus_add_device(GET_CONFIG(device)->host, &device_config, &new_device->handle);
     if (result != ESP_OK) {
@@ -119,6 +122,7 @@ static error_t add_device(Device* device, const SpiDeviceConfig* config, SpiDevi
     }
 
     new_device->cs = cs;
+    new_device->half_duplex = config->half_duplex;
 
     recursive_mutex_lock(&data->mutex);
     data->devices.push_back(new_device);
@@ -146,11 +150,79 @@ static error_t remove_device(Device* device, SpiDevice* spi_device) {
     return ERROR_NONE;
 }
 
-static error_t transmit(Device* device, SpiDevice* spi_device, const void* tx_data, void* rx_data, size_t length) {
+/** Sends @p length bytes, clocking out zeroes when @p tx_data is NULL. */
+static esp_err_t transmit_write_phase(SpiDevice* spi_device, const void* tx_data, size_t length) {
     // ESP-IDF skips the write phase for a null buffer, so zeroes are sent from a buffer in chunks.
-    // The chip select is driven by hand, so a transfer that is split up stays selected.
     constexpr size_t ZERO_CHUNK_SIZE = 64;
     uint8_t zero_buffer[ZERO_CHUNK_SIZE] = {};
+    esp_err_t result = ESP_OK;
+    size_t offset = 0;
+
+    do {
+        const size_t chunk = tx_data == nullptr ? std::min(length - offset, ZERO_CHUNK_SIZE) : length;
+        spi_transaction_t transaction = {};
+        transaction.length = chunk * 8;
+        transaction.tx_buffer = tx_data == nullptr ? zero_buffer : static_cast<const uint8_t*>(tx_data) + offset;
+#if defined(SOC_PSRAM_DMA_CAPABLE) && SOC_PSRAM_DMA_CAPABLE
+        // Let the SPI DMA engine read directly from PSRAM (e.g. a display frame buffer) instead of
+        // bouncing it through internal memory. Harmless for internal buffers: the driver checks the
+        // address itself.
+        if (tx_data != nullptr && esp_ptr_external_ram(tx_data)) {
+            transaction.flags |= SPI_TRANS_DMA_USE_PSRAM;
+        }
+#endif
+        result = spi_device_polling_transmit(spi_device->handle, &transaction);
+        offset += chunk;
+    } while (result == ESP_OK && offset < length);
+
+    return result;
+}
+
+/** Receives @p length bytes in half-duplex mode: MOSI stays idle, so only rxlength is set. */
+static esp_err_t transmit_read_phase(SpiDevice* spi_device, void* rx_data, size_t length) {
+    constexpr size_t READ_CHUNK_SIZE = 64;
+    esp_err_t result = ESP_OK;
+    size_t offset = 0;
+
+    do {
+        const size_t chunk = std::min(length - offset, READ_CHUNK_SIZE);
+        spi_transaction_t transaction = {};
+        transaction.rxlength = chunk * 8;
+        transaction.rx_buffer = static_cast<uint8_t*>(rx_data) + offset;
+        result = spi_device_polling_transmit(spi_device->handle, &transaction);
+        offset += chunk;
+    } while (result == ESP_OK && offset < length);
+
+    return result;
+}
+
+/** Clocks the write and read phases together, as a full-duplex peripheral expects. */
+static esp_err_t transmit_full_duplex(SpiDevice* spi_device, const void* tx_data, void* rx_data, size_t length) {
+    constexpr size_t ZERO_CHUNK_SIZE = 64;
+    uint8_t zero_buffer[ZERO_CHUNK_SIZE] = {};
+    esp_err_t result = ESP_OK;
+    size_t offset = 0;
+
+    do {
+        const size_t chunk = tx_data == nullptr ? std::min(length - offset, ZERO_CHUNK_SIZE) : length;
+        spi_transaction_t transaction = {};
+        transaction.length = chunk * 8;
+        transaction.tx_buffer = tx_data == nullptr ? zero_buffer : static_cast<const uint8_t*>(tx_data) + offset;
+        transaction.rx_buffer = rx_data == nullptr ? nullptr : static_cast<uint8_t*>(rx_data) + offset;
+#if defined(SOC_PSRAM_DMA_CAPABLE) && SOC_PSRAM_DMA_CAPABLE
+        // See transmit_write_phase(): external transmit buffers are read by the DMA engine directly.
+        if (tx_data != nullptr && esp_ptr_external_ram(tx_data)) {
+            transaction.flags |= SPI_TRANS_DMA_USE_PSRAM;
+        }
+#endif
+        result = spi_device_polling_transmit(spi_device->handle, &transaction);
+        offset += chunk;
+    } while (result == ESP_OK && offset < length);
+
+    return result;
+}
+
+static error_t transmit(Device* device, SpiDevice* spi_device, const void* tx_data, void* rx_data, size_t length) {
     if (length == 0) return ERROR_NONE;
 
     // The bus is taken before the chip select is asserted, so no other peripheral is selected during another one's transfer
@@ -161,16 +233,20 @@ static error_t transmit(Device* device, SpiDevice* spi_device, const void* tx_da
     }
 
     esp_err_t result = ESP_OK;
-    size_t offset = 0;
-    do {
-        const size_t chunk = tx_data == nullptr ? std::min(length - offset, ZERO_CHUNK_SIZE) : length;
-        spi_transaction_t transaction = {};
-        transaction.length = chunk * 8;
-        transaction.tx_buffer = tx_data == nullptr ? zero_buffer : tx_data;
-        transaction.rx_buffer = rx_data == nullptr ? nullptr : static_cast<uint8_t*>(rx_data) + offset;
-        result = spi_device_polling_transmit(spi_device->handle, &transaction);
-        offset += chunk;
-    } while (result == ESP_OK && offset < length);
+    if (spi_device->half_duplex) {
+        // ESP-IDF rejects a half-duplex transaction that enables both the MOSI and MISO phases, so a
+        // read/write call becomes a write transaction followed by a read transaction. Only one of
+        // them is submitted per call when the caller wants a single direction. The chip select is
+        // driven by hand, so it stays asserted between the two transactions.
+        if (tx_data != nullptr || rx_data == nullptr) {
+            result = transmit_write_phase(spi_device, tx_data, length);
+        }
+        if (result == ESP_OK && rx_data != nullptr) {
+            result = transmit_read_phase(spi_device, rx_data, length);
+        }
+    } else {
+        result = transmit_full_duplex(spi_device, tx_data, rx_data, length);
+    }
 
     if (select) {
         gpio_descriptor_set_level(spi_device->cs, false);
