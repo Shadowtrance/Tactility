@@ -1,0 +1,15 @@
+description: >
+  Whole-device power-off request line. The pin is kept high-impedance while idle and is
+  driven low on request (open-drain semantics), e.g. the ESP-Mosaico POWER_SWITCH signal
+  to its SAM8108 power controller.
+compatible: "gpio-power-off"
+
+properties:
+  pin:
+    type: phandles
+    required: true
+    description: Shutdown request pin (kept high-impedance until power-off is requested)
+  assert-timeout-ms:
+    type: int
+    default: 8000
+    description: How long to hold the request low before releasing it if power did not drop
