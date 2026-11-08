@@ -89,6 +89,15 @@ struct CameraApi {
     error_t (*set_rotation)(CameraHandle handle, CameraRotation rotation);
 
     /**
+     * @brief Sets the preview flip (horizontal mirror).
+     * Can be called while streaming; the devicetree's vertical mirror is kept.
+     * @param[in] handle handle returned by open
+     * @param[in] flipped true to mirror horizontally
+     * @return ERROR_NONE on success
+     */
+    error_t (*set_flip)(CameraHandle handle, bool flipped);
+
+    /**
      * @brief Captures one frame and JPEG-encodes it.
      * @param[in] handle handle returned by open
      * @param[out] out_buf pointer to JPEG-encoded data (caller must free with heap_caps_free)
@@ -97,6 +106,21 @@ struct CameraApi {
      * @return ERROR_NONE on success
      */
     error_t (*capture_jpeg)(CameraHandle handle, uint8_t** out_buf, size_t* out_len, uint8_t quality);
+
+    /**
+     * @brief Whether this camera has a controllable flash.
+     * @param[in] device the camera device
+     * @return true when set_flash can be used
+     */
+    bool (*has_flash)(struct Device* device);
+
+    /**
+     * @brief Turns the camera flash on or off.
+     * @param[in] device the camera device
+     * @param[in] enabled true to turn the flash on
+     * @retval ERROR_NOT_SUPPORTED if the camera has no flash
+     */
+    error_t (*set_flash)(struct Device* device, bool enabled);
 };
 
 /** @brief See CameraApi::open */
@@ -120,8 +144,17 @@ uint32_t camera_get_height(CameraHandle handle);
 /** @brief See CameraApi::set_rotation */
 error_t camera_set_rotation(CameraHandle handle, CameraRotation rotation);
 
+/** @brief See CameraApi::set_flip */
+error_t camera_set_flip(CameraHandle handle, bool flipped);
+
 /** @brief See CameraApi::capture_jpeg */
 error_t camera_capture_jpeg(CameraHandle handle, uint8_t** out_buf, size_t* out_len, uint8_t quality);
+
+/** @brief See CameraApi::has_flash */
+bool camera_has_flash(struct Device* device);
+
+/** @brief See CameraApi::set_flash */
+error_t camera_set_flash(struct Device* device, bool enabled);
 
 extern const struct DeviceType CAMERA_TYPE;
 

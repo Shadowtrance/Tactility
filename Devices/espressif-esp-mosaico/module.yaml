@@ -10,5 +10,6 @@ dependencies:
   - Drivers/gpio-poweroff-module
   - Drivers/pwm-vibration-module
   - Drivers/spi-nand-module
+  - Drivers/sc101iot-module
 dts: espressif,esp-mosaico.dts
 dts-only: true

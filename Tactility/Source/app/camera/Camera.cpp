@@ -21,6 +21,9 @@
 #include <lvgl/widgets/toolbar.h>
 #include <lvgl_window_manager/window_manager.h>
 
+// LVGL's public header does not expose the image cache API used by the canvas update path.
+#include "misc/cache/instance/lv_image_cache.h"
+
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -28,6 +31,9 @@
 #include <tactility/device.h>
 #include <tactility/drivers/camera.h>
 #include <tactility/memory.h>
+#include <tactility/preferences.h>
+
+#include <esp_heap_caps.h>
 
 namespace tt::app::camera {
 
@@ -42,11 +48,16 @@ struct Context {
 
     CameraHandle camHandle = nullptr;
 
-    uint8_t* displayBuf[2] = {};
-    int displayBufIdx = 0;
-    int publishedDisplayBufIdx = -1;
+    // A single canvas buffer: LVGL caches images by source object, so swapping the buffer pointer
+    // through lv_canvas_set_buffer() every frame makes it render stale or partially updated data.
+    // Frames are copied into this buffer under the LVGL lock instead.
+    uint8_t* displayBuf = nullptr;
     uint32_t frameWidth = 0;
     uint32_t frameHeight = 0;
+    lv_timer_t* canvasTimer = nullptr;
+    std::atomic<uint32_t> frameCounter {0};
+    uint32_t publishedFrameCounter = 0;
+    bool canvasPublished = false;
 
     TaskHandle_t camTask = nullptr;
     SemaphoreHandle_t stopSem = nullptr;
@@ -55,12 +66,15 @@ struct Context {
     SemaphoreHandle_t camHandleMutex = nullptr;
 
     std::atomic<bool> captureNext {false};
+    std::atomic<bool> flip {false};
+    std::atomic<bool> flipDirty {false};
     std::atomic<bool> stopping {false};
 
     lv_display_rotation_t displayRotation = LV_DISPLAY_ROTATION_0;
 
     lv_obj_t* previewContainer = nullptr;
     lv_obj_t* previewCanvas = nullptr;
+    lv_obj_t* flashSwitch = nullptr;
     lv_obj_t* toastLabel = nullptr;
     lv_timer_t* toastTimer = nullptr;
 };
@@ -141,8 +155,44 @@ void buildTimestampedPath(const char* suffix, char* out, size_t outLen) {
     snprintf(out, outLen, "%s%s_%04u%s", dir, fname, static_cast<unsigned>(sequence++), suffix);
 }
 
-bool saveJpeg(Context* ctx) {
-    if (!ctx->camHandle) {
+bool getSettingsPath(char* out_path, size_t out_size) {
+    char dir[200];
+    if (app_paths_get_user_data_directory("tactility.camera", dir, sizeof(dir)) != ERROR_NONE) {
+        return false;
+    }
+    const int written = snprintf(out_path, out_size, "%s/settings.properties", dir);
+    return written > 0 && static_cast<size_t>(written) < out_size;
+}
+
+bool loadFlipSetting() {
+    char path[256];
+    if (!getSettingsPath(path, sizeof(path))) {
+        return false;
+    }
+    Preferences* preferences = preferences_open(path);
+    if (preferences == nullptr) {
+        return false;
+    }
+    bool flipped = false;
+    preferences_opt_bool(preferences, "flip", &flipped);
+    preferences_close(preferences);
+    return flipped;
+}
+
+void saveFlipSetting(bool flipped) {
+    char path[256];
+    if (!getSettingsPath(path, sizeof(path))) {
+        return;
+    }
+    Preferences* preferences = preferences_open(path);
+    if (preferences == nullptr) {
+        return;
+    }
+    preferences_put_bool(preferences, "flip", flipped);
+    preferences_close(preferences);
+}
+
+bool saveJpeg(Context* ctx) {    if (!ctx->camHandle) {
         showToast(ctx, "Capture failed: driver unavailable");
         return false;
     }
@@ -226,8 +276,82 @@ void onCaptureBtn(lv_event_t* e) {
     }
 }
 
+void onFlipBtn(lv_event_t* e) {
+    auto* ctx = static_cast<Context*>(lv_event_get_user_data(e));
+    if (ctx == nullptr) return;
+
+    const bool flipped = !ctx->flip.load();
+    ctx->flip.store(flipped);
+    ctx->flipDirty.store(true);
+
+    if (ctx->camHandleMutex != nullptr) {
+        xSemaphoreTake(ctx->camHandleMutex, portMAX_DELAY);
+        if (ctx->camHandle != nullptr) {
+            camera_set_flip(ctx->camHandle, flipped);
+        }
+        xSemaphoreGive(ctx->camHandleMutex);
+    }
+
+    showToast(ctx, flipped ? "Rear camera" : "Front camera");
+}
+
+void onFlashSwitch(lv_event_t* e) {
+    auto* ctx = static_cast<Context*>(lv_event_get_user_data(e));
+    auto* switch_obj = static_cast<lv_obj_t*>(lv_event_get_target(e));
+    const bool enabled = lv_obj_has_state(switch_obj, LV_STATE_CHECKED);
+
+    Device* camera = nullptr;
+    if (device_get_first_active_by_type(&CAMERA_TYPE, &camera) != ERROR_NONE) {
+        lv_obj_remove_state(switch_obj, LV_STATE_CHECKED);
+        return;
+    }
+    const error_t error = camera_set_flash(camera, enabled);
+    device_put(camera);
+
+    if (error != ERROR_NONE) {
+        lv_obj_remove_state(switch_obj, LV_STATE_CHECKED);
+        showToast(ctx, "Flash unavailable");
+    }
+}
+
+void canvasPublishTimerCb(lv_timer_t* timer) {
+    auto* ctx = static_cast<Context*>(lv_timer_get_user_data(timer));
+    if (ctx == nullptr || ctx->previewCanvas == nullptr || ctx->displayBuf == nullptr ||
+        ctx->frameWidth == 0 || ctx->frameHeight == 0) {
+        return;
+    }
+
+    const uint32_t current = ctx->frameCounter.load();
+    if (current == 0 || current == ctx->publishedFrameCounter) {
+        return;
+    }
+
+    // Re-publish on every new frame and drop LVGL's cached copy. This is the same update path the
+    // official BSP's camera UI uses: updating a canvas buffer in place is not enough, because the
+    // image cache would otherwise keep rendering the previous frame.
+    if (!ctx->canvasPublished) {
+        lv_canvas_set_buffer(
+            ctx->previewCanvas,
+            ctx->displayBuf,
+            static_cast<int32_t>(ctx->frameWidth),
+            static_cast<int32_t>(ctx->frameHeight),
+            LV_COLOR_FORMAT_RGB565
+        );
+        ctx->canvasPublished = true;
+    }
+
+    lv_draw_buf_t* draw_buf = lv_canvas_get_draw_buf(ctx->previewCanvas);
+    if (draw_buf != nullptr) {
+        lv_draw_buf_invalidate_cache(draw_buf, NULL);
+        lv_image_cache_drop(draw_buf);
+    }
+    lv_obj_invalidate(ctx->previewCanvas);
+    ctx->publishedFrameCounter = current;
+}
+
 void cameraTaskEntry(void* arg) {
     auto* ctx = static_cast<Context*>(arg);
+    ctx->flip.store(loadFlipSetting());
 
     Device* camDev = nullptr;
     if (device_get_first_active_by_type(&CAMERA_TYPE, &camDev) != ERROR_NONE) {
@@ -238,14 +362,25 @@ void cameraTaskEntry(void* arg) {
     }
 
     CameraHandle handle = nullptr;
-    if (camera_open(camDev, &handle) != ERROR_NONE) {
-        LOG_E("Camera", "camera_open failed");
-        device_put(camDev);
-        xSemaphoreGive(ctx->doneSem);
-        vTaskDelete(nullptr);
-        return;
+    while (true) {
+        // The first open can race the sensor's power-up, or transiently find no free GDMA channel
+        // while another subsystem (e.g. a TLS handshake on the development server) holds one.
+        // Keep trying instead of leaving the preview black until the app is reopened.
+        if (xSemaphoreTake(ctx->stopSem, 0) == pdTRUE) {
+            device_put(camDev);
+            xSemaphoreGive(ctx->doneSem);
+            vTaskDelete(nullptr);
+            return;
+        }
+        if (camera_open(camDev, &handle) == ERROR_NONE) {
+            break;
+        }
+        LOG_W("Camera", "camera_open failed; retrying");
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
     device_put(camDev);
+
+    camera_set_flip(handle, ctx->flip.load());
 
     xSemaphoreTake(ctx->camHandleMutex, portMAX_DELAY);
     ctx->camHandle = handle;
@@ -254,30 +389,53 @@ void cameraTaskEntry(void* arg) {
     showToast(ctx, "Camera Started...");
 
     size_t frameSz = (size_t)camera_get_width(handle) * camera_get_height(handle) * 2;
-    for (int i = 0; i < 2; i++) {
-        const MemoryPolicy policy { .required = 0, .desired = MEMORY_CAPABILITY_EXTERNAL, .alignment = 0 };
-        ctx->displayBuf[i] = static_cast<uint8_t*>(memory_alloc_with_policy(frameSz, &policy));
-        if (!ctx->displayBuf[i]) {
-            LOG_E("Camera", "Failed to alloc display buffer %d", i);
-            xSemaphoreTake(ctx->camHandleMutex, portMAX_DELAY);
-            camera_close(handle);
-            ctx->camHandle = nullptr;
-            xSemaphoreGive(ctx->camHandleMutex);
-            for (int j = 0; j < 2; j++) {
-                heap_caps_free(ctx->displayBuf[j]);
-                ctx->displayBuf[j] = nullptr;
-            }
-            xSemaphoreGive(ctx->doneSem);
-            vTaskDelete(nullptr);
-            return;
+    // Match the BSP camera UI: a cache-line aligned, DMA-capable PSRAM buffer for the canvas.
+    ctx->displayBuf = static_cast<uint8_t*>(heap_caps_aligned_alloc(
+        64,
+        frameSz,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_8BIT
+    ));
+    if (!ctx->displayBuf) {
+        const MemoryPolicy policy { .required = 0, .desired = MEMORY_CAPABILITY_EXTERNAL, .alignment = 64 };
+        ctx->displayBuf = static_cast<uint8_t*>(memory_alloc_with_policy(frameSz, &policy));
+    }
+    if (!ctx->displayBuf) {
+        LOG_E("Camera", "Failed to alloc display buffer");
+        xSemaphoreTake(ctx->camHandleMutex, portMAX_DELAY);
+        camera_close(handle);
+        ctx->camHandle = nullptr;
+        xSemaphoreGive(ctx->camHandleMutex);
+        xSemaphoreGive(ctx->doneSem);
+        vTaskDelete(nullptr);
+        return;
+    }
+    // Publish an uninitialized PSRAM buffer and LVGL will render noise until the first frame.
+    memset(ctx->displayBuf, 0, frameSz);
+
+    // The first frames after STREAMON can contain a partial line/frame while the DVP FIFO and the
+    // sensor's auto-exposure settle. Discard them before showing anything.
+    for (int i = 0; i < 5; i++) {
+        uint8_t* warm_buf = nullptr;
+        size_t warm_len = 0;
+        uint32_t warm_width = 0;
+        uint32_t warm_height = 0;
+        if (camera_get_frame(handle, &warm_buf, &warm_len, 300, &warm_width, &warm_height) == ERROR_NONE) {
+            camera_release_frame(handle);
         }
     }
 
+    // The canvas buffer is published by canvasPublishTimerCb() on the LVGL task. LVGL calls from
+    // this task (lv_canvas_set_buffer in particular) can deadlock with the LVGL task's own image
+    // cache/flush work.
     uint8_t* frameBuf = nullptr;
     size_t frameLen = 0;
 
     while (true) {
         if (xSemaphoreTake(ctx->stopSem, 0) == pdTRUE) break;
+
+        if (ctx->flipDirty.exchange(false)) {
+            saveFlipSetting(ctx->flip.load());
+        }
 
         if (ctx->captureNext.load()) {
             ctx->captureNext.store(false);
@@ -294,27 +452,26 @@ void cameraTaskEntry(void* arg) {
             break;
         }
 
-        int idx = ctx->publishedDisplayBufIdx < 0 ? 0 : ctx->publishedDisplayBufIdx ^ 1;
         if (frameLen > frameSz || (size_t)frameWidth * frameHeight * 2 > frameSz) {
             LOG_E("Camera", "Frame too large: %zu bytes (%ux%u)", frameLen, (unsigned)frameWidth, (unsigned)frameHeight);
             camera_release_frame(handle);
             continue;
         }
-        memcpy(ctx->displayBuf[idx], frameBuf, frameLen);
-        camera_release_frame(handle);
-        ctx->displayBufIdx = idx;
 
+        // Copy and invalidate while holding the LVGL lock: the canvas points at this buffer, and
+        // LVGL must not render it while memcpy() is updating it.
         if (lvgl_try_lock(pdMS_TO_TICKS(50))) {
-            lv_obj_t* previewCanvas = ctx->previewCanvas;
-            const bool stopping = ctx->stopping.load();
-            auto w = static_cast<int32_t>(frameWidth);
-            auto h = static_cast<int32_t>(frameHeight);
-            if (previewCanvas != nullptr && !stopping) {
-                lv_canvas_set_buffer(previewCanvas, ctx->displayBuf[idx], w, h, LV_COLOR_FORMAT_RGB565);
-                ctx->publishedDisplayBufIdx = idx;
+            if (ctx->previewCanvas != nullptr && !ctx->stopping.load()) {
+                memcpy(ctx->displayBuf, frameBuf, frameLen);
+                ctx->frameCounter.fetch_add(1);
             }
             lvgl_unlock();
         }
+        camera_release_frame(handle);
+    }
+
+    if (ctx->flipDirty.exchange(false)) {
+        saveFlipSetting(ctx->flip.load());
     }
 
     xSemaphoreTake(ctx->camHandleMutex, portMAX_DELAY);
@@ -322,10 +479,8 @@ void cameraTaskEntry(void* arg) {
     ctx->camHandle = nullptr;
     xSemaphoreGive(ctx->camHandleMutex);
 
-    for (int i = 0; i < 2; i++) {
-        heap_caps_free(ctx->displayBuf[i]);
-        ctx->displayBuf[i] = nullptr;
-    }
+    heap_caps_free(ctx->displayBuf);
+    ctx->displayBuf = nullptr;
 
     xSemaphoreGive(ctx->doneSem);
     vTaskDelete(nullptr);
@@ -369,6 +524,16 @@ void createWidgets(lv_obj_t* parent, void* userData) {
     // The global toolbar nav callback only knows how to stop old-model apps.
     lvgl_toolbar_set_nav_action(toolbar, LV_SYMBOL_CLOSE, onBackPressed, ctx);
     lvgl_toolbar_add_text_button_action(toolbar, LV_SYMBOL_EYE_OPEN, onCaptureBtn, ctx);
+    lvgl_toolbar_add_text_button_action(toolbar, LV_SYMBOL_LOOP, onFlipBtn, ctx);
+
+    Device* camera_device = nullptr;
+    if (device_get_first_active_by_type(&CAMERA_TYPE, &camera_device) == ERROR_NONE) {
+        if (camera_has_flash(camera_device)) {
+            ctx->flashSwitch = lvgl_toolbar_add_switch_action(toolbar);
+            lv_obj_add_event_cb(ctx->flashSwitch, onFlashSwitch, LV_EVENT_VALUE_CHANGED, ctx);
+        }
+        device_put(camera_device);
+    }
 
     auto* main_wrapper = lv_obj_create(parent);
     lv_obj_set_flex_flow(main_wrapper, LV_FLEX_FLOW_COLUMN);
@@ -392,6 +557,8 @@ void createWidgets(lv_obj_t* parent, void* userData) {
     lv_obj_set_style_bg_color(ctx->previewCanvas, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(ctx->previewCanvas, LV_OPA_COVER, 0);
     lv_obj_center(ctx->previewCanvas);
+    // Runs on the LVGL task, so publishing the canvas buffer never races with LVGL's own work.
+    ctx->canvasTimer = lv_timer_create(canvasPublishTimerCb, 20, ctx);
 
     ctx->toastLabel = lv_label_create(lv_layer_top());
     lv_obj_align(ctx->toastLabel, LV_ALIGN_TOP_MID, 0, 52 * 2 + 24);
@@ -426,6 +593,11 @@ void destroyWidgets(void* userData) {
     if (ctx->toastTimer != nullptr) {
         lv_timer_delete(ctx->toastTimer);
         ctx->toastTimer = nullptr;
+    }
+
+    if (ctx->canvasTimer != nullptr) {
+        lv_timer_delete(ctx->canvasTimer);
+        ctx->canvasTimer = nullptr;
     }
 
     if (ctx->toastLabel != nullptr) {

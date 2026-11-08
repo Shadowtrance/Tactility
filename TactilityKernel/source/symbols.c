@@ -457,7 +457,10 @@ const struct ModuleSymbol KERNEL_SYMBOLS[] = {
     DEFINE_MODULE_SYMBOL(camera_get_width),
     DEFINE_MODULE_SYMBOL(camera_get_height),
     DEFINE_MODULE_SYMBOL(camera_set_rotation),
+    DEFINE_MODULE_SYMBOL(camera_set_flip),
     DEFINE_MODULE_SYMBOL(camera_capture_jpeg),
+    DEFINE_MODULE_SYMBOL(camera_has_flash),
+    DEFINE_MODULE_SYMBOL(camera_set_flash),
     DEFINE_MODULE_SYMBOL(CAMERA_TYPE),
     // drivers/wifi
     DEFINE_MODULE_SYMBOL(wifi_set_radio_on),

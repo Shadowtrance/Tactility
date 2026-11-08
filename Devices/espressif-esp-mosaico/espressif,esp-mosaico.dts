@@ -21,6 +21,7 @@
 #include <bindings/co5300_backlight.h>
 #include <bindings/cst9220.h>
 #include <bindings/es8311.h>
+#include <bindings/sc101iot.h>
 #include <bindings/spi_nand.h>
 
 /*
@@ -149,6 +150,44 @@
 	};
 
 	/*
+	 * External module I2C bus. It carries the camera module's SCCB and its EEPROM. The camera
+	 * fits the left slot only. On the v1.2 board this is I2C1 on GPIO0/1.
+	 */
+	i2c1 {
+		compatible = "espressif,esp32-i2c-master";
+		port = <I2C_NUM_1>;
+		clock-frequency = <100000>;
+		pin-sda = <&gpio0 0 GPIO_FLAG_PULL_UP>;
+		pin-scl = <&gpio0 1 GPIO_FLAG_PULL_UP>;
+
+		camera0 {
+			compatible = "smartsens,sc101iot";
+			reg = <0x68>;
+			pin-d0 = <&gpio0 16 GPIO_FLAG_NONE>;
+			pin-d1 = <&gpio0 15 GPIO_FLAG_NONE>;
+			pin-d2 = <&gpio0 33 GPIO_FLAG_NONE>;
+			pin-d3 = <&gpio0 4 GPIO_FLAG_NONE>;
+			pin-d4 = <&gpio0 14 GPIO_FLAG_NONE>;
+			pin-d5 = <&gpio0 12 GPIO_FLAG_NONE>;
+			pin-d6 = <&gpio0 18 GPIO_FLAG_NONE>;
+			pin-d7 = <&gpio0 13 GPIO_FLAG_NONE>;
+			pin-vsync = <&gpio0 55 GPIO_FLAG_NONE>;
+			pin-de = <&gpio0 19 GPIO_FLAG_NONE>;
+			pin-pclk = <&gpio0 17 GPIO_FLAG_NONE>;
+			pin-reset = <&gpio0 53 GPIO_FLAG_NONE>;
+			pin-pwdn = <&gpio0 48 GPIO_FLAG_NONE>;
+			pin-flash = <&gpio0 34 GPIO_FLAG_NONE>;
+			/* The module has its own 20 MHz oscillator. */
+			xclk-frequency-hz = <0>;
+			/* Sensor mounting correction; frames are center-cropped to the square panel. */
+			rotation-offset = <270>;
+			mirror-y;
+			output-width = <480>;
+			output-height = <480>;
+		};
+	};
+
+	/*
 	 * CO5300 QSPI display on SPI2. v1.2 uses SCL=42 / RST=44; v1.0 swaps those two.
 	 * D0..D3 are 36/51/35/9, CS=50, TE=43 (frame-sync input for tear-free updates).
 	 */
@@ -162,6 +201,9 @@
 		pin-wp = <&gpio0 35 GPIO_FLAG_NONE>;
 		pin-hd = <&gpio0 9 GPIO_FLAG_NONE>;
 		max-transfer-size = <65536>;
+		/* The CO5300 is write-only; release its unused RX GDMA half so CAM0 can use it while
+		 * the shared AES/SHA DMA permanently holds the third AXI pair. */
+		tx-only;
 
 		display@0 {
 			compatible = "chipone,co5300";

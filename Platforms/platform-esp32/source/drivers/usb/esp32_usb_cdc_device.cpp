@@ -57,7 +57,10 @@ static int cdc_mirroring_vprintf(const char* fmt, va_list args) {
 
     int result = previous_vprintf ? previous_vprintf(fmt, args) : vprintf(fmt, args);
 
-    if (tud_cdc_connected()) {
+    // Mirror whenever the USB device is configured rather than only while DTR is asserted.
+    // idf_monitor leaves DTR deasserted in its idle state, which would otherwise suppress all
+    // output. The TX FIFO is overwritable while DTR is low, so nothing accumulates unread.
+    if (tud_mounted()) {
         char buf[256];
         int len = vsnprintf(buf, sizeof(buf), fmt, cdc_args);
         if (len > 0) {

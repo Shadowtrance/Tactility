@@ -1,0 +1,65 @@
+description: SmartSens SC101IOT 1MP DVP camera sensor
+
+include: [ "i2c-device.yaml" ]
+
+compatible: "smartsens,sc101iot"
+
+properties:
+  rotation-offset:
+    type: int
+    enum: [ 0, 90, 180, 270 ]
+    default: 0
+    description: Clockwise mounting correction in degrees (0, 90, 180 or 270).
+  mirror-y:
+    type: boolean
+    default: false
+    description: Mirror the image vertically, for modules mounted upside down.
+  output-width:
+    type: int
+    default: 0
+    description: Width of the RGB565 frames produced by the driver. 0 keeps the sensor width.
+  output-height:
+    type: int
+    default: 0
+    description: Height of the RGB565 frames produced by the driver. 0 keeps the sensor height.
+  xclk-frequency-hz:
+    type: int
+    default: 0
+    description: DVP master clock frequency. Zero when the module has its own oscillator.
+  pin-d0:
+    type: phandles
+  pin-d1:
+    type: phandles
+  pin-d2:
+    type: phandles
+  pin-d3:
+    type: phandles
+  pin-d4:
+    type: phandles
+  pin-d5:
+    type: phandles
+  pin-d6:
+    type: phandles
+  pin-d7:
+    type: phandles
+  pin-vsync:
+    type: phandles
+  pin-de:
+    type: phandles
+  pin-pclk:
+    type: phandles
+  pin-xclk:
+    type: phandles
+    default: GPIO_PIN_SPEC_NONE
+  pin-reset:
+    type: phandles
+    default: GPIO_PIN_SPEC_NONE
+    description: Sensor reset GPIO, pulsed by esp_video before probing.
+  pin-pwdn:
+    type: phandles
+    default: GPIO_PIN_SPEC_NONE
+    description: Sensor power-down GPIO, driven low while the camera is open and high when closed.
+  pin-flash:
+    type: phandles
+    default: GPIO_PIN_SPEC_NONE
+    description: Flash LED control GPIO. Active-low, driven as an open-drain output.

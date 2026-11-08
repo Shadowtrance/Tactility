@@ -49,3 +49,11 @@ properties:
       device on the bus is selected. Helps some SPI peripherals (a garbled/invalid response on
       CMD8/if_cond has been observed for SD-over-SPI on some boards) but has been observed to
       break others (prevents the SD card from responding to CMD0 at all) - opt in per board.
+  tx-only:
+    type: boolean
+    default: false
+    description: >
+      Set when every device on this bus is write-only. The driver then releases the RX GDMA
+      channel it allocated during bus initialization, leaving it for other peripherals (e.g.
+      the DVP camera on ESP32-S31, where display/SPI2, NAND/SPI3 and CAM share the 3 AXI GDMA
+      channel pairs).

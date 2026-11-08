@@ -42,9 +42,27 @@ error_t camera_set_rotation(CameraHandle handle, CameraRotation rotation) {
     return CAMERA_DRIVER_API(driver)->set_rotation(handle, rotation);
 }
 
+error_t camera_set_flip(CameraHandle handle, bool flipped) {
+    const auto* driver = device_get_driver(handle->device);
+    return CAMERA_DRIVER_API(driver)->set_flip(handle, flipped);
+}
+
 error_t camera_capture_jpeg(CameraHandle handle, uint8_t** out_buf, size_t* out_len, uint8_t quality) {
     const auto* driver = device_get_driver(handle->device);
     return CAMERA_DRIVER_API(driver)->capture_jpeg(handle, out_buf, out_len, quality);
+}
+
+bool camera_has_flash(Device* device) {
+    const auto* api = CAMERA_DRIVER_API(device_get_driver(device));
+    return api->has_flash != nullptr && api->has_flash(device);
+}
+
+error_t camera_set_flash(Device* device, bool enabled) {
+    const auto* api = CAMERA_DRIVER_API(device_get_driver(device));
+    if (api->set_flash == nullptr) {
+        return ERROR_NOT_SUPPORTED;
+    }
+    return api->set_flash(device, enabled);
 }
 
 const struct DeviceType CAMERA_TYPE {

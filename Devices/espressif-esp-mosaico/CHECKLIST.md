@@ -1,8 +1,8 @@
 # ESP-Mosaico V1.2 bring-up checklist
 
 Checklist of the **internal** hardware the official ESP-Mosaico BSP covers, with Tactility's
-current state. External modules are out of scope for now; camera findings are recorded under
-"Deferred: camera module" below.
+current state. The V1.4 camera module is covered under "Camera module (V1.4 / SC101IOT)" below;
+the V1.2 OV3640 module and other external modules are out of scope for now.
 
 Legend: ✅ working · 🟡 present but untested/incomplete · ❌ missing
 
@@ -64,7 +64,7 @@ internal I2C is on GPIO0/1.
 | Item | Status | Notes |
 | --- | --- | --- |
 | Serial console | ✅ | CDC-ACM console over the Type-C port ("Tactility Device"). Windows enumerates it as a COM port. |
-| Flashing | ✅ | Enter download mode first (hold BOOT while resetting, or send `TT:BOOTDL` on the running console), then `idf.py flash`. The device sdkconfig selects `--before=no-reset` because the USB-OTG ROM port has no DTR/RTS reset lines. |
+| Flashing | ✅ | Enter download mode first: with the device off, hold BOOT (GPIO61) while powering it on, then release. BOOT does not reset a running board. `TT:BOOTDL` on the running console is the alternative. Then `idf.py flash`. The device sdkconfig selects `--before=no-reset` because the USB-OTG ROM port has no DTR/RTS reset lines. The esptool stub works on S31, so a full image writes in about 30 s (`CONFIG_ESPTOOLPY_NO_STUB=n`). For logs, run `idf.py -p COMx monitor`. The firmware mirrors logs regardless of DTR/RTS, and output starts once the app console enumerates, so bootloader and early boot logs need a UART console. |
 | Auto-download over CDC | ✅ | The console RX handler sets `LP_SYSTEM_REG_FORCE_DOWNLOAD_BOOT` (S31's equivalent of `RTC_CNTL_FORCE_DOWNLOAD_BOOT`) and resets. The ROM then enumerates its USB-OTG download interface on the same Type-C port. |
 | External app/SDK support for S31 | ✅ | SDK platform `platform-esp32s31` (generic device `Devices/generic-esp32s31` + CI matrix entry + `sdkconfig.app.esp32s31`). `tt app bir --architecture esp32s31` builds, installs over the dev server, and runs (HelloWorld, Snake, AudioRecorder, Doom verified). PPA and `esp_cache_msync` are exported to apps on S31 as on P4, which the Doom port needs. |
 
@@ -76,7 +76,7 @@ internal I2C is on GPIO0/1.
 - Speaker output confirmed; Audio settings app available; mic mute works (software-applied).
 - Bluetooth radio toggles off and back on without crashing (30+ cycles stress-tested, including while scanning; S31 keeps the controller initialized between sessions because `esp_bt_controller_deinit()` asserts in `btdm_osal_elem_mempool_deinit()`).
 - Software power-off via the Power app cuts the device rails (POWER_SWITCH/GPIO57). After a full power cycle the RTC crash record is invalid, so it is discarded silently instead of being reported as a bogus crash.
-- Flashing works from boot mode: hold BOOT while resetting (or send `TT:BOOTDL` on the running console) and run `idf.py flash`. The sdkconfig uses `--before=no-reset` because the USB-OTG ROM port has no DTR/RTS reset wiring.
+- Flashing works from boot mode: with the device off, hold BOOT while powering it on, then run `idf.py flash`. The sdkconfig uses `--before=no-reset` because the USB-OTG ROM port has no DTR/RTS reset wiring. The stub flasher is enabled, so a full image writes in about 30 s. For logs, run `idf.py -p COMx monitor`. The firmware mirrors logs regardless of DTR/RTS, and output begins when the app console enumerates, so bootloader and early boot logs need a UART console.
 - The 128 MB SPI NAND is the user-data volume: FAT on Dhara FTL, mounted at `/sdcard`, visible as a 93.2 MB drive in System Info. Setup/config/app files live under `/sdcard/tactility`. The NOR `data` partition is no longer used.
 - USB drive mode works for the NAND volume: Settings → USB reboots into mass storage, Windows mounts the volume, file copy and delete persist, and eject + tap returns to the OS. The volume reports healthy.
 - The on-screen keyboard appears for text entry. Navigation-only keyboards (encoders, trackballs) advertise `KeyboardApi::is_text_input = false`, so they no longer make the UI think a typing keyboard is attached.
@@ -88,14 +88,27 @@ internal I2C is on GPIO0/1.
 1. Runtime v1.0/v1.2 revision detection so one image covers both boards (only if v1.0 units exist).
 2. USB host mode, if ever needed: the Type-C port shares one OTG controller/PHY with device mode, so it needs OTG role handling plus VBUS/ID verification.
 
-## Deferred: camera module
+## Camera module (V1.4 / SC101IOT)
 
-Not implemented yet; scoped out on purpose. Findings for whoever picks it up:
+Implemented for the V1.4 module in the left slot; the V1.2 OV3640 module and the
+v1.0 board mapping are still deferred.
+
+| Item | Status | Notes |
+| --- | --- | --- |
+| Preview | ✅ | Stable 640x480 UYVY center-cropped to 480x480, PPA-converted to RGB565, DTS rotation 270 + mirror-y. Five-frame warm-up; frames with a non-exact received size are dropped as timeouts, which removes the occasional full-size/misaligned DVP frame. `Drivers/sc101iot-module` + built-in Camera app. |
+| Flash switch | ✅ | GPIO34, active-low open-drain; toolbar switch appears only when `CameraApi::has_flash` reports it. |
+| Preview flip | ✅ | Manual Front/Rear toggle (toolbar loop icon) using `PPA mirror_x`, persisted via Tactility `preferences`. The module is hinged; the BSP also treats this as a manual setting, not hinge detection. |
+| JPEG capture | ✅ | Hardware JPEG encoder on the raw UYVY frame; saved cleanly to the app's user-data directory. Unaffected by the preview flip. |
+| DVP stability patch | ✅ | Vendored as `Drivers/sc101iot-module/patches/esp-idf-dvp-frame-capture-stability-6.1.patch` and applied idempotently to `$IDF_PATH` at configure time (same approach as the official BSP). The 6.1 port adds the strict received-size guard (drops unless `dma_recv_size == fb_size`); corrupt/short/long frames are dropped as timeouts. |
+| AXI GDMA | ✅ | `spi0` is `tx-only`; its unused RX channel is released for CAM0. The shared mbedTLS AES/SHA DMA acquires the third AXI pair on first use and keeps it (Wi-Fi off does not release it), so sharing the display's RX half is required. |
+
+Findings for the remaining work:
 
 - Left slot only, 8-bit DVP. V1.2 modules use an **OV3640** (1024×768 UYVY, external 24 MHz XCLK), V1.4 modules an **SC101IOT** (1280×720 UYVY, external 20 MHz XCLK). Both sensors are supported by `esp_cam_sensor` 2.6 (OV3640 PIDs 0x364C and 0x3641).
 - Pins: D0..D7 = 16, 15, 33, 4, 14, 12, 18, 13; VSYNC 55, DE 19, PCLK 17; RESET 53, PWDN 48 (low = active), FLASH 34.
 - SCCB shares the external I2C1 bus (SDA 0 / SCL 1) with the module EEPROM (0x50, board type 0x07). Opening the camera turns GPIO14 into DVP D4, so slot-EEPROM discovery must stop before streaming starts.
-- `Tactility/idf_component.yml` pins `esp_video` 2.2.0 for `[esp32s3, esp32c6, esp32p4]` only. S31 support starts in the 2.5.x line (`targets` includes `esp32s31`), which pulls `esp_cam_sensor` 2.6.
-- `CameraApi` promises RGB565 frames, so the driver must convert UYVY → RGB565 with the PPA (same SRM path Doom uses), not return the native UYVY buffer.
-- Removable module: probe lazily in `camera_open()` (esp_video init + sensor auto-detect) and return `ERROR_NOT_FOUND` when the slot is empty, clearing the "initialized" flag so a later open retries. No mid-stream removal support; the app must close the handle.
-- **IDF caveat:** the official BSP (`I:\esp-mosaico-bsp-master`) needs IDF ≥ 6.2 and applies a DVP frame-capture stability patch (frame-tail DMA buffer, drop incomplete frames, per-VSYNC FIFO reset). IDF 6.1's `esp_driver_cam` lacks those guards and the patch does not apply as-is. Basic capture should run without it, but short-frame/overrun glitches are likely until the patch is ported or the firmware moves to 6.2. The separate SC101IOT PCLK-delay patch (V1.4 modules only) is a one-line change and easy to vendor.
+- `Tactility/idf_component.yml` pins `esp_video` 2.5.0 for `esp32s31`, which pulls `esp_cam_sensor` 2.6.
+- `CameraApi` promises RGB565 frames, so the driver converts UYVY → RGB565 with the PPA (same SRM path Doom uses), not the native UYVY buffer.
+- Removable module: probe lazily in `camera_open()` (esp_video init + sensor auto-detect) and return `ERROR_NOT_FOUND` when the slot is empty, clearing the "initialized" flag so a later open retries. The Camera app now retries `camera_open()` every 500 ms instead of leaving a black canvas.
+- SC101IOT PCLK delay: `esp_cam_sensor` 2.6 does not include the BSP's fix yet, so the driver writes register 0x3640 bits [1:0] = 0 over SCCB after `esp_video_init()`.
+- Root cause / future hardening: IDF 6.1's S31 DVP can produce full-size but misaligned frames; the strict received-size guard drops them and the preview stays stable. 6.2 adds the S31 CAM core clock source/divider (`cam_ll_select_core_clk_src()` + `cam_ll_set_core_clock_divider(ctlr, 2, 0, 0)`) and descriptor-node alignment, which are the proper timing fix once S31 leaves preview.

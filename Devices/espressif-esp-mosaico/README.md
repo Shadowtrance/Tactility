@@ -96,6 +96,59 @@ update such as a host-side file delete stays in the journal until a later checkp
 file copy still survived, but deletes reverted on reboot and Windows reported the FAT volume
 as needing a scan. The wrapper borrows the real block device; the NAND driver keeps ownership.
 
+## Camera
+
+The left module slot is supported with the V1.4 **SC101IOT** module (8-bit DVP,
+UYVY). `Drivers/sc101iot-module` (compatible `smartsens,sc101iot`) initializes
+`esp_video`/`esp_cam_sensor` lazily on the first `camera_open()`, center-crops
+640x480 to the 480x480 panel, converts UYVY to RGB565 with the PPA, and applies
+the DTS rotation/mirror. The built-in Camera app shows the preview, has a
+capability-gated flash switch (GPIO34, active-low open-drain), and saves JPEGs
+to the app's user-data directory.
+
+The camera module is hinged and can face the user or outward. Like the BSP's
+camera app, this is a **manual** Front/Rear toggle, not hinge detection: the
+toolbar loop icon flips the preview horizontally (`PPA mirror_x`) and the choice
+is persisted in the app's `settings.properties` through Tactility preferences.
+
+Three things are needed besides the driver:
+
+- **DVP stability patch.** IDF 6.1's `esp_driver_cam` does not isolate the tail
+  of a short/incomplete frame; without the patch the DMA overruns the capture
+  buffer and corrupts memory. The official BSP ships this patch and applies it
+  to `$IDF_PATH` at configure time. `Drivers/sc101iot-module/CMakeLists.txt`
+  does the same with the 6.1-adapted
+  `patches/esp-idf-dvp-frame-capture-stability-6.1.patch`; it is idempotent and
+  warns (without failing) if git or a writable IDF checkout is unavailable.
+  The 6.1 port also drops frames whose received size is **not exactly** the
+  expected size; the app treats those drops as timeouts and keeps streaming.
+  This catches short/long frames but not the remaining full-size corruption.
+- **AXI GDMA budget.** On S31 the display (SPI2), NAND (SPI3) and camera (CAM0)
+  all use the three AXI GDMA pairs. The shared mbedTLS AES/SHA DMA acquires the
+  third pair on first use and keeps it, even after Wi-Fi is turned off. `spi0`
+  declares `tx-only`, so the SPI driver releases the display's unused RX
+  channel after bus init and the DVP camera can use it. Without that,
+  `VIDIOC_STREAMON` fails with `no free gdma channel`.
+- **Startup settling.** The first frames after `STREAMON` can be partial while
+  the DVP FIFO and sensor auto-exposure settle, so the app discards five frames
+  before publishing the canvas.
+
+`esp_cam_sensor` does not yet contain the BSP's SC101IOT PCLK-delay fix, so the
+driver writes the same register (0x3640 bits [1:0] = 0) over SCCB after
+`esp_video_init()`.
+
+**Current status:** the preview is stable with the strict frame-size guard. IDF
+6.1's S31 DVP still occasionally produces a full-size but misaligned frame; the
+driver drops any frame whose received size is not exactly the expected size, and
+the app treats those drops as timeouts so streaming continues. This is a
+stability guard rather than a timing fix: 6.2 adds the S31 CAM core clock
+source/divider (`cam_ll_select_core_clk_src()` +
+`cam_ll_set_core_clock_divider(ctlr, 2, 0, 0)`) and descriptor-node alignment,
+which are the proper long-term cleanup when S31 leaves preview. JPEG capture
+uses the hardware encoder on the raw UYVY frame, so it is unaffected by the
+preview flip. OV3640 (V1.2 module) and the v1.0 board mapping are not
+implemented.
+
 ## External apps
 
 The board is a full app target:
@@ -116,21 +169,46 @@ The board is a full app target:
 ## Flashing
 
 The Type-C port is USB-OTG only; there is no USB-to-UART bridge with DTR/RTS reset
-lines, so esptool cannot reset the board into download mode. Enter download mode
-first:
+lines. The BOOT button does not reset a running board. It only enters download mode
+when held during power-up:
 
-1. Hold BOOT (GPIO61) while resetting or powering the board.
-2. The ROM enumerates its USB-OTG download interface (`303A:0020`) on the same
+1. Turn the device off.
+2. Hold BOOT (GPIO61), power the board on (USB or POWER), then release BOOT.
+3. The ROM enumerates its USB-OTG download interface (`303A:0020`) on the same
    Type-C port as a "USB Serial Device".
-3. Run `idf.py flash`. This device's sdkconfig selects `--before=no-reset`, so
+4. Run `idf.py flash`. This device's sdkconfig selects `--before=no-reset`, so
    esptool connects to the port as-is instead of resetting the board out of
    download mode again. After flashing it hard-resets into the firmware.
 
-Alternatively, while the firmware is running, send `TT:BOOTDL` on the "Tactility
-Console" COM port (`303A:4002`). The console driver sets
+While the firmware is running, sending `TT:BOOTDL` on the "Tactility Console" COM
+port (`303A:4002`) also reboots into download mode. The console driver sets
 `LP_SYSTEM_REG_FORCE_DOWNLOAD_BOOT` (S31's always-on equivalent of
 `RTC_CNTL_FORCE_DOWNLOAD_BOOT`) and resets the chip, after which the ROM port from
-step 2 appears.
+step 3 appears.
+
+The S31 supports the esptool stub flasher, so this device also sets
+`CONFIG_ESPTOOLPY_NO_STUB=n`. The full 4.9 MB image writes in about 30 seconds
+instead of the ROM-only path's 2+ minutes.
 
 The same rule applies to the browser flasher: put the board in download mode
 manually first.
+
+## Monitoring
+
+The app console is a separate USB device (`303A:4002`), so `idf.py flash monitor`
+cannot work in one command. Run:
+
+```
+idf.py -p COMx monitor
+```
+
+The firmware mirrors logs whenever USB is configured, so the terminal's DTR/RTS
+line states do not affect output. `--no-reset` is optional.
+
+The app console only enumerates after the app starts USB, so a fresh power cycle
+starts logging around display initialization. ROM, bootloader and early app logs
+are not available over this port. Capturing those requires a UART or
+USB-Serial/JTAG console on the expansion header.
+
+The monitor's reset shortcut (`Ctrl+T Ctrl+R`) cannot reset this board either,
+since the USB-OTG port has no DTR/RTS reset wiring.

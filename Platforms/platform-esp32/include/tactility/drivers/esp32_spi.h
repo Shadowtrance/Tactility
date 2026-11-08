@@ -35,6 +35,12 @@ struct Esp32SpiConfig {
      * some boards) - opt in per board rather than defaulting it on for everyone.
      */
     bool miso_pull_up;
+    /**
+     * Set when nothing on the bus ever receives data. The SPI driver then releases the RX GDMA
+     * channel it allocated during bus initialization, leaving it available to other peripherals.
+     * Only safe when every device on the bus is write-only (e.g. a display controller).
+     */
+    bool tx_only;
 };
 
 /**

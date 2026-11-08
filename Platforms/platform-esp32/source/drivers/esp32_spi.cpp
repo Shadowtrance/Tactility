@@ -9,6 +9,9 @@
 #include <tactility/drivers/gpio_controller.h>
 #include <driver/spi_master.h>
 #include <esp_memory_utils.h>
+#include <esp_private/gdma.h>
+#include <esp_private/spi_common_internal.h>
+#include <soc/soc_caps.h>
 #include <algorithm>
 #include <cstring>
 #include <new>
@@ -322,6 +325,24 @@ static error_t start(Device* device) {
         LOG_E(TAG, "Failed to initialize SPI bus: %s", esp_err_to_name(ret));
         return ERROR_RESOURCE;
     }
+
+#if SOC_GDMA_SUPPORTED
+    // IDF allocates a TX and an RX GDMA channel for every SPI bus, but the RX channel is only
+    // used when a transaction actually receives data (spi_master's s_spi_dma_prepare_data).
+    // On ESP32-S31 the display (SPI2), NAND (SPI3) and camera (CAM0) share the 3 AXI GDMA pairs;
+    // releasing the display's unused RX half leaves an RX channel the DVP camera can use even
+    // when every pair is otherwise occupied (e.g. while mbedTLS holds the shared SHA/AES
+    // channels during a development-server connection).
+    if (dts_config->tx_only) {
+        spi_dma_ctx_t* dma_ctx = spi_bus_get_dma_ctx(dts_config->host);
+        if (dma_ctx != nullptr && dma_ctx->rx_dma_chan != nullptr) {
+            gdma_disconnect(dma_ctx->rx_dma_chan);
+            gdma_del_channel(dma_ctx->rx_dma_chan);
+            dma_ctx->rx_dma_chan = nullptr;
+            LOG_I(TAG, "Released unused RX DMA channel of %s", device->name);
+        }
+    }
+#endif
 
     // MISO is only actively driven by the selected slave; between commands (and briefly during
     // slave selection/response) it floats, which can be read as spurious bits. A weak pull-up
